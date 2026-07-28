@@ -135,7 +135,6 @@ $groupReady = is_array($grandchild)
     && $grandchild['process_group'] === $timeoutPid
     && $grandchild['pid'] !== $timeoutPid;
 $groupKillSent = $timeoutWaited === 0
-    && $groupReady
     && posix_kill(-$timeoutPid, SIGKILL);
 
 if ($timeoutWaited === 0) {
@@ -157,7 +156,7 @@ $grandchildPipeClosed = feof($watchRead);
 fclose($watchRead);
 
 $timeoutResult = [
-    'classification' => $groupKillSent ? 'timed_out' : 'harness_error',
+    'classification' => $groupReady && $groupKillSent ? 'timed_out' : 'harness_error',
     'exit_code' => $timeoutWaited === $timeoutPid && pcntl_wifexited($timeoutStatus)
         ? pcntl_wexitstatus($timeoutStatus)
         : null,
