@@ -101,7 +101,7 @@ final class LifecycleExecutor
     public static function semanticProjection(array $run): array
     {
         $tests = array_map(static function (array $test): array {
-            unset($test['telemetry']);
+            unset($test['telemetry'], $test['events']);
 
             return $test;
         }, $run['tests']);
@@ -271,7 +271,9 @@ final class LifecycleExecutor
                     $child,
                     $context->child(
                         is_array($child['metadata'] ?? null) ? $child['metadata'] : [],
-                        is_array($child['state_policy'] ?? null) ? $child['state_policy'] : [],
+                        ['policy' => is_string($child['state_policy'] ?? null)
+                            ? $child['state_policy']
+                            : 'inherit'],
                     ),
                     $nextLevels,
                 );
@@ -352,8 +354,12 @@ final class LifecycleExecutor
             $scopes,
             static fn (array $child): bool => $child['status'] !== 'passed',
         );
+        $failedDescendant = array_find(
+            [...$tests, ...$scopes],
+            static fn (array $result): bool => $result['status'] !== 'passed',
+        );
         $scope['status'] = $scopeFailures === [] && ! $descendantFailed ? 'passed' : 'failed';
-        $scope['failure'] = $scopeFailures[0] ?? null;
+        $scope['failure'] = $scopeFailures[0] ?? $failedDescendant['failure'] ?? null;
         $scope['failures'] = $scopeFailures;
         $events[] = $this->event(
             'scope.finished',
@@ -435,6 +441,13 @@ final class LifecycleExecutor
         }
 
         if ($primaryFailure === null) {
+            $events[] = $this->event(
+                'test.body.started',
+                $scopeId,
+                $testId,
+                status: 'running',
+            );
+
             try {
                 $bodyValue = $this->invoke($this->test($testId), $context);
                 $events[] = $this->event(

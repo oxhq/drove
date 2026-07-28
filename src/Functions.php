@@ -50,12 +50,17 @@ if (! function_exists('beforeAll')) {
         $filename = Backtrace::testFile();
         $describing = DescribeCall::describing();
 
+        $captured = ScopeCompiler::captureHook('before_all', $filename, $closure, $describing);
+
         if ($describing !== []) {
-            throw new BeforeAllWithinDescribe($filename);
+            if (! $captured) {
+                throw new BeforeAllWithinDescribe($filename);
+            }
+
+            return;
         }
 
         TestSuite::getInstance()->beforeAll->set($closure);
-        ScopeCompiler::captureHook('before_all', $filename, $closure, $describing);
     }
 }
 
@@ -208,12 +213,17 @@ if (! function_exists('afterAll')) {
         $filename = Backtrace::testFile();
         $describing = DescribeCall::describing();
 
+        $captured = ScopeCompiler::captureHook('after_all', $filename, $closure, $describing);
+
         if ($describing !== []) {
-            throw new AfterAllWithinDescribe($filename);
+            if (! $captured) {
+                throw new AfterAllWithinDescribe($filename);
+            }
+
+            return;
         }
 
         TestSuite::getInstance()->afterAll->set($closure);
-        ScopeCompiler::captureHook('after_all', $filename, $closure, $describing);
     }
 }
 

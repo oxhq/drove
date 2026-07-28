@@ -81,8 +81,14 @@ final class ScopeCompiler
         string $filename,
         Closure $hook,
         array $describing,
-    ): void {
-        self::$active?->registerHook($phase, $filename, $hook, $describing);
+    ): bool {
+        if (! self::$active instanceof self) {
+            return false;
+        }
+
+        self::$active->registerHook($phase, $filename, $hook, $describing);
+
+        return true;
     }
 
     /**
@@ -125,6 +131,55 @@ final class ScopeCompiler
             'No Pest hook was captured for %s.',
             $hookId,
         ));
+    }
+
+    /**
+     * @param  list<string>  $filenames
+     * @param  array{name?: string, scope_concurrency?: array<string, int>, test_timeouts?: array<string, int>}  $configuration
+     * @return array<string, mixed>
+     */
+    public function suitePlan(array $filenames, array $configuration = []): array
+    {
+        $children = [];
+
+        foreach ($filenames as $filename) {
+            if (! is_string($filename)) {
+                throw new InvalidArgumentException('Drove suite files must be paths.');
+            }
+
+            $plan = $this->plan($filename);
+            $tests = [];
+
+            foreach ($plan['tests'] as $test) {
+                $tests[$test['id']] = $test;
+            }
+
+            $children[] = $this->runtimeNode(
+                $this->scopePlan($filename),
+                $tests,
+                $configuration,
+            );
+        }
+
+        return [
+            'schema' => 1,
+            'root' => [
+                'id' => 'suite:root',
+                'type' => 'suite',
+                'name' => $configuration['name'] ?? 'Drove',
+                'metadata' => [],
+                'state_policy' => 'inherit',
+                'concurrency' => $configuration['scope_concurrency']['suite:root'] ?? null,
+                'hooks' => [
+                    'before_all' => [],
+                    'before_each' => [],
+                    'after_each' => [],
+                    'after_all' => [],
+                ],
+                'tests' => [],
+                'children' => $children,
+            ],
+        ];
     }
 
     private function compile(TestCaseFactory $factory): void
@@ -360,6 +415,40 @@ final class ScopeCompiler
                     && $hook['phase'] === $phase,
             ),
         ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  array<string, array<string, mixed>>  $tests
+     * @param  array<string, mixed>  $configuration
+     * @return array<string, mixed>
+     */
+    private function runtimeNode(array $node, array $tests, array $configuration): array
+    {
+        $id = $node['id'];
+        $runtimeTests = [];
+
+        foreach ($node['tests'] as $test) {
+            $source = $tests[$test['id']] ?? throw new RuntimeException(sprintf(
+                'Drove could not enrich test %s.',
+                $test['id'],
+            ));
+            $runtimeTests[] = $test + [
+                'source' => $source['source'],
+                'timeout_ms' => $configuration['test_timeouts'][$test['id']] ?? 1_000,
+            ];
+        }
+
+        $node['metadata'] = [];
+        $node['state_policy'] = 'inherit';
+        $node['concurrency'] = $configuration['scope_concurrency'][$id] ?? null;
+        $node['tests'] = $runtimeTests;
+        $node['children'] = array_map(
+            fn (array $child): array => $this->runtimeNode($child, $tests, $configuration),
+            $node['children'],
+        );
+
+        return $node;
     }
 
     private function canonicalPath(string $path): string
