@@ -6,7 +6,7 @@ pest()->presets()->custom('myFramework', fn (array $userNamespaces): array => [
     expect($userNamespaces)->toBe(['Pest']),
 ]);
 
-test('preset retains downstream namespaces and rejects invalid names', function (): void {
+test('preset invalid name', function (): void {
     $baseNamespaces = new ReflectionProperty(Preset::class, 'baseNamespaces');
     $method = new ReflectionMethod(Preset::class, 'baseNamespaces');
     $cachedNamespaces = $baseNamespaces->getValue();
