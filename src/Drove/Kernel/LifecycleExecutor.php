@@ -385,7 +385,12 @@ final class LifecycleExecutor
     private function runTest(array $test, array $levels, ScopeContext $context): array
     {
         $testId = $this->string($test, 'id');
-        $scopeId = $levels[array_key_last($levels)]['id'];
+
+        if ($levels === []) {
+            throw new InvalidArgumentException('A Drove test must belong to a scope.');
+        }
+
+        $scopeId = $levels[count($levels) - 1]['id'];
         $events = [$this->event('test.started', $scopeId, $testId, status: 'running')];
         $completed = [];
         $primaryFailure = null;
@@ -742,6 +747,7 @@ final class LifecycleExecutor
     }
 
     /**
+     * @param  array<string, mixed>  $node
      * @return array{before_all: list<string>, before_each: list<string>, after_each: list<string>, after_all: list<string>}
      */
     private function hooks(array $node): array
@@ -813,6 +819,7 @@ final class LifecycleExecutor
     }
 
     /**
+     * @param  array<string, mixed>|null  $failure
      * @return array<string, mixed>
      */
     private function event(
@@ -836,6 +843,9 @@ final class LifecycleExecutor
         ];
     }
 
+    /**
+     * @param  array<string, mixed>  $node
+     */
     private function string(array $node, string $key): string
     {
         $value = $node[$key] ?? null;

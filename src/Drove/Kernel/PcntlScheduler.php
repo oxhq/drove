@@ -152,10 +152,12 @@ final class PcntlScheduler
                     if ($waited === $pid) {
                         $child['reaped'] = true;
                         $child['wait_status'] = $waitStatus;
+                        $child['finished_ns'] ??= hrtime(true);
                         $completionOrder[] = $child['task']['id'];
                     } elseif ($waited === -1 && pcntl_get_last_error() !== PCNTL_EINTR) {
                         $child['reaped'] = true;
                         $child['wait_status'] = null;
+                        $child['finished_ns'] ??= hrtime(true);
                         $child['protocol_error'] ??= 'waitpid() lost the Drove child.';
                         $completionOrder[] = $child['task']['id'];
                     }
@@ -308,10 +310,10 @@ final class PcntlScheduler
             'started_ns' => $startedNs,
         ]));
 
-        $reported = false;
+        $report = (object) ['finished' => false];
         $reporterPid = getmypid();
-        register_shutdown_function(function () use (&$reported, $reporterPid, $socket, $task): void {
-            if (getmypid() !== $reporterPid || $reported) {
+        register_shutdown_function(function () use ($report, $reporterPid, $socket, $task): void {
+            if (getmypid() !== $reporterPid || $report->finished) {
                 return;
             }
 
@@ -392,7 +394,7 @@ final class PcntlScheduler
         }
 
         $this->writeFrame($socket, $this->frame($task, 1, 'task.finished', $payload));
-        $reported = true;
+        $report->finished = true;
         fclose($socket);
 
         exit($status === 'passed' ? 0 : 1);
@@ -467,6 +469,11 @@ final class PcntlScheduler
         try {
             while (strlen($child['buffer']) >= 4) {
                 $header = unpack('Nlength', substr($child['buffer'], 0, 4));
+
+                if ($header === false) {
+                    throw new RuntimeException('Drove could not decode a child frame length.');
+                }
+
                 $length = $header['length'];
 
                 if ($length < 2 || $length > self::FRAME_LIMIT) {

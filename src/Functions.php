@@ -48,7 +48,7 @@ if (! function_exists('beforeAll')) {
     function beforeAll(Closure $closure): void
     {
         $filename = Backtrace::testFile();
-        $describing = DescribeCall::describing();
+        $describing = array_values(DescribeCall::describing());
 
         $captured = ScopeCompiler::captureHook('before_all', $filename, $closure, $describing);
 
@@ -75,7 +75,7 @@ if (! function_exists('beforeEach')) {
         $filename = Backtrace::testFile();
 
         if ($closure instanceof Closure) {
-            ScopeCompiler::captureHook('before_each', $filename, $closure, DescribeCall::describing());
+            ScopeCompiler::captureHook('before_each', $filename, $closure, array_values(DescribeCall::describing()));
         }
 
         return new BeforeEachCall(TestSuite::getInstance(), $filename, $closure);
@@ -107,7 +107,7 @@ if (! function_exists('describe')) {
         $filename = Backtrace::testFile();
         $description = new Description($description);
 
-        ScopeCompiler::captureScope($filename, $description, DescribeCall::describing());
+        ScopeCompiler::captureScope($filename, $description, array_values(DescribeCall::describing()));
 
         return new DescribeCall(TestSuite::getInstance(), $filename, $description, $tests);
     }
@@ -197,7 +197,7 @@ if (! function_exists('afterEach')) {
         $filename = Backtrace::testFile();
 
         if ($closure instanceof Closure) {
-            ScopeCompiler::captureHook('after_each', $filename, $closure, DescribeCall::describing());
+            ScopeCompiler::captureHook('after_each', $filename, $closure, array_values(DescribeCall::describing()));
         }
 
         return new AfterEachCall(TestSuite::getInstance(), $filename, $closure);
@@ -211,7 +211,7 @@ if (! function_exists('afterAll')) {
     function afterAll(Closure $closure): void
     {
         $filename = Backtrace::testFile();
-        $describing = DescribeCall::describing();
+        $describing = array_values(DescribeCall::describing());
 
         $captured = ScopeCompiler::captureHook('after_all', $filename, $closure, $describing);
 

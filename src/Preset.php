@@ -148,7 +148,10 @@ final class Preset
     private function baseNamespaces(): array
     {
         if (self::$baseNamespaces === null) {
-            self::$baseNamespaces = Composer::userNamespaces();
+            self::$baseNamespaces = array_values(array_diff(
+                Composer::userNamespaces(),
+                ['Drove'],
+            ));
         }
 
         return self::$baseNamespaces;

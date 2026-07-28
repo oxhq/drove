@@ -134,7 +134,7 @@ final class ScopeCompiler
     }
 
     /**
-     * @param  list<string>  $filenames
+     * @param  array<int, mixed>  $filenames
      * @param  array{name?: string, scope_concurrency?: array<string, int>, test_timeouts?: array<string, int>}  $configuration
      * @return array<string, mixed>
      */
@@ -225,14 +225,20 @@ final class ScopeCompiler
                 throw new RuntimeException(sprintf('Duplicate Drove test ID %s.', $id));
             }
 
+            $line = $source->getStartLine();
+
+            if ($line === false) {
+                throw new RuntimeException('Drove could not read a test source line.');
+            }
+
             $this->closures[$id] = $method->closure;
             $test = [
                 'id' => $id,
                 'name' => $method->description,
-                'scope' => array_map(strval(...), $method->describing),
+                'scope' => array_values(array_map(strval(...), $method->describing)),
                 'source' => [
                     'path' => $this->relativePath((string) $source->getFileName()),
-                    'line' => $source->getStartLine(),
+                    'line' => $line,
                 ],
             ];
             $tests[] = $test;
@@ -353,7 +359,8 @@ final class ScopeCompiler
         $tests = [];
 
         foreach ($placements as $placement) {
-            if ($placement['scopes'][array_key_last($placement['scopes'])] !== $id) {
+            if ($placement['scopes'] === []
+                || $placement['scopes'][count($placement['scopes']) - 1] !== $id) {
                 continue;
             }
 
