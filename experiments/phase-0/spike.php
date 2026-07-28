@@ -191,7 +191,6 @@ foreach ($tests as $name => $mutation) {
             $result['status'] = 'failed';
             $result['error'] = $throwable::class.': '.$throwable->getMessage();
             $result['error_at'] = $throwable->getFile().':'.$throwable->getLine();
-            $result['trace'] = $throwable->getTraceAsString();
         }
 
         $result['laravel_boots'] = count($GLOBALS['drove_laravel_boot_pids']);
