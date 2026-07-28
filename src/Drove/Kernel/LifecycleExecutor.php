@@ -13,12 +13,12 @@ use Throwable;
 /**
  * @internal
  */
-final class LifecycleExecutor
+final readonly class LifecycleExecutor
 {
     public function __construct(
-        private readonly PcntlScheduler $scheduler,
-        private readonly Closure $hookResolver,
-        private readonly Closure $testResolver,
+        private PcntlScheduler $scheduler,
+        private Closure $hookResolver,
+        private Closure $testResolver,
     ) {
         //
     }
@@ -520,7 +520,7 @@ final class LifecycleExecutor
         $stdout = '';
 
         while (ob_get_level() > $outputLevel) {
-            $stdout = (string) ob_get_clean().$stdout;
+            $stdout = ob_get_clean().$stdout;
         }
 
         $status = $primaryFailure === null ? 'passed' : 'failed';

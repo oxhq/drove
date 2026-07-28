@@ -359,8 +359,11 @@ final class ScopeCompiler
         $tests = [];
 
         foreach ($placements as $placement) {
-            if ($placement['scopes'] === []
-                || $placement['scopes'][count($placement['scopes']) - 1] !== $id) {
+            if ($placement['scopes'] === []) {
+                continue;
+            }
+
+            if ($placement['scopes'][count($placement['scopes']) - 1] !== $id) {
                 continue;
             }
 

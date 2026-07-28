@@ -108,6 +108,7 @@ final class Backtrace
     private static function backtrace(): array
     {
         $backtrace = debug_backtrace(self::BACKTRACE_OPTIONS);
+        $sourceRoot = dirname(__DIR__).DIRECTORY_SEPARATOR;
 
         foreach ($backtrace as $trace) {
             if (! isset($trace['file'])) {
@@ -115,8 +116,7 @@ final class Backtrace
             }
 
             if (($GLOBALS['__PEST_INTERNAL_TEST_SUITE'] ?? false)
-                && (str_contains($trace['file'], 'pest'.DIRECTORY_SEPARATOR.'src')
-                    || str_contains($trace['file'], 'drove'.DIRECTORY_SEPARATOR.'src'))) {
+                && str_starts_with($trace['file'], $sourceRoot)) {
                 continue;
             }
 

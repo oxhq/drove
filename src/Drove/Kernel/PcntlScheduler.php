@@ -14,10 +14,10 @@ use Throwable;
  */
 final class PcntlScheduler
 {
-    private const FRAME_LIMIT = 1_048_576;
+    private const int FRAME_LIMIT = 1_048_576;
 
     /** @var array<string, array{read: resource, write: resource}> */
-    private array $pools = [];
+    private array $pools;
 
     /**
      * @param  array<string, int>  $scopeConcurrency
@@ -274,7 +274,7 @@ final class PcntlScheduler
      * @param  array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
      * @param  resource  $socket
      */
-    private function runChild(array $task, $socket, Closure $execute): never
+    private function runChild(array $task, mixed $socket, Closure $execute): never
     {
         if (! @posix_setpgid(0, 0)) {
             $this->writeFrame($socket, $this->frame($task, 0, 'task.started', [
@@ -310,11 +310,12 @@ final class PcntlScheduler
             'started_ns' => $startedNs,
         ]));
 
-        $report = (object) ['finished' => false];
+        $report = new class
+        {
+            public bool $finished = false;
+        };
         $reporterPid = getmypid();
         register_shutdown_function(function () use ($report, $reporterPid, $socket, $task): void {
-            // PHPStan cannot see that this delayed callback runs after the flag changes.
-            // @phpstan-ignore booleanOr.rightAlwaysFalse
             if (getmypid() !== $reporterPid || $report->finished) {
                 return;
             }
@@ -380,7 +381,7 @@ final class PcntlScheduler
         $stdout = '';
 
         while (ob_get_level() > $outputLevel) {
-            $stdout = (string) ob_get_clean().$stdout;
+            $stdout = ob_get_clean().$stdout;
         }
 
         $payload = [
@@ -425,7 +426,7 @@ final class PcntlScheduler
      * @param  resource  $socket
      * @param  array<string, mixed>  $frame
      */
-    private function writeFrame($socket, array $frame): void
+    private function writeFrame(mixed $socket, array $frame): void
     {
         $json = json_encode($frame, JSON_THROW_ON_ERROR);
 
@@ -502,7 +503,6 @@ final class PcntlScheduler
 
     /**
      * @param  array<string, mixed>  $child
-     * @param  mixed  $frame
      */
     private function acceptFrame(array &$child, mixed $frame): void
     {
