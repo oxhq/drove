@@ -201,7 +201,7 @@ foreach ($tests as $name => $mutation) {
             $redisWritePid = (string) getmypid();
             $childRedisConnection->hset($redisWritesKey, $name, $redisWritePid);
             $fixture = DB::table('prepared_fixtures')->find($scopeState->fixture_id)->name;
-            $testCase = new InheritedApplicationTestCase('testPreparedFixture');
+            $testCase = new InheritedApplicationTestCase('test_prepared_fixture');
             $testCase->bindApplication($app);
             $testCase->run();
 
