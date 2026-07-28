@@ -6,6 +6,7 @@ use Drove\Pest\ScopeCompiler;
 use Pest\Kernel as PestKernel;
 use Pest\TestSuite as PestTestSuite;
 use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
+use PHPUnit\Runner\TestSuiteLoader;
 use PHPUnit\TextUI\Configuration\Registry as PHPUnitConfiguration;
 use PHPUnit\TextUI\TestSuiteFilterProcessor;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -205,7 +206,7 @@ $testsMatch = $testIds === [$firstTestId, $secondTestId]
     && $compiler->closure($firstTestId) === $GLOBALS['drove_phase_three_tests']['first']
     && $compiler->closure($secondTestId) === $GLOBALS['drove_phase_three_tests']['second'];
 
-$loaderFile = (new ReflectionClass(PHPUnit\Runner\TestSuiteLoader::class))->getFileName();
+$loaderFile = (new ReflectionClass(TestSuiteLoader::class))->getFileName();
 $localCompilerHash = hash_file('sha256', '/pest/src/Drove/Pest/ScopeCompiler.php');
 $installedCompilerHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Drove/Pest/ScopeCompiler.php');
 $localFunctionsHash = hash_file('sha256', '/pest/src/Functions.php');

@@ -11,6 +11,7 @@ use Pest\Support\Str;
 use Pest\TestSuite as PestTestSuite;
 use PHPUnit\Framework\TestCase as PHPUnitTestCase;
 use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
+use PHPUnit\Runner\TestSuiteLoader;
 use PHPUnit\TextUI\Configuration\Registry as PHPUnitConfiguration;
 use PHPUnit\TextUI\TestSuiteFilterProcessor;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -160,7 +161,7 @@ if (count($generatedClasses) !== 1) {
 }
 
 $generatedClass = $generatedClasses[0];
-$loaderFile = (new ReflectionClass(PHPUnit\Runner\TestSuiteLoader::class))->getFileName();
+$loaderFile = (new ReflectionClass(TestSuiteLoader::class))->getFileName();
 $localCompilerHash = hash_file('sha256', '/pest/src/Drove/Pest/ScopeCompiler.php');
 $installedCompilerHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Drove/Pest/ScopeCompiler.php');
 $usesLocalDrove = is_string($localCompilerHash)

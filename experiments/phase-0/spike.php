@@ -24,7 +24,7 @@ final class InheritedApplicationTestCase extends TestCase
         throw new RuntimeException('A child attempted to create a fresh Laravel application.');
     }
 
-    public function testPreparedFixture(): void
+    public function test_prepared_fixture(): void
     {
         $this->assertSame(
             [$this->app->make('drove.root_pid')],
@@ -46,7 +46,7 @@ if (! function_exists('pcntl_fork')) {
     exit(2);
 }
 
-(new PHPUnitConfigurationBuilder())->build(['drove-phase-0']);
+(new PHPUnitConfigurationBuilder)->build(['drove-phase-0']);
 
 /**
  * @return array{duration_ms: float, peak_php_bytes: int, peak_rss_kb: int}

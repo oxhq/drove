@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -10,7 +11,7 @@ use Tests\TestCase;
 beforeAll(function (): void {
     $app = TestCase::$preparedApplication;
 
-    if (! $app instanceof Illuminate\Foundation\Application) {
+    if (! $app instanceof Application) {
         throw new RuntimeException('The root application was not prepared.');
     }
 

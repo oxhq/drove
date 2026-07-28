@@ -9,6 +9,7 @@ use Pest\Kernel as PestKernel;
 use Pest\TestSuite as PestTestSuite;
 use PHPUnit\Framework\TestCase as PHPUnitTestCase;
 use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
+use PHPUnit\Runner\TestSuiteLoader;
 use PHPUnit\TextUI\Configuration\Registry as PHPUnitConfiguration;
 use PHPUnit\TextUI\TestSuiteFilterProcessor;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -130,7 +131,7 @@ $expectedDiscoveryManifest = [
 $generatedClass = $testCase::class;
 $generatedMethod = $testCase->name();
 $generatedFile = (new ReflectionClass($generatedClass))->getFileName();
-$loaderFile = (new ReflectionClass(PHPUnit\Runner\TestSuiteLoader::class))->getFileName();
+$loaderFile = (new ReflectionClass(TestSuiteLoader::class))->getFileName();
 $localFactoryHash = hash_file('sha256', '/pest/src/Factories/TestCaseFactory.php');
 $installedFactoryHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Factories/TestCaseFactory.php');
 $usesLocalPest = is_string($localFactoryHash)
