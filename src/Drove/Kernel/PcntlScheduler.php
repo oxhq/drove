@@ -313,6 +313,8 @@ final class PcntlScheduler
         $report = (object) ['finished' => false];
         $reporterPid = getmypid();
         register_shutdown_function(function () use ($report, $reporterPid, $socket, $task): void {
+            // PHPStan cannot see that this delayed callback runs after the flag changes.
+            // @phpstan-ignore booleanOr.rightAlwaysFalse
             if (getmypid() !== $reporterPid || $report->finished) {
                 return;
             }
