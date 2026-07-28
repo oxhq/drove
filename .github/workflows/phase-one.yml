@@ -1,0 +1,43 @@
+name: Drove Phase 1
+
+on:
+  push:
+    branches: [5.x, spike/phase-1]
+    paths:
+      - experiments/phase-1/**
+      - src/**
+      - overrides/**
+      - composer.json
+      - .github/workflows/phase-one.yml
+  pull_request:
+    paths:
+      - experiments/phase-1/**
+      - src/**
+      - overrides/**
+      - composer.json
+      - .github/workflows/phase-one.yml
+
+concurrency:
+  group: drove-phase-one-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pest-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Build discovery slice
+      run: docker build --tag drove-phase-one --file experiments/phase-1/Dockerfile .
+
+    - name: Validate dependencies
+      run: docker run --rm --entrypoint sh drove-phase-one -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
+
+    - name: Pest discovery and prepared-fork proof
+      run: docker run --rm drove-phase-one
