@@ -124,7 +124,7 @@ $expectedDiscoveryManifest = [
     'tests' => [[
         'id' => 'test:tests/PreparedStateTest.php::it reads root-prepared state in a forked child',
         'name' => 'it reads root-prepared state in a forked child',
-        'source' => ['path' => 'tests/PreparedStateTest.php', 'line' => 39],
+        'source' => ['path' => 'tests/PreparedStateTest.php', 'line' => 40],
     ]],
 ];
 
