@@ -44,6 +44,11 @@ $GLOBALS['drove_after_all_proof'] = (object) ['count' => 0, 'pid' => null];
 $app = require __DIR__.'/bootstrap/app.php';
 $app->make(LaravelKernel::class)->bootstrap();
 
+set_exception_handler(static function (Throwable $throwable): never {
+    fwrite(STDERR, $throwable::class.': '.$throwable->getMessage().PHP_EOL);
+    exit(1);
+});
+
 if ($GLOBALS['drove_laravel_boot_pids'] !== [$rootPid]) {
     throw new RuntimeException('Laravel did not boot exactly once in the root process.');
 }
@@ -112,6 +117,15 @@ $discoveryManifest = [
         ],
     ]],
 ];
+$expectedDiscoveryManifest = [
+    'id' => 'file:tests/PreparedStateTest.php',
+    'path' => 'tests/PreparedStateTest.php',
+    'tests' => [[
+        'id' => 'test:tests/PreparedStateTest.php::it reads root-prepared state in a forked child',
+        'name' => 'it reads root-prepared state in a forked child',
+        'source' => ['path' => 'tests/PreparedStateTest.php', 'line' => 39],
+    ]],
+];
 
 $generatedClass = $testCase::class;
 $generatedMethod = $testCase->name();
@@ -133,106 +147,133 @@ if (! $usesLocalPest
 }
 
 $generatedClass::setUpBeforeClass();
-$beforeAllProof = $GLOBALS['drove_before_all_proof'];
-$scopeState = $GLOBALS['drove_scope_state'];
+$databaseManager = null;
+$connectionNames = [];
+$rootConnectionsReady = false;
 
-if ($beforeAllProof->count !== 1
-    || $beforeAllProof->pid !== $rootPid
-    || $scopeState->mutations !== ['root', 'prepared']) {
-    throw new RuntimeException('Pest beforeAll did not prepare the root scope exactly once.');
-}
+try {
+    $beforeAllProof = $GLOBALS['drove_before_all_proof'];
+    $scopeState = $GLOBALS['drove_scope_state'];
 
-$databaseManager = $app->make('db');
-$connectionNames = array_keys($databaseManager->getConnections());
-
-foreach ($connectionNames as $connectionName) {
-    if ($databaseManager->connection($connectionName)->transactionLevel() !== 0) {
-        throw new RuntimeException(sprintf('Database connection %s has an open transaction.', $connectionName));
+    if ($beforeAllProof->count !== 1
+        || $beforeAllProof->pid !== $rootPid
+        || $scopeState->mutations !== ['root', 'prepared']) {
+        throw new RuntimeException('Pest beforeAll did not prepare the root scope exactly once.');
     }
 
-    $databaseManager->disconnect($connectionName);
-}
+    $databaseManager = $app->make('db');
+    $connectionNames = array_keys($databaseManager->getConnections());
 
-$sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-
-if ($sockets === false) {
-    throw new RuntimeException('Unable to create the child result pipe.');
-}
-
-[$parentSocket, $childSocket] = $sockets;
-$childPid = pcntl_fork();
-
-if ($childPid === -1) {
-    fclose($parentSocket);
-    fclose($childSocket);
-    throw new RuntimeException('Unable to fork the discovered Pest test.');
-}
-
-if ($childPid === 0) {
-    fclose($parentSocket);
-    $result = ['status' => 'passed', 'pid' => getmypid()];
-
-    try {
-        foreach ($connectionNames as $connectionName) {
-            $databaseManager->reconnect($connectionName);
+    foreach ($connectionNames as $connectionName) {
+        if ($databaseManager->connection($connectionName)->transactionLevel() !== 0) {
+            throw new RuntimeException(sprintf('Database connection %s has an open transaction.', $connectionName));
         }
 
-        $testCase->run();
-
-        if (! $testCase->status()->isSuccess()) {
-            throw new RuntimeException(sprintf(
-                'Generated Pest test ended with %s: %s',
-                $testCase->status()->asString(),
-                $testCase->status()->message(),
-            ));
-        }
-
-        $result += [
-            'generated_class' => $generatedClass,
-            'generated_method' => $generatedMethod,
-            'test_status' => $testCase->status()->asString(),
-            'assertions' => $testCase->numberOfAssertionsPerformed(),
-            'pest_ran' => $testCase->__ran,
-            'application_request_pids' => TestCase::$applicationRequestPids,
-            'application_object_id' => spl_object_id($app),
-            'laravel_boot_pids' => $GLOBALS['drove_laravel_boot_pids'],
-            'execution' => $GLOBALS['drove_pest_execution'] ?? null,
-        ];
-    } catch (Throwable $throwable) {
-        $result['status'] = 'failed';
-        $result['error'] = $throwable::class.': '.$throwable->getMessage();
-        $result['error_at'] = $throwable->getFile().':'.$throwable->getLine();
-    } finally {
-        foreach ($connectionNames as $connectionName) {
-            $databaseManager->disconnect($connectionName);
-        }
+        $databaseManager->disconnect($connectionName);
     }
 
-    fwrite($childSocket, json_encode($result, JSON_THROW_ON_ERROR).PHP_EOL);
+    $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+
+    if ($sockets === false) {
+        throw new RuntimeException('Unable to create the child result pipe.');
+    }
+
+    [$parentSocket, $childSocket] = $sockets;
+    $childPid = pcntl_fork();
+
+    if ($childPid === -1) {
+        fclose($parentSocket);
+        fclose($childSocket);
+        throw new RuntimeException('Unable to fork the discovered Pest test.');
+    }
+
+    if ($childPid === 0) {
+        fclose($parentSocket);
+        $result = ['status' => 'passed', 'pid' => getmypid()];
+
+        try {
+            foreach ($connectionNames as $connectionName) {
+                $databaseManager->reconnect($connectionName);
+            }
+
+            $testCase->run();
+
+            if (! $testCase->status()->isSuccess()) {
+                throw new RuntimeException(sprintf(
+                    'Generated Pest test ended with %s: %s',
+                    $testCase->status()->asString(),
+                    $testCase->status()->message(),
+                ));
+            }
+
+            $result += [
+                'generated_class' => $generatedClass,
+                'generated_method' => $generatedMethod,
+                'test_status' => $testCase->status()->asString(),
+                'assertions' => $testCase->numberOfAssertionsPerformed(),
+                'pest_ran' => $testCase->__ran,
+                'application_request_pids' => TestCase::$applicationRequestPids,
+                'application_object_id' => spl_object_id($app),
+                'laravel_boot_pids' => $GLOBALS['drove_laravel_boot_pids'],
+                'execution' => $GLOBALS['drove_pest_execution'] ?? null,
+            ];
+        } catch (Throwable $throwable) {
+            $result['status'] = 'failed';
+            $result['error'] = $throwable::class.': '.$throwable->getMessage();
+            $result['error_at'] = $throwable->getFile().':'.$throwable->getLine();
+        } finally {
+            foreach ($connectionNames as $connectionName) {
+                $databaseManager->disconnect($connectionName);
+            }
+        }
+
+        fwrite($childSocket, json_encode($result, JSON_THROW_ON_ERROR).PHP_EOL);
+        fclose($childSocket);
+
+        exit($result['status'] === 'passed' ? 0 : 1);
+    }
+
     fclose($childSocket);
+    $waitStatus = 0;
 
-    exit($result['status'] === 'passed' ? 0 : 1);
+    do {
+        $waitedPid = pcntl_waitpid($childPid, $waitStatus);
+    } while ($waitedPid === -1 && pcntl_get_last_error() === PCNTL_EINTR);
+
+    $payload = trim((string) stream_get_contents($parentSocket));
+    fclose($parentSocket);
+
+    $result = $payload === ''
+        ? ['status' => 'failed', 'pid' => $childPid, 'error' => 'No child result.']
+        : json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
+    $childExitCode = $waitedPid === $childPid && pcntl_wifexited($waitStatus)
+        ? pcntl_wexitstatus($waitStatus)
+        : 128;
+
+    foreach ($connectionNames as $connectionName) {
+        $databaseManager->reconnect($connectionName);
+    }
+
+    $rootConnectionsReady = true;
+    $rootFixture = DB::table('prepared_fixtures')->find($scopeState->fixture_id)?->name;
+} finally {
+    if (getmypid() === $rootPid) {
+        try {
+            if ($databaseManager !== null && ! $rootConnectionsReady) {
+                foreach ($connectionNames as $connectionName) {
+                    $databaseManager->reconnect($connectionName);
+                }
+            }
+        } finally {
+            $generatedClass::tearDownAfterClass();
+        }
+    }
 }
 
-fclose($childSocket);
-pcntl_waitpid($childPid, $waitStatus);
-$payload = trim((string) stream_get_contents($parentSocket));
-fclose($parentSocket);
-
-$result = $payload === ''
-    ? ['status' => 'failed', 'pid' => $childPid, 'error' => 'No child result.']
-    : json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
-$childExitCode = pcntl_wifexited($waitStatus) ? pcntl_wexitstatus($waitStatus) : 128;
-
-foreach ($connectionNames as $connectionName) {
-    $databaseManager->reconnect($connectionName);
-}
-
-$rootFixture = DB::table('prepared_fixtures')->find($scopeState->fixture_id)?->name;
-$generatedClass::tearDownAfterClass();
 $afterAllProof = $GLOBALS['drove_after_all_proof'];
 
 $passed = $childExitCode === 0
+    && $discoveryManifest === $expectedDiscoveryManifest
     && ($result['status'] ?? null) === 'passed'
     && ($result['generated_class'] ?? null) === $generatedClass
     && ($result['generated_method'] ?? null) === $generatedMethod
