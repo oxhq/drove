@@ -1,0 +1,3 @@
+/database/
+/vendor/
+!/composer.lock

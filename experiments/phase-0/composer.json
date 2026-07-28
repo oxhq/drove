@@ -1,0 +1,20 @@
+{
+    "name": "oxhq/drove-phase-zero",
+    "description": "Drove prepared-state feasibility spike",
+    "license": "MIT",
+    "type": "project",
+    "require": {
+        "php": "^8.4",
+        "ext-pcntl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_sqlite": "*",
+        "laravel/framework": "^13.0"
+    },
+    "config": {
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "scripts": {
+        "spike": "php spike.php"
+    }
+}
