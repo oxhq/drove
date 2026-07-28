@@ -3033,6 +3033,7 @@
             },
             "autoload": {
                 "psr-4": {
+                    "Drove\\": "src/Drove/",
                     "Pest\\": "src/"
                 },
                 "files": [

@@ -1,0 +1,47 @@
+name: Drove Phase 2
+
+on:
+  push:
+    branches: [5.x, spike/phase-2]
+    paths:
+      - experiments/phase-2/**
+      - experiments/phase-1/composer.json
+      - experiments/phase-1/composer.lock
+      - src/Drove/**
+      - overrides/Runner/TestSuiteLoader.php
+      - composer.json
+      - .github/workflows/phase-two.yml
+  pull_request:
+    paths:
+      - experiments/phase-2/**
+      - experiments/phase-1/composer.json
+      - experiments/phase-1/composer.lock
+      - src/Drove/**
+      - overrides/Runner/TestSuiteLoader.php
+      - composer.json
+      - .github/workflows/phase-two.yml
+
+concurrency:
+  group: drove-phase-two-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scope-ir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Build Scope IR slice
+      run: docker build --tag drove-phase-two --file experiments/phase-2/Dockerfile .
+
+    - name: Validate dependencies
+      run: docker run --rm --entrypoint sh drove-phase-two -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
+
+    - name: Scope IR and sibling-fork proof
+      run: docker run --rm drove-phase-two
