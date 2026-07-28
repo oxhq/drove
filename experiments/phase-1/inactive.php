@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
+use Pest\Exceptions\AfterAllWithinDescribe;
 use Pest\Exceptions\BeforeAllWithinDescribe;
 use Pest\Kernel as PestKernel;
 use Pest\TestSuite as PestTestSuite;
-use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 
@@ -22,25 +22,30 @@ while (ob_get_level() > $outputBufferLevel) {
     ob_end_clean();
 }
 
-$fixture = realpath(__DIR__.'/inactive-fixtures/NestedBeforeAllTest.php');
+$checks = [
+    [__DIR__.'/inactive-fixtures/NestedBeforeAllTest.php', BeforeAllWithinDescribe::class],
+    [__DIR__.'/inactive-fixtures/NestedAfterAllTest.php', AfterAllWithinDescribe::class],
+];
 
-if ($fixture === false) {
-    throw new RuntimeException('The inactive-mode fixture does not exist.');
-}
+foreach ($checks as [$fixture, $exception]) {
+    $thrown = false;
 
-$thrown = false;
+    try {
+        require $fixture;
+    } catch (Throwable $throwable) {
+        $thrown = $throwable instanceof $exception;
+    }
 
-try {
-    PHPUnitTestSuite::empty('drove-phase-one-inactive')->addTestFile($fixture);
-} catch (BeforeAllWithinDescribe) {
-    $thrown = true;
-}
-
-if (! $thrown) {
-    throw new RuntimeException('Nested beforeAll was accepted while Drove was inactive.');
+    if (! $thrown) {
+        throw new RuntimeException(sprintf(
+            '%s was accepted while Drove was inactive.',
+            basename($fixture),
+        ));
+    }
 }
 
 fwrite(STDOUT, json_encode([
     'status' => 'passed',
     'nested_before_all' => 'rejected',
+    'nested_after_all' => 'rejected',
 ], JSON_THROW_ON_ERROR).PHP_EOL);

@@ -162,6 +162,8 @@ final class PcntlScheduler
                 }
 
                 if ($child['started_ns'] !== null
+                    && $child['finished'] === null
+                    && ! $child['reaped']
                     && $child['task']['timeout_ms'] > 0
                     && ! $child['timed_out']
                     && $now >= $child['deadline_ns']) {
@@ -250,6 +252,7 @@ final class PcntlScheduler
             || ! is_string($scopeId) || $scopeId === ''
             || ! is_array($scopes) || ! array_is_list($scopes)
             || array_any($scopes, static fn (mixed $scope): bool => ! is_string($scope) || $scope === '')
+            || count(array_unique($scopes)) !== count($scopes)
             || ! is_int($timeoutMs) || $timeoutMs < 0
             || ! is_bool($permit)) {
             throw new InvalidArgumentException('Drove received an invalid process task.');
@@ -306,8 +309,9 @@ final class PcntlScheduler
         ]));
 
         $reported = false;
-        register_shutdown_function(function () use (&$reported, $socket, $task): void {
-            if ($reported) {
+        $reporterPid = getmypid();
+        register_shutdown_function(function () use (&$reported, $reporterPid, $socket, $task): void {
+            if (getmypid() !== $reporterPid || $reported) {
                 return;
             }
 
@@ -343,6 +347,8 @@ final class PcntlScheduler
             }
         });
 
+        ini_set('display_errors', '0');
+        ini_set('log_errors', '0');
         $outputLevel = ob_get_level();
         ob_start();
         $status = 'passed';
@@ -572,6 +578,16 @@ final class PcntlScheduler
             );
         }
 
+        if ($signal !== null) {
+            return $this->failedResult(
+                $task,
+                FailureKind::SignalTermination,
+                sprintf('The Drove task ended from signal %d.', $signal),
+                $telemetry,
+                $child['frames'],
+            );
+        }
+
         if ($child['protocol_error'] !== null) {
             return $this->failedResult(
                 $task,
@@ -608,16 +624,6 @@ final class PcntlScheduler
                 'events' => $child['frames'],
                 'telemetry' => $telemetry,
             ];
-        }
-
-        if ($signal !== null) {
-            return $this->failedResult(
-                $task,
-                FailureKind::SignalTermination,
-                sprintf('The Drove task ended from signal %d.', $signal),
-                $telemetry,
-                $child['frames'],
-            );
         }
 
         return $this->failedResult(
@@ -738,6 +744,8 @@ final class PcntlScheduler
         }
 
         [$read, $write] = $sockets;
+        stream_set_read_buffer($read, 0);
+        stream_set_write_buffer($write, 0);
 
         for ($permit = 0; $permit < $limit; $permit++) {
             if (fwrite($write, '.') !== 1) {

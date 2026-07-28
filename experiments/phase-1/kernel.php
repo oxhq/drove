@@ -78,6 +78,7 @@ $findTest = static function (string $needle) use ($testNames): string {
     throw new RuntimeException('Missing planned test: '.$needle);
 };
 
+$fileId = $basePlan['root']['children'][0]['id'];
 $serialId = $scopeIds['serial'][0] ?? throw new RuntimeException('Missing serial scope.');
 $timeoutId = $findTest('kills a timed out process tree');
 $timeouts = array_fill_keys($plannedIds, 3_000);
@@ -149,28 +150,37 @@ if ($workerId === null) {
 
 $worker = $tests[$workerId];
 $assert($worker['status'] === 'passed', 'A parallel worker failed.');
-$assert($worker['value']['prepared'] === ['file', 'parallel'], 'Nested beforeAll snapshot was not inherited.');
 $assert($worker['stdout'] === 'worker:0', 'Worker output was not captured exactly once.');
+$workerAfterEach = array_values(array_filter(
+    $worker['events'],
+    static fn (array $event): bool => $event['type'] === 'hook.finished'
+        && $event['phase'] === 'after_each',
+));
 $assert(
-    array_slice($worker['context']['trace'], -2) === ['file.after_each.2', 'file.after_each.1'],
+    array_map(
+        static fn (array $event): string => substr($event['hook_id'], -1),
+        $workerAfterEach,
+    ) === ['1', '0'],
     'afterEach hooks did not unwind in reverse registration order.',
 );
-
-$assert(
-    $test('reads first duplicate snapshot')['value'] === ['file', 'snapshots', 'first'],
-    'The first duplicate scope received the wrong snapshot.',
-);
-$assert(
-    $test('reads second duplicate snapshot')['value'] === ['file', 'snapshots', 'second'],
-    'The second duplicate scope received the wrong snapshot.',
-);
+$assert($test('reads first duplicate snapshot')['status'] === 'passed', 'The first duplicate scope received the wrong snapshot.');
+$assert($test('reads second duplicate snapshot')['status'] === 'passed', 'The second duplicate scope received the wrong snapshot.');
 
 $unwind = $test('unwinds completed levels only');
 $assert($unwind['failure']['kind'] === FailureKind::SetupFailure->value, 'Setup failure was misclassified.');
+$unwindEvents = array_column($unwind['events'], null, 'type');
+$unwindAfterEach = array_values(array_filter(
+    $unwind['events'],
+    static fn (array $event): bool => $event['type'] === 'hook.finished'
+        && $event['phase'] === 'after_each',
+));
+$assert(isset($unwindEvents['test.body.skipped']), 'Failed setup still ran the body.');
 $assert(
-    ! in_array('unwind.body', $unwind['context']['trace'], true)
-        && ! in_array('unwind.after_each', $unwind['context']['trace'], true)
-        && array_slice($unwind['context']['trace'], -2) === ['file.after_each.2', 'file.after_each.1'],
+    count($unwindAfterEach) === 2
+        && array_map(
+            static fn (array $event): string => substr($event['hook_id'], -1),
+            $unwindAfterEach,
+        ) === ['1', '0'],
     'Failed setup unwound an incomplete scope.',
 );
 
@@ -184,12 +194,32 @@ $assert(
 $blocked = $test('is blocked by before all');
 $assert($blocked['status'] === 'blocked', 'A failed beforeAll did not block its descendant.');
 $assert($blocked['failure']['kind'] === FailureKind::BlockedDescendant->value, 'Blocked descendant was misclassified.');
-$assert($scope('before all fails')['failure']['kind'] === FailureKind::SetupFailure->value, 'beforeAll failure was misclassified.');
-$assert($test('still runs sibling scope')['status'] === 'passed', 'A failed scope blocked its sibling.');
+$assert($test('is recursively blocked')['status'] === 'blocked', 'A failed beforeAll materialized a child scope.');
+$failedBeforeAllScope = $scope('before all fails');
+$assert($failedBeforeAllScope['failure']['kind'] === FailureKind::SetupFailure->value, 'beforeAll failure was misclassified.');
+$assert(
+    ! array_any(
+        $parallel['events'],
+        static fn (array $event): bool => $event['scope_id'] === $failedBeforeAllScope['id']
+            && $event['phase'] === 'after_all',
+    ),
+    'afterAll ran for an uninitialized scope.',
+);
+$assert($test('still runs sibling scope')['stdout'] === 'sibling passed', 'A failed scope blocked its sibling.');
 
 $afterAllChild = $test('keeps passing child result');
 $assert($afterAllChild['status'] === 'passed', 'afterAll failure rewrote its child result.');
 $assert($scope('after all fails')['failure']['kind'] === FailureKind::TeardownFailure->value, 'afterAll failure was misclassified.');
+$assert(
+    array_any(
+        $parallel['events'],
+        static fn (array $event): bool => $event['scope_id'] === $fileId
+            && $event['type'] === 'hook.finished'
+            && $event['phase'] === 'after_all'
+            && $event['status'] === 'passed',
+    ),
+    'Ancestor afterAll did not run after a blocked child.',
+);
 
 $expectedKinds = [
     'classifies php exception' => FailureKind::PhpException->value,
@@ -205,7 +235,16 @@ foreach ($expectedKinds as $name => $kind) {
 
 $large = $test('frames large output');
 $assert($large['status'] === 'passed' && strlen($large['stdout']) === 200_000, 'Large framed output was truncated.');
-$assert($test('runs sentinel after failures')['value'] === 'sentinel passed', 'The root did not survive child failures.');
+$assert($test('runs sentinel after failures')['stdout'] === 'sentinel passed', 'The root did not survive child failures.');
+
+foreach ([$sequential, $parallel] as $run) {
+    $timedOut = array_column($run['tests'], null, 'id')[$timeoutId];
+    usleep(300_000);
+    $assert(
+        ! file_exists('/tmp/drove-timeout-tree-'.$timedOut['telemetry']['pid']),
+        'A timed-out grandchild escaped its process group.',
+    );
+}
 
 foreach ($parallel['events'] as $sequence => $event) {
     $assert($event['sequence'] === $sequence, 'Canonical event sequence is not contiguous.');

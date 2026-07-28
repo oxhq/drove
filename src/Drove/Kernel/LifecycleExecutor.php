@@ -251,7 +251,7 @@ final class LifecycleExecutor
                 'id' => $id,
                 'scope_id' => $id,
                 'scopes' => [...$scopeIds, $id],
-                'timeout_ms' => 0,
+                'timeout_ms' => $child['timeout_ms'] ?? 30_000,
                 'permit' => false,
             ];
         }
@@ -390,7 +390,6 @@ final class LifecycleExecutor
         $completed = [];
         $primaryFailure = null;
         $teardownFailures = [];
-        $bodyValue = null;
         $outputLevel = ob_get_level();
         ob_start();
 
@@ -449,7 +448,7 @@ final class LifecycleExecutor
             );
 
             try {
-                $bodyValue = $this->invoke($this->test($testId), $context);
+                $this->invoke($this->test($testId), $context);
                 $events[] = $this->event(
                     'test.body.finished',
                     $scopeId,
@@ -535,8 +534,7 @@ final class LifecycleExecutor
             'status' => $status,
             'failure' => $primaryFailure,
             'teardown_failures' => $teardownFailures,
-            'value' => $bodyValue,
-            'context' => $context->all(),
+            'value' => null,
             'stdout' => $stdout,
             'events' => $events,
         ];
@@ -573,7 +571,6 @@ final class LifecycleExecutor
                 'failure' => $blockedFailure,
                 'teardown_failures' => [],
                 'value' => null,
-                'context' => [],
                 'stdout' => '',
                 'events' => [],
                 'telemetry' => null,
@@ -687,7 +684,6 @@ final class LifecycleExecutor
             'failure' => $transport['failure'],
             'teardown_failures' => [],
             'value' => null,
-            'context' => [],
             'stdout' => $transport['stdout'] ?? '',
             'events' => [],
         ];

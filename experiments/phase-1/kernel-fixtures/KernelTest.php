@@ -37,25 +37,21 @@ describe('parallel', function (): void {
     });
 
     for ($worker = 0; $worker < 12; $worker++) {
-        test('worker '.$worker, function () use ($worker): array {
+        test('worker '.$worker, function () use ($worker): void {
+            if ($this->get('prepared') !== ['file', 'parallel']) {
+                throw new RuntimeException('A parallel worker inherited the wrong snapshot.');
+            }
+
             usleep((24 - $worker) * 10_000);
             echo 'worker:'.$worker;
-
-            return [
-                'worker' => $worker,
-                'prepared' => $this->get('prepared'),
-                'trace' => $this->get('trace'),
-            ];
         });
     }
 });
 
 describe('serial', function (): void {
     for ($worker = 0; $worker < 3; $worker++) {
-        test('serial worker '.$worker, function () use ($worker): int {
+        test('serial worker '.$worker, function (): void {
             usleep(60_000);
-
-            return $worker;
         });
     }
 });
@@ -70,8 +66,10 @@ describe('snapshots', function (): void {
             $this->share('prepared', [...$this->get('prepared'), 'first']);
         });
 
-        test('reads first duplicate snapshot', function (): array {
-            return $this->get('prepared');
+        test('reads first duplicate snapshot', function (): void {
+            if ($this->get('prepared') !== ['file', 'snapshots', 'first']) {
+                throw new RuntimeException('The first duplicate scope inherited the wrong snapshot.');
+            }
         });
     });
 
@@ -80,8 +78,10 @@ describe('snapshots', function (): void {
             $this->share('prepared', [...$this->get('prepared'), 'second']);
         });
 
-        test('reads second duplicate snapshot', function (): array {
-            return $this->get('prepared');
+        test('reads second duplicate snapshot', function (): void {
+            if ($this->get('prepared') !== ['file', 'snapshots', 'second']) {
+                throw new RuntimeException('The second duplicate scope inherited the wrong snapshot.');
+            }
         });
     });
 });
@@ -119,14 +119,28 @@ describe('before all fails', function (): void {
         throw new RuntimeException('before all failed');
     });
 
+    afterAll(function (): never {
+        throw new RuntimeException('afterAll ran for an uninitialized scope.');
+    });
+
     test('is blocked by before all', function (): void {
         $this->share('forbidden', true);
+    });
+
+    describe('blocked child', function (): void {
+        beforeAll(function (): never {
+            throw new RuntimeException('A blocked child scope was materialized.');
+        });
+
+        test('is recursively blocked', function (): void {
+            $this->share('forbidden', true);
+        });
     });
 });
 
 describe('sibling after blocked scope', function (): void {
-    test('still runs sibling scope', function (): string {
-        return 'sibling passed';
+    test('still runs sibling scope', function (): void {
+        echo 'sibling passed';
     });
 });
 
@@ -135,8 +149,8 @@ describe('after all fails', function (): void {
         throw new RuntimeException('after all failed');
     });
 
-    test('keeps passing child result', function (): string {
-        return 'child passed';
+    test('keeps passing child result', function (): void {
+        //
     });
 });
 
@@ -162,6 +176,9 @@ describe('process failures', function (): void {
     test('kills a timed out process tree', function (): never {
         pcntl_async_signals(true);
         pcntl_signal(SIGTERM, SIG_IGN);
+        $taskPid = getmypid();
+        $marker = '/tmp/drove-timeout-tree-'.$taskPid;
+        @unlink($marker);
         $grandchild = pcntl_fork();
 
         if ($grandchild === -1) {
@@ -169,6 +186,9 @@ describe('process failures', function (): void {
         }
 
         if ($grandchild === 0) {
+            usleep(250_000);
+            file_put_contents($marker, 'escaped');
+
             while (true) {
                 usleep(10_000);
             }
@@ -179,14 +199,11 @@ describe('process failures', function (): void {
         }
     });
 
-    test('frames large output', function (): int {
-        $output = str_repeat('x', 200_000);
-        echo $output;
-
-        return strlen($output);
+    test('frames large output', function (): void {
+        echo str_repeat('x', 200_000);
     });
 
-    test('runs sentinel after failures', function (): string {
-        return 'sentinel passed';
+    test('runs sentinel after failures', function (): void {
+        echo 'sentinel passed';
     });
 });
