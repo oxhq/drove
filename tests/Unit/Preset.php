@@ -6,7 +6,7 @@ pest()->presets()->custom('myFramework', fn (array $userNamespaces): array => [
     expect($userNamespaces)->toBe(['Pest']),
 ]);
 
-test('preset retains the Drove namespace outside the internal test suite', function (): void {
+test('preset retains downstream namespaces and rejects invalid names', function (): void {
     $baseNamespaces = new ReflectionProperty(Preset::class, 'baseNamespaces');
     $method = new ReflectionMethod(Preset::class, 'baseNamespaces');
     $cachedNamespaces = $baseNamespaces->getValue();
@@ -16,8 +16,11 @@ test('preset retains the Drove namespace outside the internal test suite', funct
     try {
         unset($GLOBALS['__PEST_INTERNAL_TEST_SUITE']);
         $baseNamespaces->setValue(null, null);
+        $namespaces = $method->invoke(new Preset);
 
-        expect($method->invoke(new Preset))->toContain('Drove');
+        if (! is_array($namespaces) || ! in_array('Drove', $namespaces, true)) {
+            throw new RuntimeException('The downstream Drove namespace was filtered.');
+        }
     } finally {
         $baseNamespaces->setValue(null, $cachedNamespaces);
 
@@ -27,9 +30,7 @@ test('preset retains the Drove namespace outside the internal test suite', funct
             unset($GLOBALS['__PEST_INTERNAL_TEST_SUITE']);
         }
     }
-});
 
-test('preset invalid name', function (): void {
     $this->preset()->myAnotherFramework();
 })->throws(InvalidArgumentException::class, 'The preset [myAnotherFramework] does not exist. The available presets are [php, laravel, strict, security, relaxed, myFramework].');
 
