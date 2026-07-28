@@ -1,0 +1,51 @@
+name: Drove Phase 0
+
+on:
+  push:
+    branches: [5.x, spike/phase-0]
+    paths:
+      - experiments/phase-0/**
+      - .github/workflows/phase-zero.yml
+  pull_request:
+    paths:
+      - experiments/phase-0/**
+      - .github/workflows/phase-zero.yml
+
+concurrency:
+  group: drove-phase-zero-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepared-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      redis:
+        image: redis:8.2.8-alpine@sha256:3790f265260957949f41e767efd9b66d5e3f277913b63a56c0183d55a47e7347
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Build spike
+      run: docker build --tag drove-phase-zero experiments/phase-0
+
+    - name: Validate dependencies
+      run: docker run --rm --entrypoint sh drove-phase-zero -lc 'composer validate --strict && composer check-platform-reqs'
+
+    - name: Prepared-state proof
+      run: docker run --rm --network host --env REDIS_HOST=127.0.0.1 drove-phase-zero
+
+    - name: Failure and timeout proof
+      run: docker run --rm drove-phase-zero php failure.php
