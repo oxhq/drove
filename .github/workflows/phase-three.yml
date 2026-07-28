@@ -1,0 +1,59 @@
+name: Drove Phase 3
+
+on:
+  push:
+    branches: [5.x, spike/phase-3]
+    paths:
+      - experiments/phase-3/**
+      - experiments/phase-2/**
+      - experiments/phase-1/**
+      - src/**
+      - overrides/Runner/TestSuiteLoader.php
+      - composer.json
+      - .github/workflows/phase-three.yml
+  pull_request:
+    paths:
+      - experiments/phase-3/**
+      - experiments/phase-2/**
+      - experiments/phase-1/**
+      - src/**
+      - overrides/Runner/TestSuiteLoader.php
+      - composer.json
+      - .github/workflows/phase-three.yml
+
+concurrency:
+  group: drove-phase-three-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hook-ir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Build hierarchical hook IR slice
+      run: docker build --tag drove-phase-three --file experiments/phase-3/Dockerfile .
+
+    - name: Validate dependencies
+      run: docker run --rm --entrypoint sh drove-phase-three -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
+
+    - name: Hierarchical hook IR proof
+      run: docker run --rm drove-phase-three
+
+    - name: Build Phase 1 inactive-mode regression
+      run: docker build --tag drove-phase-one --file experiments/phase-1/Dockerfile .
+
+    - name: Phase 1 inactive-mode regression
+      run: docker run --rm drove-phase-one
+
+    - name: Build Phase 2 regression
+      run: docker build --tag drove-phase-two --file experiments/phase-2/Dockerfile .
+
+    - name: Phase 2 regression
+      run: docker run --rm drove-phase-two
