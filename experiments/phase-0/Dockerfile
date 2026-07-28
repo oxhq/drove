@@ -4,7 +4,9 @@ FROM php:8.4-cli@sha256:3a70cc45c4b03b691f04ea3c032030613a5ff6ee61053127aadb8a93
 RUN apt-get update \
     && apt-get install -y --no-install-recommends unzip \
     && rm -rf /var/lib/apt/lists/* \
-    && docker-php-ext-install pcntl
+    && docker-php-ext-install pcntl \
+    && pecl install redis-6.3.0 \
+    && docker-php-ext-enable redis
 COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app

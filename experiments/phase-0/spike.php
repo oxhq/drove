@@ -91,9 +91,24 @@ $applicationObjectId = spl_object_id($app);
 $app->instance('drove.root_pid', $rootPid);
 $app->instance('drove.application_object_id', $applicationObjectId);
 
+set_exception_handler(static function (Throwable $throwable): never {
+    fwrite(STDERR, $throwable::class.': '.$throwable->getMessage().PHP_EOL);
+    exit(1);
+});
+
+$redis = $app->make('redis');
+$redisPreparedKey = 'drove:phase-0:prepared';
+$redisWritesKey = 'drove:phase-0:child-writes';
+$disconnectRedis = static function () use ($redis): void {
+    foreach ((array) $redis->connections() as $name => $connection) {
+        $connection->disconnect();
+        $redis->purge($name);
+    }
+};
+
 $beforeAllProof = (object) ['count' => 0, 'pid' => null];
 $beforeAllStartedAt = hrtime(true);
-$scopeState = (static function () use ($beforeAllProof): object {
+$scopeState = (static function () use ($beforeAllProof, $redis, $redisPreparedKey, $redisWritesKey): object {
     $beforeAllProof->count++;
     $beforeAllProof->pid = getmypid();
 
@@ -102,6 +117,10 @@ $scopeState = (static function () use ($beforeAllProof): object {
         $table->id();
         $table->string('name');
     });
+
+    $redisConnection = $redis->connection();
+    $redisConnection->del($redisPreparedKey, $redisWritesKey);
+    $redisConnection->set($redisPreparedKey, 'prepared once');
 
     return (object) [
         'fixture_id' => DB::table('prepared_fixtures')->insertGetId(['name' => 'prepared once']),
@@ -121,14 +140,25 @@ $tests = [
     'second sibling' => 'second',
 ];
 
-$connectionNames = array_keys($app->make('db')->getConnections());
+$databaseManager = $app->make('db');
+$connectionNames = array_keys($databaseManager->getConnections());
 
 foreach ($connectionNames as $connectionName) {
-    if (DB::connection($connectionName)->transactionLevel() !== 0) {
+    if ($databaseManager->connection($connectionName)->transactionLevel() !== 0) {
         throw new RuntimeException(sprintf('Database connection %s has an open transaction.', $connectionName));
     }
 
-    DB::disconnect($connectionName);
+    $databaseManager->disconnect($connectionName);
+}
+
+$preparedRedisConnection = $redis->connection();
+$redisConnectedBeforeDetach = $preparedRedisConnection->client()->isConnected();
+$disconnectRedis();
+$redisDetachedBeforeFork = ! $preparedRedisConnection->client()->isConnected()
+    && $redis->connections() === [];
+
+if (! $redisConnectedBeforeDetach || ! $redisDetachedBeforeFork) {
+    throw new RuntimeException('Redis was not disconnected and purged before forking.');
 }
 
 $children = [];
@@ -162,10 +192,14 @@ foreach ($tests as $name => $mutation) {
 
         try {
             foreach ($connectionNames as $connectionName) {
-                DB::reconnect($connectionName);
+                $databaseManager->reconnect($connectionName);
             }
 
+            $childRedisConnection = $redis->connection();
+            $result['redis_connection_recreated'] = $childRedisConnection !== $preparedRedisConnection;
             $scopeState->mutations[] = $mutation;
+            $redisWritePid = (string) getmypid();
+            $childRedisConnection->hset($redisWritesKey, $name, $redisWritePid);
             $fixture = DB::table('prepared_fixtures')->find($scopeState->fixture_id)->name;
             $testCase = new InheritedApplicationTestCase('testPreparedFixture');
             $testCase->bindApplication($app);
@@ -186,11 +220,19 @@ foreach ($tests as $name => $mutation) {
                 'test_status' => $testCase->status()->asString(),
                 'assertions' => $testCase->numberOfAssertionsPerformed(),
                 'application_object_id' => spl_object_id($app),
+                'redis_fixture' => $childRedisConnection->get($redisPreparedKey),
+                'redis_write_pid' => $redisWritePid,
             ];
         } catch (Throwable $throwable) {
             $result['status'] = 'failed';
             $result['error'] = $throwable::class.': '.$throwable->getMessage();
             $result['error_at'] = $throwable->getFile().':'.$throwable->getLine();
+        } finally {
+            foreach ($connectionNames as $connectionName) {
+                $databaseManager->disconnect($connectionName);
+            }
+
+            $disconnectRedis();
         }
 
         $result['laravel_boots'] = count($GLOBALS['drove_laravel_boot_pids']);
@@ -231,10 +273,22 @@ foreach ($children as $pid => $child) {
 usort($results, static fn (array $left, array $right): int => $left['test'] <=> $right['test']);
 
 foreach ($connectionNames as $connectionName) {
-    DB::reconnect($connectionName);
+    $databaseManager->reconnect($connectionName);
 }
 
 $rootFixture = DB::table('prepared_fixtures')->find($scopeState->fixture_id)->name;
+$rootRedisConnection = $redis->connection();
+$rootRedisFixture = $rootRedisConnection->get($redisPreparedKey);
+$redisChildWrites = $rootRedisConnection->hgetall($redisWritesKey);
+ksort($redisChildWrites);
+$expectedRedisWrites = [];
+
+foreach ($results as $result) {
+    $expectedRedisWrites[$result['test']] = (string) $result['pid'];
+}
+
+ksort($expectedRedisWrites);
+$redisWritesAreShared = $redisChildWrites === $expectedRedisWrites;
 $childProcessesPassed = count($exitCodes) === count($tests)
     && array_all($exitCodes, static fn (int $exitCode): bool => $exitCode === 0);
 $expectedMutations = [
@@ -248,18 +302,23 @@ $resultsPassed = count($results) === count($tests)
         && $result['laravel_boot_pids'] === [$rootPid]
         && $result['before_all_executions'] === 1
         && $result['before_all_pid'] === $rootPid
+        && $result['redis_connection_recreated'] === true
         && $result['value']['fixture'] === 'prepared once'
         && $result['value']['test_case'] === InheritedApplicationTestCase::class
         && $result['value']['test_status'] === 'success'
         && $result['value']['assertions'] >= 3
         && $result['value']['application_object_id'] === $applicationObjectId
-        && $result['value']['mutations'] === $expectedMutations[$result['test']]);
+        && $result['value']['mutations'] === $expectedMutations[$result['test']]
+        && $result['value']['redis_fixture'] === 'prepared once'
+        && $result['value']['redis_write_pid'] === (string) $result['pid']);
 $rootStateStayedPrepared = $scopeState->mutations === ['prepared'];
 
 $passed = $childProcessesPassed
     && $resultsPassed
     && $rootStateStayedPrepared
-    && $rootFixture === 'prepared once';
+    && $rootFixture === 'prepared once'
+    && $rootRedisFixture === 'prepared once'
+    && $redisWritesAreShared;
 
 $summary = [
     'status' => $passed ? 'passed' : 'failed',
@@ -270,6 +329,13 @@ $summary = [
     'before_all_pid' => $beforeAllProof->pid,
     'root_pid' => $rootPid,
     'root_state_after_children' => $scopeState->mutations,
+    'redis' => [
+        'connected_before_detach' => $redisConnectedBeforeDetach,
+        'detached_and_purged_before_fork' => $redisDetachedBeforeFork,
+        'prepared_value' => $rootRedisFixture,
+        'child_writes_are_shared' => $redisWritesAreShared,
+        'child_writes' => $redisChildWrites,
+    ],
     'boot' => $bootMetrics,
     'before_all' => $beforeAllMetrics,
     'run' => metrics($runStartedAt),
@@ -280,6 +346,8 @@ $summary = [
         'redis' => extension_loaded('redis'),
     ],
 ];
+
+$disconnectRedis();
 
 echo json_encode($summary, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL;
 
