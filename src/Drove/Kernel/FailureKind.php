@@ -28,6 +28,10 @@ enum FailureKind: string
 
     public static function for(Throwable $throwable, string $phase): self
     {
+        if ($throwable instanceof StateAdapterException) {
+            return self::StateAdapterFailure;
+        }
+
         if (str_starts_with($phase, 'before')) {
             return self::SetupFailure;
         }

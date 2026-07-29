@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drove\Pest;
 
+use Closure;
 use Drove\Console\Renderer;
 use Drove\Kernel\DroverScheduler;
 use Drove\Kernel\LifecycleExecutor;
+use Drove\Kernel\ScopeContext;
 use InvalidArgumentException;
 use ParaTest\Options;
 use Pest\Kernel as PestKernel;
@@ -17,6 +19,8 @@ use PHPUnit\TextUI\Configuration\PhpHandler;
 use PHPUnit\TextUI\Configuration\TestSuiteBuilder;
 use PHPUnit\TextUI\Exception as PHPUnitCliException;
 use PHPUnit\TextUI\TestSuiteFilterProcessor;
+use ReflectionException;
+use ReflectionMethod;
 use RuntimeException;
 use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -142,9 +146,14 @@ final class Runner
 
             (new PhpHandler)->handle($configuration->php());
             (new BootstrapLoader)->handle($configuration);
+            $laravel = $this->laravelRuntime($rootPath);
             $suite = (new TestSuiteBuilder)->build($configuration);
             (new TestSuiteFilterProcessor)->process($configuration, $suite);
-            $runtime = TestCaseRuntime::fromSuite($compiler, $suite);
+            $runtime = TestCaseRuntime::fromSuite(
+                $compiler,
+                $suite,
+                $this->callback($laravel, 'bindTestCase'),
+            );
             $resolvers = $runtime->resolvers();
 
             $executor = new LifecycleExecutor(
@@ -154,9 +163,14 @@ final class Runner
                 ),
                 $compiler->hook(...),
                 static fn (string $id): array => $resolvers[$id],
+                beforeDispatch: $this->callback($laravel, 'beforeDispatch'),
+                enterDescendant: $this->callback($laravel, 'enterDescendant'),
+                leaveDescendant: $this->callback($laravel, 'leaveDescendant'),
+                afterDispatch: $this->callback($laravel, 'afterDispatch'),
             );
             $run = $executor->run(
                 $compiler->suitePlan($compiler->files()),
+                $this->scopeContext($laravel),
             );
         } catch (Throwable $throwable) {
             $runFailure = $throwable;
@@ -189,6 +203,67 @@ final class Runner
         }
 
         return $exitCode;
+    }
+
+    private function laravelRuntime(string $rootPath): ?object
+    {
+        $class = 'Drove\\Laravel\\LaravelRuntime';
+
+        if (! class_exists($class)) {
+            return null;
+        }
+
+        try {
+            $boot = new ReflectionMethod($class, 'boot');
+        } catch (ReflectionException) {
+            throw new RuntimeException('drove-laravel is missing boot().');
+        }
+
+        $runtime = $boot->invoke(null, $rootPath);
+
+        if (! is_object($runtime)) {
+            throw new RuntimeException('drove-laravel returned an invalid runtime.');
+        }
+
+        foreach ([
+            'scopeContext',
+            'bindTestCase',
+            'beforeDispatch',
+            'enterDescendant',
+            'leaveDescendant',
+            'afterDispatch',
+        ] as $method) {
+            if (! method_exists($runtime, $method)) {
+                throw new RuntimeException(sprintf(
+                    'drove-laravel is missing %s().',
+                    $method,
+                ));
+            }
+        }
+
+        return $runtime;
+    }
+
+    private function callback(?object $runtime, string $method): ?Closure
+    {
+        if ($runtime === null) {
+            return null;
+        }
+
+        return new ReflectionMethod($runtime, $method)->getClosure($runtime);
+    }
+
+    private function scopeContext(?object $runtime): ?ScopeContext
+    {
+        if ($runtime === null) {
+            return null;
+        }
+
+        $context = $this->callback($runtime, 'scopeContext')?->__invoke();
+
+        return $context instanceof ScopeContext
+            ? $context
+            : throw new RuntimeException('drove-laravel returned an invalid scope context.');
     }
 
     /**

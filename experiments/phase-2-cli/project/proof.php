@@ -2,8 +2,7 @@
 
 declare(strict_types=1);
 
-$run = static function (string ...$arguments): array {
-    $command = [PHP_BINARY, __DIR__.'/vendor/bin/drove', ...$arguments];
+$execute = static function (array $command): array {
     $process = proc_open($command, [
         0 => ['pipe', 'r'],
         1 => ['pipe', 'w'],
@@ -26,6 +25,12 @@ $run = static function (string ...$arguments): array {
         'stderr' => $stderr,
     ];
 };
+$run = static fn (string ...$arguments): array => $execute([
+    PHP_BINARY,
+    __DIR__.'/vendor/bin/drove',
+    ...$arguments,
+]);
+$prepareCase = $execute([PHP_BINARY, __DIR__.'/prepare-case.php']);
 $expect = static function (bool $condition, string $message): void {
     if (! $condition) {
         throw new RuntimeException($message);
@@ -42,6 +47,15 @@ $namedMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
 file_put_contents($markerPath, '');
 $nestedLifecycle = $run('tests/CompatibilityTest.php', '--filter=runs a nested describe case');
 $nestedMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
+$staticLifecycle = $run('unsupported/StaticLifecycleTest.php');
+$staticMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
+$staticSetupFailure = $run('unsupported/StaticSetupFailureTest.php');
+$staticSetupFailureMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
+$staticTeardownFailure = $run('unsupported/StaticTeardownFailureTest.php');
+$staticTeardownFailureMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 file_put_contents($markerPath, '');
 $cases = [
     'path' => $run('tests/OtherTest.php'),
@@ -60,7 +74,9 @@ $cases = [
     'ordinary_phpunit' => $run('unsupported/OrdinaryPhpUnitTest.php'),
     'dependency' => $run('unsupported/DependencyTest.php'),
     'process_isolation_metadata' => $run('unsupported/ProcessIsolationTest.php'),
-    'static_lifecycle' => $run('unsupported/StaticLifecycleTest.php'),
+    'static_lifecycle' => $staticLifecycle,
+    'static_setup_failure' => $staticSetupFailure,
+    'static_teardown_failure' => $staticTeardownFailure,
     'xml_process_isolation' => $run('--configuration=unsupported/process-isolation.xml'),
     'xml_enforce_time_limit' => $run('--configuration=unsupported/enforce-time-limit.xml'),
 ];
@@ -76,6 +92,7 @@ foreach ([
     'parallel',
     'compatibility_c1',
     'compatibility_c8',
+    'static_lifecycle',
     'slow',
 ] as $name) {
     $expect($cases[$name]['exit'] === 0, $name.' did not exit successfully: '.$cases[$name]['stderr']);
@@ -85,6 +102,11 @@ $expect(
     str_contains($cases['path']['stdout'], 'gamma other')
         && ! str_contains($cases['path']['stdout'], 'alpha fast'),
     'Path selection drifted.',
+);
+$expect(
+    $prepareCase['exit'] === 0
+        && str_contains($prepareCase['stdout'], '"status": "passed"'),
+    'The installed per-case preparation seam did not run before runBare: '.$prepareCase['stderr'],
 );
 $expect(
     str_contains($cases['filter']['stdout'], 'alpha fast')
@@ -182,6 +204,44 @@ $expect(
         ],
     'The installed nested Pest and TestCase lifecycle order drifted.',
 );
+$expect(
+    $staticMarkers === [
+        'set_up_before_class',
+        'static_before_all',
+        'static_set_up',
+        'static_before_each',
+        'static_body',
+        'static_after_each',
+        'static_tear_down',
+        'static_after_all',
+        'tear_down_after_class',
+    ],
+    'The installed static TestCase lifecycle order drifted.',
+);
+$expect(
+    $staticSetupFailure['exit'] === 1
+        && $staticSetupFailureMarkers === ['failing_set_up_before_class']
+        && str_contains($staticSetupFailure['stdout'], 'is blocked by class setup failure')
+        && str_contains($staticSetupFailure['stdout'], 'class setup failed')
+        && str_contains($staticSetupFailure['stdout'], '1 blocked'),
+    'A failed static setup did not block only its file descendants.',
+);
+$expect(
+    $staticTeardownFailure['exit'] === 1
+        && $staticTeardownFailureMarkers === [
+            'teardown_set_up_before_class',
+            'teardown_before_all',
+            'teardown_before_each',
+            'teardown_body',
+            'teardown_after_each',
+            'teardown_after_all',
+            'failing_tear_down_after_class',
+        ]
+        && str_contains($staticTeardownFailure['stdout'], '✓ passes before class teardown fails')
+        && str_contains($staticTeardownFailure['stdout'], 'class teardown failed')
+        && str_contains($staticTeardownFailure['stdout'], '1 passed'),
+    'A failed static teardown rewrote the passing test result or escaped its file scope.',
+);
 $expect($markers[0] === 'before_all'
     && $markers[array_key_last($markers)] === 'after_all', 'The installed Drove scope lifecycle order drifted.');
 $expect(
@@ -222,11 +282,6 @@ $expect(
     $cases['process_isolation_metadata']['exit'] === 2
         && str_contains($cases['process_isolation_metadata']['stderr'], 'process-isolation metadata'),
     'Process-isolation metadata was not rejected explicitly.',
-);
-$expect(
-    $cases['static_lifecycle']['exit'] === 2
-        && str_contains($cases['static_lifecycle']['stderr'], 'custom static TestCase lifecycle methods'),
-    'Custom static TestCase lifecycle was not rejected explicitly.',
 );
 $expect(
     $cases['xml_process_isolation']['exit'] === 2

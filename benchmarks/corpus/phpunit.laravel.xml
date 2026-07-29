@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" cacheDirectory="/drove-work/phpunit-cache">
+  <php>
+    <env name="APP_ENV" value="testing" force="true"/>
+    <env name="APP_KEY" value="base64:x5m/qWTRn07o2rXmBGZap8zkqzrPybJGqGbi2f8I7Pc===" force="true"/>
+    <env name="APP_URL" value="http://drove.test" force="true"/>
+    <env name="BCRYPT_ROUNDS" value="4" force="true"/>
+    <env name="BROADCAST_CONNECTION" value="null" force="true"/>
+    <env name="CACHE_STORE" value="array" force="true"/>
+    <env name="DB_CONNECTION" value="sqlite" force="true"/>
+    <env name="DB_DATABASE" value="/drove-work/database.sqlite" force="true"/>
+    <env name="DROVE_LARAVEL_STATE" value="sqlite-copy" force="true"/>
+    <env name="DROVE_LARAVEL_DB_CONNECTION" value="sqlite" force="true"/>
+    <env name="DROVE_LARAVEL_SQLITE_WORKSPACE" value="/drove-work/snapshots" force="true"/>
+    <env name="MAIL_MAILER" value="array" force="true"/>
+    <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
+    <env name="PULSE_ENABLED" value="false" force="true"/>
+    <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+    <env name="SESSION_DRIVER" value="array" force="true"/>
+    <env name="TELESCOPE_ENABLED" value="false" force="true"/>
+  </php>
+</phpunit>

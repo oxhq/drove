@@ -133,11 +133,11 @@ $generatedMethod = $testCase->name();
 $generatedFile = (new ReflectionClass($generatedClass))->getFileName();
 $loaderFile = (new ReflectionClass(TestSuiteLoader::class))->getFileName();
 $localFactoryHash = hash_file('sha256', '/pest/src/Factories/TestCaseFactory.php');
-$installedFactoryHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Factories/TestCaseFactory.php');
+$installedFactoryHash = hash_file('sha256', __DIR__.'/vendor/oxhq/drove/src/Factories/TestCaseFactory.php');
 $usesLocalPest = is_string($localFactoryHash)
     && hash_equals($localFactoryHash, (string) $installedFactoryHash)
     && is_string($loaderFile)
-    && str_ends_with(str_replace('\\', '/', $loaderFile), '/vendor/pestphp/pest/overrides/Runner/TestSuiteLoader.php');
+    && str_ends_with(str_replace('\\', '/', $loaderFile), '/vendor/oxhq/drove/overrides/Runner/TestSuiteLoader.php');
 
 if (! $usesLocalPest
     || ! is_subclass_of($generatedClass, TestCase::class)

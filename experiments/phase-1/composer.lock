@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "286cd7500c614ab0411cd1046caaf33e",
+    "content-hash": "ed26cd4a59046c47d25d845873297119",
     "packages": [
         {
             "name": "brianium/paratest",
@@ -2963,8 +2963,8 @@
             "time": "2026-02-16T23:10:27+00:00"
         },
         {
-            "name": "pestphp/pest",
-            "version": "5.x-dev",
+            "name": "oxhq/drove",
+            "version": "0.1.x-dev",
             "dist": {
                 "type": "path",
                 "url": "/pest"
@@ -2987,6 +2987,9 @@
                 "sebastian/exporter": "<7.0.0",
                 "webmozart/assert": "<1.11.0"
             },
+            "replace": {
+                "pestphp/pest": "5.0.1"
+            },
             "require-dev": {
                 "laravel/pao": "^1.1.2",
                 "pestphp/pest-dev-tools": "^5.0.0",
@@ -2997,6 +3000,7 @@
                 "psy/psysh": "^0.12.24"
             },
             "bin": [
+                "bin/drove",
                 "bin/pest"
             ],
             "type": "library",
@@ -3106,9 +3110,10 @@
                     "email": "enunomaduro@gmail.com"
                 }
             ],
-            "description": "The elegant PHP Testing Framework.",
+            "description": "Experimental Pest fork for prepared-state parallel test execution.",
             "keywords": [
-                "framework",
+                "drove",
+                "parallel",
                 "pest",
                 "php",
                 "test",
@@ -8933,7 +8938,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "pestphp/pest": 20
+        "oxhq/drove": 20
     },
     "prefer-stable": false,
     "prefer-lowest": false,

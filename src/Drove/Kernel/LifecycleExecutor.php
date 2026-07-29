@@ -17,11 +17,19 @@ final readonly class LifecycleExecutor
 {
     /**
      * @param  Closure(string): (Closure|array<string, mixed>)  $testResolver
+     * @param  null|Closure(ScopeContext, list<array<string, mixed>>): void  $beforeDispatch
+     * @param  null|Closure(ScopeContext, array<string, mixed>): void  $enterDescendant
+     * @param  null|Closure(ScopeContext, array<string, mixed>): void  $leaveDescendant
+     * @param  null|Closure(ScopeContext, list<array<string, mixed>>): void  $afterDispatch
      */
     public function __construct(
         private Scheduler $scheduler,
         private Closure $hookResolver,
         private Closure $testResolver,
+        private ?Closure $beforeDispatch = null,
+        private ?Closure $enterDescendant = null,
+        private ?Closure $leaveDescendant = null,
+        private ?Closure $afterDispatch = null,
     ) {
         //
     }
@@ -265,23 +273,75 @@ final readonly class LifecycleExecutor
             ];
         }
 
-        $mapped = $this->scheduler->map(
-            $tasks,
-            function (array $task) use ($jobs, $context, $nextLevels): array {
-                $job = $jobs[$task['id']];
+        $beforeDispatchFailure = null;
 
-                if ($job['kind'] === 'test') {
-                    return $this->runTest($job['node'], $nextLevels, $context);
-                }
+        try {
+            $this->beforeDispatch?->__invoke($context, $tasks);
+        } catch (Throwable $throwable) {
+            $beforeDispatchFailure = $this->failure($throwable, 'before_dispatch', null);
+            $scopeFailures[] = $beforeDispatchFailure;
+        }
 
-                $child = $job['node'];
+        $mapFailure = null;
+        $mapped = ['results' => [], 'completion_order' => []];
 
-                return $this->runScope($child, $this->scopeContext($child, $context), $nextLevels);
-            },
-        );
+        if ($beforeDispatchFailure === null) {
+            try {
+                $mapped = $this->scheduler->map(
+                    $tasks,
+                    function (array $task) use ($jobs, $context, $nextLevels): array {
+                        $job = $jobs[$task['id']];
+                        $descendantContext = $job['kind'] === 'test'
+                            ? $context->child(['test_id' => $task['id']])
+                            : $this->scopeContext($job['node'], $context);
+                        $result = null;
+                        $primaryFailure = null;
 
-        $tests = [];
-        $scopes = [];
+                        try {
+                            $this->enterDescendant?->__invoke($descendantContext, $task);
+                            $result = $job['kind'] === 'test'
+                                ? $this->runTest($job['node'], $nextLevels, $descendantContext)
+                                : $this->runScope($job['node'], $descendantContext, $nextLevels);
+                        } catch (Throwable $throwable) {
+                            $primaryFailure = $throwable;
+                        } finally {
+                            try {
+                                $this->leaveDescendant?->__invoke($descendantContext, $task);
+                            } catch (Throwable $throwable) {
+                                if (is_array($result)) {
+                                    $result = $this->withDescendantCleanupFailure($result, $task, $throwable);
+                                }
+                            }
+                        }
+
+                        if ($primaryFailure instanceof Throwable) {
+                            throw $primaryFailure;
+                        }
+
+                        return $result;
+                    },
+                );
+            } catch (Throwable $throwable) {
+                $mapFailure = $throwable;
+            }
+        }
+
+        try {
+            $this->afterDispatch?->__invoke($context, $tasks);
+        } catch (Throwable $throwable) {
+            $scopeFailures[] = $this->failure($throwable, 'after_dispatch', null);
+        }
+
+        if ($mapFailure instanceof Throwable) {
+            throw $mapFailure;
+        }
+
+        $blocked = $beforeDispatchFailure === null
+            ? ['scopes' => [], 'tests' => [], 'events' => []]
+            : $this->blockedDescendants($node, $beforeDispatchFailure);
+        $tests = $blocked['tests'];
+        $scopes = $blocked['scopes'];
+        array_push($events, ...$blocked['events']);
         $completionOrder = $mapped['completion_order'];
 
         foreach ($mapped['results'] as $transport) {
@@ -398,7 +458,6 @@ final readonly class LifecycleExecutor
         }
 
         $scopeId = $levels[count($levels) - 1]['id'];
-        $context = $context->child(['test_id' => $testId]);
         ['closure' => $body, 'runtime' => $runtime] = $this->test($testId);
         $events = [$this->event('test.started', $scopeId, $testId, status: 'running')];
         $completed = [];
@@ -558,6 +617,80 @@ final readonly class LifecycleExecutor
             'stderr' => '',
             'events' => $events,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     * @param  array<string, mixed>  $task
+     * @return array<string, mixed>
+     */
+    private function withDescendantCleanupFailure(
+        array $result,
+        array $task,
+        Throwable $throwable,
+    ): array {
+        $failure = $this->failure($throwable, 'after_descendant', null);
+
+        if ($task['kind'] === 'test') {
+            $result['status'] = 'failed';
+            $result['failure'] ??= $failure;
+            $result['teardown_failures'][] = $failure;
+            $this->rewriteTerminalFailure(
+                $result['events'],
+                'test.finished',
+                'test_id',
+                $task['id'],
+                $result['failure'],
+            );
+
+            return $result;
+        }
+
+        $result['scope']['status'] = 'failed';
+        $result['scope']['failure'] ??= $failure;
+        $result['scope']['failures'][] = $failure;
+        $result['scopes'][0] = $result['scope'];
+        $this->rewriteTerminalFailure(
+            $result['events'],
+            'scope.finished',
+            'scope_id',
+            $task['id'],
+            $result['scope']['failure'],
+        );
+
+        return $result;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $events
+     * @param  array<string, mixed>  $failure
+     */
+    private function rewriteTerminalFailure(
+        array &$events,
+        string $type,
+        string $idKey,
+        string $id,
+        array $failure,
+    ): void {
+        foreach (array_reverse(array_keys($events)) as $index) {
+            if (($events[$index]['type'] ?? null) !== $type) {
+                continue;
+            }
+
+            if (($events[$index][$idKey] ?? null) !== $id) {
+                continue;
+            }
+
+            $events[$index]['status'] = 'failed';
+            $events[$index]['failure'] = $failure;
+
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'Drove could not find the terminal event for %s.',
+            $id,
+        ));
     }
 
     /**

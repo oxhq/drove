@@ -1,0 +1,8 @@
+diff --git a/bootstrap/app.php b/bootstrap/app.php
+index ab92354..47e4227 100644
+--- a/bootstrap/app.php
++++ b/bootstrap/app.php
+@@ -13,0 +14 @@ use Filament\Widgets\WidgetsServiceProvider;
++use Drove\Laravel\DroveLaravelServiceProvider;
+@@ -41,0 +43 @@ $app->register(AdminPanelProvider::class);
++$app->register(DroveLaravelServiceProvider::class);

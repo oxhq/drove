@@ -32,7 +32,7 @@ docker run --rm drove-phase-two-cli
 ```
 
 It also requires explicit exit-2 diagnostics for ordinary PHPUnit cases,
-dependencies, process isolation, custom static class lifecycle, and XML time
+dependencies, process isolation, and XML time
 limits. This remains a source-built Linux alpha. See
 [`docs/migration-from-pest.md`](../../docs/migration-from-pest.md) for the
 supported and rejected Pest surfaces.

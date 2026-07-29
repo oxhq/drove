@@ -61,6 +61,9 @@ final class ScopeCompiler
     /** @var array<string, true> */
     private array $boundCases = [];
 
+    /** @var array<string, true> */
+    private array $boundClassLifecycles = [];
+
     private function __construct(
         private readonly string $rootPath,
         private readonly bool $ownsScopeHooks,
@@ -245,6 +248,49 @@ final class ScopeCompiler
             );
             $this->boundCases[$filename] = true;
         }
+    }
+
+    public function bindClassLifecycle(
+        string $filename,
+        ?Closure $beforeClass,
+        ?Closure $afterClass,
+    ): void {
+        if (! $beforeClass instanceof Closure && ! $afterClass instanceof Closure) {
+            return;
+        }
+
+        $filename = $this->canonicalPath($filename);
+
+        if (isset($this->boundClassLifecycles[$filename])) {
+            throw new RuntimeException(sprintf(
+                'Drove class lifecycle was already bound for %s.',
+                $filename,
+            ));
+        }
+
+        $plan = $this->scopePlans[$filename] ?? throw new OutOfBoundsException(sprintf(
+            'No Drove scope plan was captured for %s.',
+            $filename,
+        ));
+        $scopeId = $this->plans[$filename]['id'] ?? throw new OutOfBoundsException(sprintf(
+            'No Drove file plan was captured for %s.',
+            $filename,
+        ));
+
+        if ($beforeClass instanceof Closure) {
+            $hookId = 'hook:'.$scopeId.'::set_up_before_class';
+            array_unshift($plan['hooks']['before_all'], $hookId);
+            $this->hookClosures[$hookId] = $beforeClass;
+        }
+
+        if ($afterClass instanceof Closure) {
+            $hookId = 'hook:'.$scopeId.'::tear_down_after_class';
+            array_unshift($plan['hooks']['after_all'], $hookId);
+            $this->hookClosures[$hookId] = $afterClass;
+        }
+
+        $this->scopePlans[$filename] = $plan;
+        $this->boundClassLifecycles[$filename] = true;
     }
 
     /**

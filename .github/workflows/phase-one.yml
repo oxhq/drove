@@ -20,6 +20,21 @@ jobs:
     timeout-minutes: 30
 
     services:
+      mysql:
+        image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+        env:
+          MYSQL_DATABASE: drove
+          MYSQL_USER: drove
+          MYSQL_PASSWORD: drove
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --host=127.0.0.1 --user=root --password=root"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 30
+
       redis:
         image: redis:8.2.8-alpine@sha256:3790f265260957949f41e767efd9b66d5e3f277913b63a56c0183d55a47e7347
         ports:
@@ -88,3 +103,24 @@ jobs:
         docker build --tag drove-phase-three --file experiments/phase-3/Dockerfile .
         docker run --rm --entrypoint sh drove-phase-three -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
         docker run --rm drove-phase-three
+
+    - name: Build and validate Phase 3 Laravel alpha
+      run: |
+        set -euo pipefail
+        docker build --tag drove-phase-three-laravel --file experiments/phase-3-laravel/Dockerfile .
+        docker run --rm --entrypoint sh drove-phase-three-laravel -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
+
+    - name: Phase 3 Laravel SQLite proof
+      run: docker run --rm drove-phase-three-laravel
+
+    - name: Phase 3 Laravel MySQL transaction proof
+      run: |
+        set -euo pipefail
+        docker run --rm \
+          --network host \
+          --env DB_HOST=127.0.0.1 \
+          --env DB_PORT=3306 \
+          --env DB_DATABASE=drove \
+          --env DB_USERNAME=drove \
+          --env DB_PASSWORD=drove \
+          drove-phase-three-laravel php proof-mysql.php

@@ -2,6 +2,7 @@
 .idea/codeStyleSettings.xml
 .temp/*
 composer.lock
+!experiments/phase-3-laravel/composer.lock
 /vendor/
 coverage.xml
 .phpunit.result.cache

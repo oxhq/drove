@@ -208,15 +208,15 @@ $testsMatch = $testIds === [$firstTestId, $secondTestId]
 
 $loaderFile = (new ReflectionClass(TestSuiteLoader::class))->getFileName();
 $localCompilerHash = hash_file('sha256', '/pest/src/Drove/Pest/ScopeCompiler.php');
-$installedCompilerHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Drove/Pest/ScopeCompiler.php');
+$installedCompilerHash = hash_file('sha256', __DIR__.'/vendor/oxhq/drove/src/Drove/Pest/ScopeCompiler.php');
 $localFunctionsHash = hash_file('sha256', '/pest/src/Functions.php');
-$installedFunctionsHash = hash_file('sha256', __DIR__.'/vendor/pestphp/pest/src/Functions.php');
+$installedFunctionsHash = hash_file('sha256', __DIR__.'/vendor/oxhq/drove/src/Functions.php');
 $usesLocalDrove = is_string($localCompilerHash)
     && hash_equals($localCompilerHash, (string) $installedCompilerHash)
     && is_string($localFunctionsHash)
     && hash_equals($localFunctionsHash, (string) $installedFunctionsHash)
     && is_string($loaderFile)
-    && str_ends_with(str_replace('\\', '/', $loaderFile), '/vendor/pestphp/pest/overrides/Runner/TestSuiteLoader.php');
+    && str_ends_with(str_replace('\\', '/', $loaderFile), '/vendor/oxhq/drove/overrides/Runner/TestSuiteLoader.php');
 
 $passed = $planIsScalar
     && $plan === $expectedPlan

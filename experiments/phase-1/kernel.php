@@ -8,6 +8,7 @@ use Drove\Kernel\FailureKind;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\PcntlScheduler;
 use Drove\Kernel\ScopeContext;
+use Drove\Kernel\StateAdapterException;
 use Drove\Pest\ScopeCompiler;
 use Pest\Kernel as PestKernel;
 use Pest\TestSuite as PestTestSuite;
@@ -445,6 +446,12 @@ $expectedKinds = [
     'classifies missing terminal frame' => FailureKind::ChildProtocolFailure->value,
     'kills a timed out process tree' => FailureKind::Timeout->value,
 ];
+
+$assert(
+    FailureKind::for(new StateAdapterException('adapter failed'), 'executor')
+        === FailureKind::StateAdapterFailure,
+    'State adapter failures lost their dedicated classification.',
+);
 
 foreach ($expectedKinds as $name => $kind) {
     $failed = $test($name);

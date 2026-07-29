@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+vendor
+experiments/phase-0
+experiments/phase-1
+experiments/phase-2
+experiments/phase-2-cli
+experiments/phase-3
+tests
+tests-external

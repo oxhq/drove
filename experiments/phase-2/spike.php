@@ -133,7 +133,7 @@ foreach ($tests as $test) {
     ob_start();
 
     try {
-        $outcome = ($resolver['closure'])();
+        $outcome = ($resolver['closure'])($scopeContext);
         $assert($outcome instanceof TestOutcome, 'Runtime resolver did not return a TestOutcome.');
         $results[$id] = is_array($outcome->value)
             ? $outcome->value
