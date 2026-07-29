@@ -24,11 +24,9 @@ jobs:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest] # windows-latest
-        symfony: ['8.0']
         php: ['8.4', '8.5']
-        dependency_version: [prefer-stable]
 
-    name: PHP ${{ matrix.php }} - Symfony ^${{ matrix.symfony }} - ${{ matrix.os }} - ${{ matrix.dependency_version }}
+    name: PHP ${{ matrix.php }} - ${{ matrix.os }}
 
     steps:
     - name: Checkout
@@ -40,7 +38,7 @@ jobs:
         php-version: ${{ matrix.php }}
         tools: composer:v2
         coverage: none
-        extensions: sockets
+        extensions: ffi, pcntl, posix, sockets
 
     - name: Get Composer cache directory
       id: composer-cache
@@ -51,9 +49,8 @@ jobs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
         path: ${{ steps.composer-cache.outputs.dir }}
-        key: ${{ matrix.os }}-php-${{ matrix.php }}-symfony-${{ matrix.symfony }}-composer-${{ hashFiles('**/composer.json', '**/composer.lock') }}
+        key: ${{ matrix.os }}-php-${{ matrix.php }}-composer-${{ hashFiles('**/composer.json', '**/composer.lock') }}
         restore-keys: |
-          ${{ matrix.os }}-php-${{ matrix.php }}-symfony-${{ matrix.symfony }}-composer-
           ${{ matrix.os }}-php-${{ matrix.php }}-composer-
 
     - name: Setup Problem Matches
@@ -64,8 +61,11 @@ jobs:
     - name: Install PHP dependencies
       shell: bash
       env:
-        COMPOSER_ROOT_VERSION: 0.1.x-dev
-      run: composer update --${{ matrix.dependency_version }} --no-interaction --no-progress --ansi --with="symfony/console:^${{ matrix.symfony }}"
+        COMPOSER_ROOT_VERSION: 0.4.x-dev
+      run: composer install --no-interaction --no-progress --ansi
+
+    - name: Validate package metadata
+      run: composer validate --strict && composer check-platform-reqs
 
     - name: Unit Tests
       run: composer test:unit

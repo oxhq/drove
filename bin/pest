@@ -128,13 +128,18 @@ use Symfony\Component\Console\Output\ConsoleOutput;
         }
     }
 
-    // Used when Pest is required using composer.
+    $proxyPath = $GLOBALS['_composer_autoload_path'] ?? null;
+
+    // Used when Pest is required using older Composer proxies.
     $vendorPath = dirname(__DIR__, 4).'/vendor/autoload.php';
 
     // Used when Pest maintainers are running Pest tests.
     $localPath = dirname(__DIR__).'/vendor/autoload.php';
 
-    if (file_exists($vendorPath)) {
+    if (is_string($proxyPath) && file_exists($proxyPath)) {
+        include_once $proxyPath;
+        $autoloadPath = $proxyPath;
+    } elseif (file_exists($vendorPath)) {
         include_once $vendorPath;
         $autoloadPath = $vendorPath;
     } else {
@@ -142,8 +147,17 @@ use Symfony\Component\Console\Output\ConsoleOutput;
         $autoloadPath = $localPath;
     }
 
-    // Get $rootPath based on $autoloadPath
-    $rootPath = dirname($autoloadPath, 2);
+    $rootPath = dirname($autoloadPath);
+
+    while (! file_exists($rootPath.'/composer.json')) {
+        $parent = dirname($rootPath);
+
+        if ($parent === $rootPath) {
+            throw new RuntimeException('Pest could not locate the Composer project root.');
+        }
+
+        $rootPath = $parent;
+    }
 
     $input = new ArgvInput;
 

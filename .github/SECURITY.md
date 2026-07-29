@@ -4,10 +4,12 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Pest, please report it privately using one of the following channels:
+If you discover a security vulnerability in Drove, report it privately through
+GitHub Private Vulnerability Reporting:
 
-1. **GitHub Private Vulnerability Reporting** (preferred) — go to the repository's **Security** tab and click **"Report a vulnerability"**. This creates a private advisory visible only to maintainers and provides a structured workflow for triage, fix coordination, and CVE assignment.
+1. Open the repository's **Security** tab.
+2. Select **Report a vulnerability**.
+3. Include affected versions, reproduction steps, impact, and any proposed
+   mitigation.
 
-2. **Email** — send the details to Nuno Maduro at **enunomaduro@gmail.com**.
-
-All security vulnerabilities will be promptly addressed.
+Do not open a public issue until the maintainers have coordinated disclosure.

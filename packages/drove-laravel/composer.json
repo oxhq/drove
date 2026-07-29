@@ -3,10 +3,25 @@
     "description": "Narrow Laravel runtime integration for Drove.",
     "license": "MIT",
     "type": "library",
+    "homepage": "https://github.com/oxhq/drove-laravel",
+    "authors": [
+        {
+            "name": "OxHQ",
+            "homepage": "https://github.com/oxhq",
+            "role": "Maintainer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/oxhq/drove/issues",
+        "source": "https://github.com/oxhq/drove-laravel"
+    },
     "require": {
         "php": "^8.4",
         "laravel/framework": "^13.0",
-        "oxhq/drove": "^0.1@dev"
+        "oxhq/drove": "^0.4@alpha"
+    },
+    "suggest": {
+        "orchestra/testbench": "Required only for package suites; tested with ^11.1."
     },
     "autoload": {
         "psr-4": {

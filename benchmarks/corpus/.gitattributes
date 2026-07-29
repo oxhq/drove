@@ -1,0 +1,2 @@
+*.sh text eol=lf
+locks/*.lock text eol=lf

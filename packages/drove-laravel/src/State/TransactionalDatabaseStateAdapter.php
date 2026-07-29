@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Drove\Laravel\State;
 
+use Drove\Environment\ResourceCapability;
+use Drove\Environment\ResourceKind;
+use Drove\Environment\ResourcePlan;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
@@ -39,6 +42,18 @@ final class TransactionalDatabaseStateAdapter extends AbstractDatabaseStateAdapt
     public function name(): string
     {
         return 'transaction';
+    }
+
+    public function resourcePlan(): ResourcePlan
+    {
+        return new ResourcePlan(
+            ResourceKind::Database,
+            $this->name(),
+            [
+                ResourceCapability::LeafIsolated,
+            ],
+            $this->limitations(),
+        );
     }
 
     public function preflightTestCase(TestCase $testCase): void
@@ -81,17 +96,6 @@ final class TransactionalDatabaseStateAdapter extends AbstractDatabaseStateAdapt
 
         if ($this->dispatchPid === $pid) {
             throw new StateAdapterException('A transactional Drove dispatch is already active.');
-        }
-
-        $scopeTasks = array_values(array_filter(
-            $tasks,
-            static fn (array $task): bool => $task['kind'] === 'scope',
-        ));
-
-        if ($scopeTasks !== [] && (count($scopeTasks) !== 1 || count($tasks) !== 1)) {
-            throw new StateAdapterException(
-                'The transactional adapter cannot isolate sibling or mixed scope dispatches.',
-            );
         }
 
         $this->assertOnlySelectedConnectionIsResolved();

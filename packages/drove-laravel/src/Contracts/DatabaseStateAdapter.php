@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace Drove\Laravel\Contracts;
 
+use Drove\Environment\ResourceProvider;
 use Drove\Kernel\ScopeContext;
 use Illuminate\Foundation\Application;
 use PHPUnit\Framework\TestCase;
 
-interface DatabaseStateAdapter
+interface DatabaseStateAdapter extends ResourceProvider
 {
     public function boot(Application $application): void;
 

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Drove\Laravel\State;
 
+use Drove\Environment\ResourceCapability;
+use Drove\Environment\ResourceKind;
+use Drove\Environment\ResourcePlan;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
@@ -63,6 +66,19 @@ final class InMemorySqliteDatabaseStateAdapter extends AbstractDatabaseStateAdap
         return 'sqlite-memory';
     }
 
+    public function resourcePlan(): ResourcePlan
+    {
+        return new ResourcePlan(
+            ResourceKind::Database,
+            $this->name(),
+            [
+                ResourceCapability::Branchable,
+                ResourceCapability::ScopeIsolated,
+            ],
+            $this->limitations(),
+        );
+    }
+
     public function assertTestCaseSupported(TestCase $testCase): void
     {
         parent::assertTestCaseSupported($testCase);
@@ -107,7 +123,7 @@ final class InMemorySqliteDatabaseStateAdapter extends AbstractDatabaseStateAdap
     {
         return [
             'Exactly one resolved SQLite connection configured as literal :memory: is supported.',
-            'Isolation relies on Linux fork copy-on-write with the prepared parent PDO kept open.',
+            'Isolation relies on POSIX fork copy-on-write with the prepared parent PDO kept open.',
             'Reconnects, disconnects before descendant setup, URI databases, attached databases, and multiple connections are unsupported.',
             'RefreshDatabase requires prepared_schema=true and reuses that explicitly prepared inherited PDO; migration and truncation traits are rejected.',
             'Queue, cache, Redis, HTTP, filesystem writes, and other external resources are not managed.',

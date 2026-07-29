@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ed26cd4a59046c47d25d845873297119",
+    "content-hash": "15b545b3ed848246cc8a54faee3d136e",
     "packages": [
         {
             "name": "brianium/paratest",
@@ -2964,13 +2964,19 @@
         },
         {
             "name": "oxhq/drove",
-            "version": "0.1.x-dev",
+            "version": "0.4.0-alpha.1",
             "dist": {
                 "type": "path",
                 "url": "/pest"
             },
             "require": {
                 "brianium/paratest": "^7.23.0",
+                "ext-ffi": "*",
+                "ext-openssl": "*",
+                "ext-pcntl": "*",
+                "ext-phar": "*",
+                "ext-posix": "*",
+                "ext-zlib": "*",
                 "nunomaduro/collision": "^8.9.5",
                 "nunomaduro/termwind": "^2.4.0",
                 "pestphp/pest-plugin": "^5.0.0",
@@ -3001,6 +3007,7 @@
             },
             "bin": [
                 "bin/drove",
+                "bin/drove-install-native",
                 "bin/pest"
             ],
             "type": "library",
@@ -3106,20 +3113,34 @@
             ],
             "authors": [
                 {
+                    "name": "OxHQ",
+                    "homepage": "https://github.com/oxhq",
+                    "role": "Maintainer"
+                },
+                {
                     "name": "Nuno Maduro",
-                    "email": "enunomaduro@gmail.com"
+                    "email": "enunomaduro@gmail.com",
+                    "role": "Original Pest author"
                 }
             ],
-            "description": "Experimental Pest fork for prepared-state parallel test execution.",
+            "description": "Independent prepared-state test runner with Pest and PHPUnit frontends.",
+            "homepage": "https://github.com/oxhq/drove",
             "keywords": [
                 "drove",
+                "laravel",
                 "parallel",
                 "pest",
                 "php",
+                "phpunit",
+                "prepared-state",
                 "test",
                 "testing",
                 "unit"
             ],
+            "support": {
+                "issues": "https://github.com/oxhq/drove/issues",
+                "source": "https://github.com/oxhq/drove"
+            },
             "transport-options": {
                 "symlink": false,
                 "relative": false
@@ -6145,16 +6166,16 @@
         },
         {
             "name": "symfony/console",
-            "version": "v8.1.1",
+            "version": "v8.1.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/console.git",
-                "reference": "b711a8ab808b6c074c6b8caef70d0fd8d6b6d07d"
+                "reference": "535e18a1b8925f6c01a55b171d157ab66c2ace15"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/console/zipball/b711a8ab808b6c074c6b8caef70d0fd8d6b6d07d",
-                "reference": "b711a8ab808b6c074c6b8caef70d0fd8d6b6d07d",
+                "url": "https://api.github.com/repos/symfony/console/zipball/535e18a1b8925f6c01a55b171d157ab66c2ace15",
+                "reference": "535e18a1b8925f6c01a55b171d157ab66c2ace15",
                 "shasum": ""
             },
             "require": {
@@ -6221,7 +6242,7 @@
                 "terminal"
             ],
             "support": {
-                "source": "https://github.com/symfony/console/tree/v8.1.1"
+                "source": "https://github.com/symfony/console/tree/v8.1.2"
             },
             "funding": [
                 {
@@ -6241,7 +6262,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-06-16T12:55:20+00:00"
+            "time": "2026-07-27T13:58:19+00:00"
         },
         {
             "name": "symfony/css-selector",
@@ -8117,16 +8138,16 @@
         },
         {
             "name": "symfony/string",
-            "version": "v8.1.0",
+            "version": "v8.1.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/string.git",
-                "reference": "afd5944f4005862d961efb85c8bbd5c523c4e3c9"
+                "reference": "286a76b7255e5cc4bf0101a0bc5388ecf1c38ccc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/string/zipball/afd5944f4005862d961efb85c8bbd5c523c4e3c9",
-                "reference": "afd5944f4005862d961efb85c8bbd5c523c4e3c9",
+                "url": "https://api.github.com/repos/symfony/string/zipball/286a76b7255e5cc4bf0101a0bc5388ecf1c38ccc",
+                "reference": "286a76b7255e5cc4bf0101a0bc5388ecf1c38ccc",
                 "shasum": ""
             },
             "require": {
@@ -8183,7 +8204,7 @@
                 "utf8"
             ],
             "support": {
-                "source": "https://github.com/symfony/string/tree/v8.1.0"
+                "source": "https://github.com/symfony/string/tree/v8.1.2"
             },
             "funding": [
                 {
@@ -8203,7 +8224,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-05-29T05:06:50+00:00"
+            "time": "2026-07-28T07:35:25+00:00"
         },
         {
             "name": "symfony/translation",
@@ -8938,7 +8959,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "oxhq/drove": 20
+        "oxhq/drove": 15
     },
     "prefer-stable": false,
     "prefer-lowest": false,

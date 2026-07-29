@@ -23,9 +23,7 @@ COPY . /drove
 
 ENV DROVER_LIBRARY=/usr/local/lib/libdrover.so
 
-WORKDIR /app
-
-COPY experiments/phase-3-laravel/ ./
+WORKDIR /drove/experiments/phase-3-laravel
 
 RUN mkdir -p \
         bootstrap/cache \

@@ -1,7 +1,7 @@
 # Drove Laravel
 
-This package is a narrow Laravel 13 bridge for Drove's prepared-process
-runtime. It adds:
+This package is a narrow Linux/macOS Laravel 13 bridge for Drove's
+prepared-process runtime. It adds:
 
 - a `php artisan drove -- <arguments>` subprocess command;
 - one root Laravel or Orchestra Testbench application and `TestCase` binding;
@@ -9,6 +9,18 @@ runtime. It adds:
 - one MySQL transaction adapter;
 - one inherited SQLite `:memory:` adapter; and
 - one physical file-copy adapter for a single SQLite database.
+
+## Install
+
+The alpha depends on Drove's inherited Pest plugin loader, so clean consumers
+must explicitly trust that Composer plugin before installing:
+
+```bash
+composer config --no-plugins allow-plugins.pestphp/pest-plugin true
+composer require --dev oxhq/drove-laravel:^0.4@alpha
+vendor/bin/drove-install-native
+vendor/bin/drove --version
+```
 
 Adapter selection is mandatory. Set `DROVE_LARAVEL_STATE=transaction` or
 `DROVE_LARAVEL_STATE=sqlite-memory` or
@@ -37,6 +49,7 @@ $context = $runtime->scopeContext();
 Core integration calls:
 
 ```php
+$runtime->assertPlanSupported($scopeIr);
 $runtime->bindTestCase($testCase, $context); // no-op for non-Laravel cases
 $runtime->beforeDispatch($context, $tasks);
 $runtime->enterDescendant($context, $task);
@@ -45,6 +58,23 @@ $runtime->afterDispatch($context, $tasks);
 ```
 
 `leaveDescendant()` and `afterDispatch()` belong in `finally` paths.
+`assertPlanSupported()` belongs after Scope IR compilation and before lifecycle
+execution; unsupported topology is input rejection rather than a failed scope.
+
+Each provider contributes a core `ResourcePlan` to an `EnvironmentPlan`.
+Resource plans identify database, filesystem, cache, queue, or object-storage
+resources and declare explicit `Branchable`, `LeafIsolated`, `ScopeIsolated`,
+`RollbackIsolated`, `Resettable`, and `SharedReadOnly` capabilities. The
+environment also declares whether a multi-resource lifecycle is atomic or
+best-effort.
+
+The current Laravel environment has one managed database resource and declares
+best-effort coordination because filesystem, cache, queue, and object-storage
+are explicitly unmanaged. The SQLite providers are
+`Branchable + ScopeIsolated`; the transaction provider is `LeafIsolated`.
+Planning and runtime dispatch both reject sibling or mixed scopes when any
+managed resource lacks scope isolation. The four unmanaged resource kinds have
+no provider in this alpha.
 
 ## Deliberate limits
 
@@ -68,12 +98,17 @@ reflink claim. `RefreshDatabase` migrates each private copy unless
 already migrated.
 
 The `sqlite-memory` adapter accepts one literal `:memory:` database and keeps
-the prepared PDO open across Linux forks. `RefreshDatabase` is accepted only
+the prepared PDO open across POSIX forks. `RefreshDatabase` is accepted only
 with `DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true`; without that explicit
 contract Drove rejects the suite instead of skipping migrations. Testbench
 support is limited to one application profile per selected suite. Testbench
 class/method attributes and suites mixing Testbench with Laravel application
 cases are rejected before execution.
+
+Orchestra Testbench is optional for Laravel application consumers. Package
+suites are tested against `orchestra/testbench:^11.1`; Drove checks the
+reflected Testbench application/binding contract before it creates an
+application.
 
 All configured databases must be disposable. If test code explicitly resolves
 and writes a secondary connection, Drove detects it only during descendant

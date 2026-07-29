@@ -4,6 +4,7 @@
 composer.lock
 !experiments/phase-3-laravel/composer.lock
 /vendor/
+/native/drover/target/
 coverage.xml
 .phpunit.result.cache
 .phpunit.cache

@@ -6,23 +6,23 @@
     "repositories": [
         {
             "type": "path",
-            "url": "/drove",
+            "url": "../..",
             "options": {
                 "reference": "none",
                 "symlink": false,
                 "versions": {
-                    "oxhq/drove": "0.1.x-dev"
+                    "oxhq/drove": "0.4.0-alpha.1"
                 }
             }
         },
         {
             "type": "path",
-            "url": "/drove/packages/drove-laravel",
+            "url": "../../packages/drove-laravel",
             "options": {
                 "reference": "none",
                 "symlink": false,
                 "versions": {
-                    "oxhq/drove-laravel": "1.0.x-dev"
+                    "oxhq/drove-laravel": "0.4.0-alpha.1"
                 }
             }
         }
@@ -34,8 +34,8 @@
         "ext-pdo_mysql": "*",
         "ext-pdo_sqlite": "*",
         "laravel/framework": "^13.0",
-        "oxhq/drove": "^0.1@dev",
-        "oxhq/drove-laravel": "^1.0@dev"
+        "oxhq/drove": "^0.4@alpha",
+        "oxhq/drove-laravel": "^0.4@alpha"
     },
     "autoload": {
         "psr-4": {

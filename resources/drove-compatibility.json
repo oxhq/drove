@@ -1,0 +1,101 @@
+{
+    "schema": 1,
+    "release_channel": "experimental-alpha",
+    "drove_version": null,
+    "platforms": {
+        "linux-gnu-x86_64": {
+            "status": "supported-alpha",
+            "native_asset": "drove-native-linux-gnu-x86_64.tar.gz",
+            "minimum_glibc": "2.31"
+        },
+        "linux-gnu-aarch64": {
+            "status": "supported-alpha",
+            "native_asset": "drove-native-linux-gnu-aarch64.tar.gz",
+            "minimum_glibc": "2.31"
+        },
+        "linux-musl": {
+            "status": "unsupported",
+            "reason": "The experimental Linux binaries target GNU libc 2.31 or newer."
+        },
+        "macos-x86_64": {
+            "status": "beta",
+            "native_asset": "drove-native-macos-x86_64.tar.gz"
+        },
+        "macos-aarch64": {
+            "status": "beta",
+            "native_asset": "drove-native-macos-aarch64.tar.gz"
+        },
+        "windows": {
+            "status": "unsupported",
+            "reason": "Drove requires fork, PCNTL, POSIX process groups, and a Unix native library."
+        }
+    },
+    "frontends": {
+        "pest-5.0.1": {
+            "status": "partial",
+            "details": "The declared DSL, hook, dataset, selection, and result subset is supported."
+        },
+        "phpunit-13.2.4": {
+            "status": "partial",
+            "details": "One native TestCase class per file, datasets, groups, and class lifecycle are supported."
+        },
+        "laravel-13": {
+            "status": "alpha",
+            "details": "One application and one disposable database connection are supported through drove-laravel."
+        },
+        "orchestra-testbench-11": {
+            "status": "alpha",
+            "details": "One application profile is supported through the tested Testbench bridge."
+        }
+    },
+    "capabilities": {
+        "prepared-scope-lifecycle": "supported-alpha",
+        "native-parallel-scheduling": "supported-alpha",
+        "sqlite-file-copy": "supported-alpha",
+        "sqlite-memory-fork-inheritance": "supported-alpha",
+        "mysql-test-rollback": "limited-alpha",
+        "environment-plan": "supported-alpha",
+        "coverage-aggregation": "beta",
+        "signal-and-timeout-cleanup": "beta",
+        "replay-metadata": "beta",
+        "drove-plugin-observers": "alpha",
+        "test-dependencies": "unsupported",
+        "browser-mode": "unsupported",
+        "mutation-testing": "unsupported",
+        "watch-mode": "unsupported",
+        "redis-queue-object-storage-isolation": "unsupported"
+    },
+    "plugin_policy": {
+        "portable-syntax": "compatible when it compiles into the declared Pest frontend",
+        "drove-observers": "Bootable, InspectsPlan, and ReportsRun are available as an alpha API",
+        "observer-failures": "observer exceptions fail the run with exit 1",
+        "runner-internals": "explicitly unsupported unless listed in this registry"
+    },
+    "environment_contract": {
+        "schema": 1,
+        "coordination_guarantees": [
+            "atomic",
+            "best-effort"
+        ],
+        "resource_kinds": [
+            "database",
+            "filesystem",
+            "cache",
+            "queue",
+            "object-storage"
+        ],
+        "resource_capabilities": [
+            "branchable",
+            "leaf-isolated",
+            "scope-isolated",
+            "rollback-isolated",
+            "resettable",
+            "shared-read-only"
+        ]
+    },
+    "proof": {
+        "phase_gates": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.1/.github/workflows/phase-one.yml",
+        "external_corpus": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.1/benchmarks/corpus/manifest.json",
+        "limitations": "docs/migration-from-pest.md"
+    }
+}

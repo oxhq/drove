@@ -96,6 +96,7 @@ jobs:
         docker build --tag drove-phase-two-cli --file experiments/phase-2-cli/Dockerfile .
         docker run --rm --entrypoint sh drove-phase-two-cli -lc 'composer validate --strict && composer check-platform-reqs && composer audit --locked'
         docker run --rm drove-phase-two-cli
+        docker run --rm drove-phase-two-cli php proof-beta.php
 
     - name: Phase 3 regression
       run: |
@@ -116,6 +117,7 @@ jobs:
     - name: Phase 4 Laravel and Testbench proofs
       run: |
         set -euo pipefail
+        docker run --rm drove-phase-three-laravel php proof-state-capabilities.php
         docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
         docker run --rm drove-phase-three-laravel php proof-testbench.php
         docker run --rm drove-phase-three-laravel php proof-data-provider.php

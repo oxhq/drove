@@ -5,10 +5,16 @@ declare(strict_types=1);
 namespace Drove\Pest;
 
 use Closure;
+use Drove\CompatibilityRegistry;
 use Drove\Console\Renderer;
+use Drove\Coverage\Aggregator as CoverageAggregator;
+use Drove\Environment\EnvironmentRuntime;
 use Drove\Kernel\DroverScheduler;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\ScopeContext;
+use Drove\Plugins\Manager as PluginManager;
+use Drove\Replay\Artifact as ReplayArtifact;
+use Drove\Version;
 use InvalidArgumentException;
 use ParaTest\Options;
 use Pest\Kernel as PestKernel;
@@ -36,11 +42,11 @@ use Throwable;
  */
 final class Runner
 {
+    private ?ReplayArtifact $replay = null;
+
     /** @var list<string> */
     private const array UNSUPPORTED_OPTIONS = [
         '--coverage',
-        '--coverage-',
-        '--no-coverage',
         '--process-isolation',
         '--teamcity',
         '--testdox',
@@ -90,13 +96,24 @@ final class Runner
      */
     public static function main(array $arguments, string $rootPath): int
     {
+        $runner = new self;
+
         try {
-            return (new self)->run($arguments, $rootPath);
+            return $runner->run($arguments, $rootPath);
         } catch (InvalidArgumentException|PHPUnitCliException $exception) {
             fwrite(STDERR, 'Drove: '.$exception->getMessage().PHP_EOL);
 
             return 2;
         } catch (Throwable $throwable) {
+            try {
+                $runner->replay?->writeCrash($throwable);
+            } catch (Throwable $replayFailure) {
+                fwrite(
+                    STDERR,
+                    'Drove replay: '.$replayFailure->getMessage().PHP_EOL,
+                );
+            }
+
             fwrite(STDERR, $throwable::class.': '.$throwable->getMessage().PHP_EOL);
 
             return 1;
@@ -112,12 +129,37 @@ final class Runner
             throw new InvalidArgumentException('Drove requires an executable argument.');
         }
 
-        [$phpunitArguments, $concurrency] = $this->arguments($arguments);
+        if ($this->hasOption($arguments, '--version')) {
+            fwrite(STDOUT, 'Drove '.Version::current().PHP_EOL);
+
+            return 0;
+        }
+
+        if ($this->hasOption($arguments, '--compatibility')) {
+            fwrite(STDOUT, CompatibilityRegistry::json());
+
+            return 0;
+        }
+
+        $options = $this->arguments($arguments);
+        $phpunitArguments = $options['phpunit_arguments'];
+        $concurrency = $options['processes'];
         $this->rejectUnsupportedOptions($phpunitArguments);
         $rootPath = realpath($rootPath);
 
         if ($rootPath === false) {
             throw new InvalidArgumentException('The project root does not exist.');
+        }
+
+        if ($options['replay'] !== null) {
+            $this->replay = ReplayArtifact::create(
+                $rootPath,
+                $options['replay'],
+                $options['replay_on_failure'],
+                $phpunitArguments,
+                $concurrency,
+                $options['timeout_ms'],
+            );
         }
 
         $previousDirectory = getcwd();
@@ -135,6 +177,8 @@ final class Runner
         $failOnEmptyTestSuite = false;
         $failOnPhpunitWarning = true;
         $phpunitWarnings = false;
+        $coverage = null;
+        $plugins = new PluginManager;
 
         try {
             PestKernel::boot(
@@ -142,6 +186,7 @@ final class Runner
                 new ArgvInput($phpunitArguments),
                 new BufferedOutput,
             );
+            $plugins->boot($arguments, $rootPath);
             $compiler = ScopeCompiler::activate($rootPath, ownsScopeHooks: true);
             $configuration = (new Builder)->build($phpunitArguments);
 
@@ -214,12 +259,14 @@ final class Runner
             $suite = (new TestSuiteBuilder)->build($configuration);
             (new TestSuiteFilterProcessor)->process($configuration, $suite);
             $laravel = $this->laravelRuntime($rootPath, $suite);
+            $coverage = CoverageAggregator::fromConfiguration($configuration);
             $runtime = TestCaseRuntime::fromSuite(
                 $compiler,
                 $suite,
                 $this->callback($laravel, 'bindTestCase'),
                 $configuration->reportUselessTests(),
                 capturePhpunitWarnings: true,
+                coverage: $coverage,
             );
             EventFacade::instance()->seal();
             $phpunitResult = TestResultFacade::result();
@@ -237,6 +284,18 @@ final class Runner
                         !== 'No tests found in class "Pest\\TestCases\\IgnorableTestCase".',
                 );
             $resolvers = $runtime->resolvers();
+            $plan = $compiler->suitePlan(
+                $compiler->files(),
+                ['default_test_timeout_ms' => $options['timeout_ms']],
+            );
+
+            if ($laravel instanceof EnvironmentRuntime) {
+                $laravel->assertPlanSupported($plan);
+                $plan['environment'] = $laravel->environmentPlan()->toArray();
+            }
+
+            $plugins->inspectPlan($plan);
+            $this->replay?->recordPlan($plan);
 
             $executor = new LifecycleExecutor(
                 new DroverScheduler(
@@ -251,12 +310,15 @@ final class Runner
                 afterDispatch: $this->callback($laravel, 'afterDispatch'),
             );
             $run = $executor->run(
-                $compiler->suitePlan($compiler->files()),
+                $plan,
                 $this->scopeContext($laravel),
             );
+            $coverage?->mergeAndReport();
         } catch (Throwable $throwable) {
             $runFailure = $throwable;
         } finally {
+            $coverage?->cleanup();
+
             while (ob_get_level() > $outputLevel) {
                 ob_end_clean();
             }
@@ -306,6 +368,9 @@ final class Runner
             $run['exit_code'] = $exitCode = 1;
         }
 
+        $plugins->reportRun($run);
+        $this->replay?->writeRun($run);
+
         if (fwrite(STDOUT, (new Renderer)->render($run)) === false) {
             throw new RuntimeException('Drove could not write its result.');
         }
@@ -313,7 +378,7 @@ final class Runner
         return $exitCode;
     }
 
-    private function laravelRuntime(string $rootPath, TestSuite $suite): ?object
+    private function laravelRuntime(string $rootPath, TestSuite $suite): ?EnvironmentRuntime
     {
         $class = 'Drove\\Laravel\\LaravelRuntime';
 
@@ -329,24 +394,14 @@ final class Runner
 
         $runtime = $boot->invoke(null, $rootPath, $suite);
 
-        if (! is_object($runtime)) {
+        if (! $runtime instanceof EnvironmentRuntime) {
             throw new RuntimeException('drove-laravel returned an invalid runtime.');
         }
 
-        foreach ([
-            'scopeContext',
-            'bindTestCase',
-            'beforeDispatch',
-            'enterDescendant',
-            'leaveDescendant',
-            'afterDispatch',
-        ] as $method) {
-            if (! method_exists($runtime, $method)) {
-                throw new RuntimeException(sprintf(
-                    'drove-laravel is missing %s().',
-                    $method,
-                ));
-            }
+        if (! method_exists($runtime, 'bindTestCase')) {
+            throw new RuntimeException(
+                'drove-laravel is missing bindTestCase().',
+            );
         }
 
         return $runtime;
@@ -368,45 +423,55 @@ final class Runner
 
         $runtime = $boot->invoke(null, $rootPath);
 
-        if ($runtime !== null && ! is_object($runtime)) {
+        if ($runtime !== null && ! $runtime instanceof EnvironmentRuntime) {
             throw new RuntimeException('drove-laravel returned an invalid pre-suite runtime.');
         }
     }
 
     private function callback(?object $runtime, string $method): ?Closure
     {
-        if ($runtime === null) {
+        if (! $runtime instanceof EnvironmentRuntime) {
             return null;
         }
 
         return new ReflectionMethod($runtime, $method)->getClosure($runtime);
     }
 
-    private function scopeContext(?object $runtime): ?ScopeContext
+    private function scopeContext(?EnvironmentRuntime $runtime): ?ScopeContext
     {
-        if ($runtime === null) {
+        if (! $runtime instanceof EnvironmentRuntime) {
             return null;
         }
 
-        $context = $this->callback($runtime, 'scopeContext')?->__invoke();
-
-        return $context instanceof ScopeContext
-            ? $context
-            : throw new RuntimeException('drove-laravel returned an invalid scope context.');
+        return $runtime->scopeContext();
     }
 
     /**
      * @param  list<string>  $arguments
-     * @return array{list<string>, int}
+     * @return array{
+     *     phpunit_arguments: list<string>,
+     *     processes: int,
+     *     timeout_ms: int,
+     *     replay: ?string,
+     *     replay_on_failure: bool
+     * }
      */
     private function arguments(array $arguments): array
     {
         $phpunitArguments = [];
         $parallel = false;
         $processes = null;
+        $timeoutMs = 0;
+        $replay = null;
+        $replayOnFailure = false;
         $literal = false;
+        $skip = [];
 
         foreach ($arguments as $index => $argument) {
+            if (isset($skip[$index])) {
+                continue;
+            }
+
             if ($literal || $index === 0) {
                 $phpunitArguments[] = $argument;
 
@@ -432,11 +497,8 @@ final class Runner
                 }
 
                 $processes = $this->processes($arguments[$index + 1]);
+                $skip[$index + 1] = true;
 
-                continue;
-            }
-
-            if ($index > 1 && $arguments[$index - 1] === '--processes') {
                 continue;
             }
 
@@ -450,6 +512,73 @@ final class Runner
                 continue;
             }
 
+            if ($argument === '--drove-timeout-ms') {
+                if ($timeoutMs !== 0 || ! isset($arguments[$index + 1])) {
+                    throw new InvalidArgumentException(
+                        'Drove accepts one positive --drove-timeout-ms value.',
+                    );
+                }
+
+                $timeoutMs = $this->positiveInteger(
+                    $arguments[$index + 1],
+                    '--drove-timeout-ms',
+                );
+                $skip[$index + 1] = true;
+
+                continue;
+            }
+
+            if (str_starts_with($argument, '--drove-timeout-ms=')) {
+                if ($timeoutMs !== 0) {
+                    throw new InvalidArgumentException(
+                        'Drove accepts --drove-timeout-ms only once.',
+                    );
+                }
+
+                $timeoutMs = $this->positiveInteger(
+                    substr($argument, strlen('--drove-timeout-ms=')),
+                    '--drove-timeout-ms',
+                );
+
+                continue;
+            }
+
+            if (in_array($argument, ['--replay', '--replay-on-failure'], true)) {
+                $value = $arguments[$index + 1] ?? null;
+
+                if ($replay !== null
+                    || ! is_string($value)
+                    || $value === ''
+                    || str_starts_with($value, '--')) {
+                    throw new InvalidArgumentException(
+                        'Drove accepts one replay artifact path.',
+                    );
+                }
+
+                $replay = $value;
+                $replayOnFailure = $argument === '--replay-on-failure';
+                $skip[$index + 1] = true;
+
+                continue;
+            }
+
+            foreach (['--replay=' => false, '--replay-on-failure=' => true] as $prefix => $failureOnly) {
+                if (! str_starts_with($argument, $prefix)) {
+                    continue;
+                }
+
+                if ($replay !== null) {
+                    throw new InvalidArgumentException(
+                        'Drove accepts one replay artifact path.',
+                    );
+                }
+
+                $replay = substr($argument, strlen($prefix));
+                $replayOnFailure = $failureOnly;
+
+                continue 2;
+            }
+
             $phpunitArguments[] = $argument;
         }
 
@@ -458,22 +587,51 @@ final class Runner
         }
 
         return [
-            $phpunitArguments,
-            $parallel ? ($processes ?? Options::getNumberOfCPUCores()) : 1,
+            'phpunit_arguments' => $phpunitArguments,
+            'processes' => $parallel ? ($processes ?? Options::getNumberOfCPUCores()) : 1,
+            'timeout_ms' => $timeoutMs,
+            'replay' => $replay,
+            'replay_on_failure' => $replayOnFailure,
         ];
     }
 
     private function processes(string $value): int
     {
-        $processes = filter_var($value, FILTER_VALIDATE_INT, [
+        return $this->positiveInteger($value, '--processes');
+    }
+
+    /**
+     * @param  list<string>  $arguments
+     */
+    private function hasOption(array $arguments, string $option): bool
+    {
+        foreach (array_slice($arguments, 1) as $argument) {
+            if ($argument === '--') {
+                return false;
+            }
+
+            if ($argument === $option) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function positiveInteger(string $value, string $option): int
+    {
+        $integer = filter_var($value, FILTER_VALIDATE_INT, [
             'options' => ['min_range' => 1, 'max_range' => PHP_INT_MAX],
         ]);
 
-        if (! is_int($processes)) {
-            throw new InvalidArgumentException('Drove requires a positive --processes value.');
+        if (! is_int($integer)) {
+            throw new InvalidArgumentException(sprintf(
+                'Drove requires a positive %s value.',
+                $option,
+            ));
         }
 
-        return $processes;
+        return $integer;
     }
 
     /**

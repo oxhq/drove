@@ -16,22 +16,22 @@ case "$target" in
         # Pest is the inherited source surface in this fork, not an external checkout.
         commit=
         expected_files=143
-        required_directories="tests/Unit tests/Features"
+        set -- tests/Unit tests/Features
         ;;
     invoiceshelf)
         commit=403a4d67225a153838ec126c484339abf60229d1
         expected_files=47
-        required_directories="tests/Unit tests/Feature/Customer"
+        set -- tests/Unit tests/Feature/Customer
         ;;
     livewire)
         commit=9c1450739d30c9b0b223ad6512be2a33f8f62f96
         expected_files=20
-        required_directories="src"
+        set -- src
         ;;
     filament)
         commit=e9348b2e3792088ee877068116b6c1e1559a7df8
         expected_files=39
-        required_directories="tests/src/Support"
+        set -- tests/src/Support
         ;;
     *)
         echo "usage: $0 pest|invoiceshelf|livewire|filament [corpus-root]" >&2
@@ -52,13 +52,13 @@ if [ -n "$commit" ]; then
         exit 2
     fi
 
-    if [ -n "$(git status --porcelain -- $required_directories)" ]; then
+    if [ -n "$(git status --porcelain -- "$@")" ]; then
         echo "corpus selection roots contain uncommitted changes" >&2
         exit 2
     fi
 fi
 
-for directory in $required_directories; do
+for directory in "$@"; do
     if [ ! -d "$directory" ]; then
         echo "corpus directory does not exist: $directory" >&2
         exit 2

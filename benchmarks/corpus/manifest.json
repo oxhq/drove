@@ -1,12 +1,28 @@
 {
-    "schema_version": 2,
-    "proven_drove_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
+    "schema_version": 3,
+    "initial_proof_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
+    "release_overlay_version": "0.4.0-alpha.1",
     "ladder": [
         "pest",
         "invoiceshelf",
         "livewire",
         "filament"
     ],
+    "hosted_gate": {
+        "smoke": [
+            "pest",
+            "invoiceshelf"
+        ],
+        "full": [
+            "livewire",
+            "filament"
+        ],
+        "full_triggers": [
+            "schedule",
+            "workflow_dispatch",
+            "version_tag"
+        ]
+    },
     "classifications": {
         "SUPPORTED": "The selected cases must complete with the same pass, fail, skip, and incomplete semantics.",
         "EXPLICITLY_UNSUPPORTED": "Drove must reject before any selected test body executes or persistent application state is mutated.",
@@ -24,6 +40,16 @@
             "tag": "v5.0.1",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "hosted_gate_matrix": {
+                "full": {
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        8
+                    ]
+                }
+            },
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh pest .",
                 "roots": [
@@ -63,6 +89,20 @@
             "commit": "403a4d67225a153838ec126c484339abf60229d1",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "dependency_lock": {
+                "path": "locks/invoiceshelf.lock",
+                "sha256": "b7eb7b86d205a5dbb9f985a56e756882af60eaa5913a095187fa65fcb0d98f47"
+            },
+            "hosted_gate_matrix": {
+                "full": {
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        8
+                    ]
+                }
+            },
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh invoiceshelf /checkout",
                 "roots": [
@@ -73,7 +113,8 @@
                 "cases": 202
             },
             "dependency_uplift": {
-                "pest_frontend": "oxhq/drove 0.1.x-dev",
+                "pest_frontend": "oxhq/drove 0.4.0-alpha.1",
+                "drove_laravel": "oxhq/drove-laravel 0.4.0-alpha.1",
                 "pest_plugin_laravel": "5.0.0",
                 "pest_plugin_faker": "5.0.0",
                 "phpunit": "13.2.4",
@@ -107,6 +148,10 @@
             "commit": "9c1450739d30c9b0b223ad6512be2a33f8f62f96",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "dependency_lock": {
+                "path": "locks/livewire.lock",
+                "sha256": "d54b9564f5364cd57f6b0c37eaa4e910abe4f3bf611e19f43b6713cc2862ce52"
+            },
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh livewire /checkout",
                 "rule": "the lexicographically first 20 src/**/*UnitTest.php files",
@@ -114,8 +159,8 @@
                 "cases": 288
             },
             "dependency_uplift": {
-                "drove": "0.1.x-dev",
-                "drove_laravel": "1.0.x-dev",
+                "drove": "0.4.0-alpha.1",
+                "drove_laravel": "0.4.0-alpha.1",
                 "phpunit": "13.2.4",
                 "laravel": "13.23.0",
                 "orchestra_testbench_observed": "11.1.0",
@@ -139,6 +184,20 @@
                 "incomplete": 3,
                 "exit": 0
             },
+            "hosted_gate_matrix": {
+                "full": {
+                    "state": "sqlite-memory",
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        1,
+                        2,
+                        4,
+                        8
+                    ]
+                }
+            },
             "proof_boundary": [
                 "The selected files are ordinary PHPUnit cases running on Orchestra Testbench, not Pest cases.",
                 "All 20 selected source files and the Testbench bootstrap are unchanged from the pinned Livewire commit.",
@@ -154,6 +213,31 @@
             "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "dependency_lock": {
+                "path": "locks/filament.lock",
+                "sha256": "07470ae723c2b11e5ac330e9ee3d54676fabb3ee58fb83e98a27834d19d4797b"
+            },
+            "hosted_gate_matrix": {
+                "nonserial": {
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        1,
+                        2,
+                        4,
+                        8
+                    ]
+                },
+                "serial": {
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        1
+                    ]
+                }
+            },
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh filament /checkout",
                 "root": "tests/src/Support",
@@ -182,8 +266,8 @@
                 "total_assertions": 1050
             },
             "dependency_uplift": {
-                "drove": "0.1.x-dev",
-                "drove_laravel": "1.0.x-dev",
+                "drove": "0.4.0-alpha.1",
+                "drove_laravel": "0.4.0-alpha.1",
                 "pest_plugin_laravel": "5.0.0",
                 "pest_plugin_browser": "5.0.0",
                 "phpunit": "13.2.4",

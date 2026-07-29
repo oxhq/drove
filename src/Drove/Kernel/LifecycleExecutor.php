@@ -120,6 +120,13 @@ final readonly class LifecycleExecutor
 
             return $test;
         }, $run['tests']);
+        $root = $run['root'];
+        unset($root['telemetry']);
+        $scopes = array_map(static function (array $scope): array {
+            unset($scope['telemetry']);
+
+            return $scope;
+        }, $run['scopes']);
 
         $events = array_map(static function (array $event): array {
             unset(
@@ -137,8 +144,8 @@ final readonly class LifecycleExecutor
         return [
             'status' => $run['status'],
             'exit_code' => $run['exit_code'],
-            'root' => $run['root'],
-            'scopes' => $run['scopes'],
+            'root' => $root,
+            'scopes' => $scopes,
             'tests' => $tests,
             'events' => $events,
         ];
@@ -306,7 +313,7 @@ final readonly class LifecycleExecutor
                 'kind' => 'scope',
                 'scope_id' => $id,
                 'scopes' => [...$scopeIds, $id],
-                'timeout_ms' => $child['timeout_ms'] ?? 30_000,
+                'timeout_ms' => $child['timeout_ms'] ?? 0,
                 'permit' => false,
             ];
         }
@@ -399,6 +406,8 @@ final readonly class LifecycleExecutor
                 $child = $transport['status'] === 'passed' && is_array($transport['value'])
                     ? $transport['value']
                     : $this->transportScopeFailure($job['node'], $transport);
+                $child['scope']['telemetry'] = $transport['telemetry'];
+                $child['scopes'][0]['telemetry'] = $transport['telemetry'];
 
                 foreach (['stdout', 'stderr'] as $stream) {
                     $child['scope'][$stream] = ($child['scope'][$stream] ?? '').($transport[$stream] ?? '');

@@ -1,8 +1,9 @@
-# Drover Phase 1 native scheduler
+# Drover native scheduler
 
-This directory contains the source-built Linux native execution boundary used
-by `Drove\Kernel\DroverScheduler`. It is deliberately not a prebuilt extension
-distribution.
+This directory contains the Linux/macOS native execution boundary used by
+`Drove\Kernel\DroverScheduler`. Tagged experimental releases provide
+checksummed x86_64 and ARM64 libraries; `drove-install-native` installs the
+matching library into the Composer package.
 
 Rust owns:
 
@@ -25,7 +26,11 @@ Scope hosts do not consume a global test permit. Nested maps use the same
 engine-backed permit pools, so concurrency one can enter a scope and still run
 its descendants without a self-deadlock.
 
-## Proof
+## Proof from source
+
+The Composer archive includes this runtime note but excludes Rust sources and
+development fixtures. Run these commands from the matching tagged
+[source checkout](https://github.com/oxhq/drove/tree/v0.4.0-alpha.1).
 
 The standalone ABI smoke is:
 
@@ -55,11 +60,11 @@ tree cleanup, and native child `_exit` behavior.
 
 ## Intentional limits
 
-- Linux only.
-- FFI is the Phase 1 bridge; extension packaging remains separate.
+- Windows is unsupported because Drover requires POSIX `fork()` and process
+  groups.
+- FFI remains the native bridge; Drove is not a PHP extension.
 - The scheduler is single-threaded and uses `poll()`, not pidfds/epoll.
-- Bail policy, replay metadata, coverage merging, and an output artifact store
-  remain outside this slice.
+- Bail policy and a general output artifact store remain outside this slice.
 - Protocol v1 limits an individual frame to 1 MiB and aggregate stdout,
   stderr, or value data to 64 MiB. `ChildProtocol` chunks normal payloads.
 - A Rust panic in the in-process library is not recoverable in this slice.
