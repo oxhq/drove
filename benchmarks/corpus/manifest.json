@@ -41,12 +41,20 @@
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
             "hosted_gate_matrix": {
-                "full": {
+                "nonserial": {
                     "baseline": [
                         1
                     ],
                     "drove": [
                         8
+                    ]
+                },
+                "serial": {
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        1
                     ]
                 }
             },
@@ -57,7 +65,22 @@
                     "tests/Features"
                 ],
                 "files": 143,
-                "cases": 797
+                "cases": 797,
+                "nonserial": {
+                    "selector": "sh benchmarks/corpus/select.sh pest-nonserial .",
+                    "files": 140,
+                    "cases": 785
+                },
+                "serial": {
+                    "selector": "sh benchmarks/corpus/select.sh pest-serial .",
+                    "files": 3,
+                    "cases": 12,
+                    "source_files": [
+                        "tests/Features/Expect/toBeFile.php",
+                        "tests/Features/Expect/toBeReadableFile.php",
+                        "tests/Features/Expect/toBeWritableFile.php"
+                    ]
+                }
             },
             "baseline": {
                 "runner": "php bin/pest with the selector output as explicit paths",
@@ -65,7 +88,20 @@
                 "failed": 0,
                 "skipped": 71,
                 "assertions": 1718,
-                "exit": 0
+                "exit": 0,
+                "nonserial": {
+                    "passed": 714,
+                    "failed": 0,
+                    "skipped": 71,
+                    "assertions": 1690,
+                    "exit": 0
+                },
+                "serial": {
+                    "passed": 12,
+                    "failed": 0,
+                    "assertions": 28,
+                    "exit": 0
+                }
             },
             "drove": {
                 "runner": "php bin/drove --parallel --processes=8 with the same explicit paths",
@@ -73,11 +109,25 @@
                 "failed": 0,
                 "skipped": 71,
                 "assertions": 1718,
-                "exit": 0
+                "exit": 0,
+                "nonserial": {
+                    "passed": 714,
+                    "failed": 0,
+                    "skipped": 71,
+                    "assertions": 1690,
+                    "exit": 0
+                },
+                "serial": {
+                    "passed": 12,
+                    "failed": 0,
+                    "assertions": 28,
+                    "exit": 0
+                }
             },
             "proof_boundary": [
                 "The proof runs Pest's inherited tests from the Drove checkout, not an independently installed Pest consumer.",
                 "142 selected files are byte-identical to v5.0.1; tests/Features/Expect/pipes.php differs only by removal of a redundant property initializer.",
+                "Three unchanged files share /tmp/fake.file and are therefore compared in an explicit one-process cohort; the remaining 140 files run at eight processes.",
                 "Drove and Pest both report 1718 assertions for the selected cases.",
                 "Shared-host wall times are diagnostics only; no performance claim is recorded."
             ]

@@ -13,6 +13,18 @@ use std::time::Duration;
 
 const GLOBAL_POOL: &str = "@global";
 const MAX_QUEUE_CAPACITY: usize = 1_000_000;
+#[cfg(target_os = "macos")]
+const MAX_DARWIN_PROCESS_GROUP_PIDS: usize = 65_536;
+
+#[cfg(target_os = "macos")]
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_listpgrppids(
+        pgrpid: libc::pid_t,
+        buffer: *mut libc::c_void,
+        buffersize: libc::c_int,
+    ) -> libc::c_int;
+}
 
 #[derive(Clone, Copy, Debug)]
 struct PermitPool {
@@ -1431,11 +1443,113 @@ fn wait_blocking(pid: libc::pid_t) {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn signal_enumerated_process_group<F>(
+    pgid: libc::pid_t,
+    signal: i32,
+    members: &[libc::pid_t],
+    returned: usize,
+    mut signal_member: F,
+) -> Result<(), String>
+where
+    F: FnMut(libc::pid_t) -> Result<(), io::Error>,
+{
+    if returned == 0 {
+        return Err(format!(
+            "Darwin returned no members for process group {pgid}."
+        ));
+    }
+
+    let listed = &members[..returned.min(members.len())];
+    let mut first_error = None;
+
+    if returned >= members.len() {
+        first_error = Some(format!(
+            "Darwin returned {returned} PIDs for the {}-PID buffer for process group {pgid}; \
+             enumeration may be truncated.",
+            members.len()
+        ));
+    }
+
+    if listed.iter().any(|member| *member <= 0) && first_error.is_none() {
+        first_error = Some(format!(
+            "Darwin returned an invalid member for process group {pgid}."
+        ));
+    }
+
+    if !listed.contains(&pgid) && first_error.is_none() {
+        first_error = Some(format!(
+            "Darwin omitted the retained leader from process group {pgid}."
+        ));
+    }
+
+    for member in listed.iter().filter(|member| **member > 0) {
+        if let Err(error) = signal_member(*member) {
+            if error.raw_os_error() != Some(libc::ESRCH) && first_error.is_none() {
+                first_error = Some(format!(
+                    "Drover could not send signal {signal} to Darwin process-group member \
+                     {member}: {error}."
+                ));
+            }
+        }
+    }
+
+    first_error.map_or(Ok(()), Err)
+}
+
+#[cfg(target_os = "macos")]
+fn signal_darwin_process_group_members(pgid: libc::pid_t, signal: i32) -> Result<(), String> {
+    let buffer_bytes = MAX_DARWIN_PROCESS_GROUP_PIDS
+        .checked_mul(std::mem::size_of::<libc::pid_t>())
+        .and_then(|bytes| libc::c_int::try_from(bytes).ok())
+        .ok_or_else(|| format!("Darwin process group {pgid} exceeded its buffer bound."))?;
+    let mut members = vec![0; MAX_DARWIN_PROCESS_GROUP_PIDS];
+
+    unsafe {
+        *libc::__error() = 0;
+    }
+    let returned = unsafe {
+        proc_listpgrppids(
+            pgid,
+            members.as_mut_ptr().cast::<libc::c_void>(),
+            buffer_bytes,
+        )
+    };
+    let list_error = io::Error::last_os_error();
+
+    if returned <= 0 {
+        return if list_error.raw_os_error() == Some(0) {
+            Err(format!(
+                "Darwin returned no members for process group {pgid}."
+            ))
+        } else {
+            Err(format!(
+                "Darwin could not enumerate process group {pgid}: {list_error}."
+            ))
+        };
+    }
+
+    signal_enumerated_process_group(
+        pgid,
+        signal,
+        &members,
+        usize::try_from(returned)
+            .map_err(|_| format!("Darwin returned an invalid count for process group {pgid}."))?,
+        |member| {
+            if unsafe { libc::kill(member, signal) } == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        },
+    )
+}
+
 fn signal_process_tree(
     pid: libc::pid_t,
     signal: i32,
     allow_direct_child: bool,
-    zombie_anchor: bool,
+    _zombie_anchor: bool,
 ) -> Result<(), String> {
     if unsafe { libc::kill(-pid, signal) } == 0 {
         return Ok(());
@@ -1453,16 +1567,18 @@ fn signal_process_tree(
         };
     }
 
-    if unsafe { libc::kill(pid, signal) } == 0 {
-        // Darwin can reject a group SIGKILL when its retained leader is a zombie.
-        if cfg!(target_os = "macos")
-            && signal == libc::SIGKILL
-            && zombie_anchor
-            && group_error.raw_os_error() == Some(libc::EPERM)
-        {
-            return Ok(());
-        }
+    #[cfg(target_os = "macos")]
+    if signal == libc::SIGKILL && _zombie_anchor && group_error.raw_os_error() == Some(libc::EPERM)
+    {
+        return signal_darwin_process_group_members(pid, signal).map_err(|error| {
+            format!(
+                "Drover could not send signal {signal} to process group {pid}: {group_error}; \
+                 {error}"
+            )
+        });
+    }
 
+    if unsafe { libc::kill(pid, signal) } == 0 {
         return Err(format!(
             "Drover could not send signal {signal} to process group {pid}: {group_error}; \
              the child was signaled directly but descendant cleanup is not guaranteed."
@@ -1876,6 +1992,48 @@ mod tests {
 
         assert!(error.contains("process group"));
         assert!(error.contains("or child"));
+    }
+
+    #[test]
+    fn darwin_group_sweep_tolerates_exit_races_and_rejects_incomplete_enumeration() {
+        let pgid = 40;
+        let members = [pgid, 41, 42, 43, 0];
+        let mut attempted = Vec::new();
+        let error = signal_enumerated_process_group(pgid, libc::SIGKILL, &members, 4, |member| {
+            attempted.push(member);
+
+            match member {
+                41 => Err(io::Error::from_raw_os_error(libc::ESRCH)),
+                42 => Err(io::Error::from_raw_os_error(libc::EPERM)),
+                _ => Ok(()),
+            }
+        })
+        .unwrap_err();
+
+        assert_eq!(attempted, vec![40, 41, 42, 43]);
+        assert!(error.contains("member 42"));
+
+        let mut attempted = Vec::new();
+        let error =
+            signal_enumerated_process_group(pgid, libc::SIGKILL, &[pgid, 41], 2, |member| {
+                attempted.push(member);
+
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(attempted, vec![40, 41]);
+        assert!(error.contains("may be truncated"));
+
+        let mut attempted = Vec::new();
+        let error =
+            signal_enumerated_process_group(pgid, libc::SIGKILL, &[41, 0, 0], 2, |member| {
+                attempted.push(member);
+
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(attempted, vec![41]);
+        assert!(error.contains("invalid member"));
     }
 
     #[test]
