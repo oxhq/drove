@@ -10,7 +10,7 @@ as an execution target.
 
 ```bash
 composer install
-cargo test --manifest-path native/drover/Cargo.toml --locked
+cargo test --manifest-path native/drover/Cargo.toml --locked -- --test-threads=1
 ```
 
 ## Checks
