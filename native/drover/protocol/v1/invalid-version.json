@@ -1,0 +1,1 @@
+{"protocol":"drover.task","version":2,"run_id":"golden-run","task_id":"task:golden","sequence":2,"type":"task.finished","monotonic_ns":300,"payload":{"status":"passed","value":{"ok":true}}}

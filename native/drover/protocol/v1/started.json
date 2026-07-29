@@ -1,0 +1,1 @@
+{"protocol":"drover.task","version":1,"run_id":"golden-run","task_id":"task:golden","sequence":0,"type":"task.started","monotonic_ns":100,"payload":{"worker":"php"}}
