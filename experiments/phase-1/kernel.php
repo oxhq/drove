@@ -530,6 +530,29 @@ if ($backend === 'drover') {
         );
     }
 
+    $previousSigchld = pcntl_signal_get_handler(SIGCHLD);
+    $sigchldRejected = false;
+
+    try {
+        pcntl_signal(SIGCHLD, SIG_IGN);
+        $exitProbe->map(
+            [[
+                'id' => 'ignored-sigchld',
+                'kind' => 'test',
+                'scope_id' => 'root',
+                'scopes' => ['root'],
+                'timeout_ms' => 100,
+                'permit' => true,
+            ]],
+            static fn (): null => null,
+        );
+    } catch (RuntimeException $exception) {
+        $sigchldRejected = str_contains($exception->getMessage(), 'default waitable-child disposition');
+    } finally {
+        pcntl_signal(SIGCHLD, $previousSigchld);
+    }
+
+    $assert($sigchldRejected, 'Drover accepted a non-waitable SIGCHLD disposition.');
     $nativeChildExitChecked = true;
 }
 

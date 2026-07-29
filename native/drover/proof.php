@@ -15,6 +15,55 @@ $assert = static function (bool $condition, string $message): void {
     }
 };
 
+$readDescendantState = static function (string $path, string $label): array {
+    $deadline = hrtime(true) + 1_000_000_000;
+
+    do {
+        $raw = @file_get_contents($path);
+        $pidMatch = [];
+        $pgidMatch = [];
+
+        if (is_string($raw)
+            && preg_match('/\bpid=(\d+)\b/', $raw, $pidMatch) === 1
+            && preg_match('/\bpgid=(\d+)\b/', $raw, $pgidMatch) === 1
+            && (int) $pidMatch[1] > 1
+            && (int) $pgidMatch[1] > 1) {
+            return [
+                'pid' => (int) $pidMatch[1],
+                'pgid' => (int) $pgidMatch[1],
+            ];
+        }
+
+        usleep(1_000);
+    } while (hrtime(true) < $deadline);
+
+    throw new RuntimeException($label.' did not publish complete process state.');
+};
+
+$assertProcessGone = static function (int $pid, string $message): void {
+    $deadline = hrtime(true) + 2_000_000_000;
+
+    do {
+        $status = 0;
+
+        if (@pcntl_waitpid($pid, $status, WNOHANG) === $pid) {
+            return;
+        }
+
+        if (! @posix_kill($pid, 0)) {
+            if (posix_get_last_error() === 3) {
+                return;
+            }
+
+            throw new RuntimeException($message.' Process lookup failed unexpectedly.');
+        }
+
+        usleep(1_000);
+    } while (hrtime(true) < $deadline);
+
+    throw new RuntimeException($message);
+};
+
 $library = $argv[1]
     ?? (getenv('DROVER_LIBRARY') ?: null)
     ?? '/usr/local/lib/'.(PHP_OS_FAMILY === 'Darwin' ? 'libdrover.dylib' : 'libdrover.so');
@@ -135,8 +184,13 @@ $runId = 'native-abi-smoke';
 $timeoutProbe = '/tmp/drover-timeout-descendant-'.getmypid();
 $readyPath = $timeoutProbe.'.ready';
 $escapedPath = $timeoutProbe.'.escaped';
+$crashProbe = '/tmp/drover-crash-descendant-'.getmypid();
+$crashReadyPath = $crashProbe.'.ready';
+$crashEscapedPath = $crashProbe.'.escaped';
 @unlink($readyPath);
 @unlink($escapedPath);
+@unlink($crashReadyPath);
+@unlink($crashEscapedPath);
 $prepared = ['items' => ['root']];
 $tasks = [
     [
@@ -215,6 +269,50 @@ $tasks = [
 
             usleep(2_000_000);
             throw new RuntimeException('The timed-out callback resumed.');
+        },
+    ],
+    [
+        'id' => 'task:crash-tree',
+        'kind' => 'test',
+        'scope_id' => 'scope:serial',
+        'scopes' => ['scope:root', 'scope:serial'],
+        'timeout_ms' => 2_000,
+        'callback' => static function () use (
+            $crashEscapedPath,
+            $crashReadyPath,
+            $readDescendantState,
+        ): never {
+            $descendant = pcntl_fork();
+
+            if ($descendant === -1) {
+                throw new RuntimeException('The crash descendant could not fork.');
+            }
+
+            if ($descendant === 0) {
+                if (! pcntl_signal(SIGTERM, SIG_IGN)) {
+                    exit(70);
+                }
+
+                $descendantState = sprintf(
+                    'pid=%d ppid=%d pgid=%d started_ns=%d',
+                    getmypid(),
+                    posix_getppid(),
+                    posix_getpgrp(),
+                    hrtime(true),
+                );
+                pcntl_exec('/bin/sh', [
+                    '-c',
+                    'printf %s '.escapeshellarg($descendantState)
+                        .' > '.escapeshellarg($crashReadyPath)
+                        .'; sleep 1; printf escaped > '.escapeshellarg($crashEscapedPath),
+                ]);
+                file_put_contents($crashEscapedPath, 'exec_failed');
+                exit(71);
+            }
+
+            $readDescendantState($crashReadyPath, 'The crash descendant');
+            posix_kill(getmypid(), SIGKILL);
+            exit(72);
         },
     ],
 ];
@@ -356,8 +454,14 @@ $assert(
         $timeoutFailure['message'] ?? 'missing',
     ),
 );
-$assert(file_exists($readyPath), 'The timeout descendant did not start before cleanup.');
-usleep(1_200_000);
+$readyState = $readDescendantState($readyPath, 'The timeout descendant');
+$assert(
+    $readyState['pgid'] === ($results['task:timeout-tree']['telemetry']['pgid'] ?? null)
+        && ($results['task:timeout-tree']['telemetry']['pid'] ?? null)
+            !== ($results['task:timeout-tree']['telemetry']['pgid'] ?? null),
+    'The timeout executor did not run beneath its dedicated process-group anchor.',
+);
+$assertProcessGone($readyState['pid'], 'A timed-out descendant remained alive after cleanup.');
 $escapedState = @file_get_contents($escapedPath);
 $assert(
     $escapedState === false,
@@ -368,6 +472,23 @@ $assert(
     ),
 );
 @unlink($readyPath);
+
+$crashFailure = $results['task:crash-tree']['failure'] ?? [];
+$assert(
+    ($crashFailure['kind'] ?? null) === 'signal_termination'
+        && ($results['task:crash-tree']['telemetry']['signal'] ?? null) === SIGKILL,
+    'A crashed executor did not preserve its signal identity.',
+);
+$crashState = $readDescendantState($crashReadyPath, 'The crash descendant');
+$assert(
+    $crashState['pgid'] === ($results['task:crash-tree']['telemetry']['pgid'] ?? null)
+        && ($results['task:crash-tree']['telemetry']['pid'] ?? null)
+            !== ($results['task:crash-tree']['telemetry']['pgid'] ?? null),
+    'The crashed executor did not run beneath its dedicated process-group anchor.',
+);
+$assertProcessGone($crashState['pid'], 'A crashed executor descendant remained alive after cleanup.');
+$assert(! file_exists($crashEscapedPath), 'A crashed executor descendant escaped its process group.');
+@unlink($crashReadyPath);
 
 $interruptionReady = '/tmp/drover-active-interruption-'.getmypid().'.ready';
 $interruptionDescendantReady = '/tmp/drover-active-interruption-'.getmypid().'.descendant-ready';
@@ -399,7 +520,7 @@ $interruptionDeadline = hrtime(true) + 5_000_000_000;
 
 try {
     while (hrtime(true) < $interruptionDeadline) {
-        if (! $interruptionSent && file_exists($interruptionReady)) {
+        if (! $interruptionSent && @file_get_contents($interruptionReady) === 'ready') {
             $assert(
                 $ffi->drover_map_interrupt($interruptionMap, $interruptionSignal) === 0,
                 'Drover rejected an active interruption.',
@@ -414,18 +535,22 @@ try {
         }
 
         if ($role === DROVER_ROLE_CHILD) {
-            $script = 'trap "" TERM; printf ready > '
+            $script = 'trap "" TERM; printf "pid=%s ppid=%s pgid=%s" "$$" "$PPID" '
+                .escapeshellarg((string) posix_getpgrp())
+                .' > '
                 .escapeshellarg($interruptionDescendantReady)
                 .'; sleep 0.8; printf escaped > '
                 .escapeshellarg($interruptionEscaped)
                 .'; while :; do sleep 1; done';
-            exec('sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &');
-            $readyDeadline = hrtime(true) + 1_000_000_000;
+            $launchOutput = [];
+            $launchStatus = 0;
+            exec('sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &', $launchOutput, $launchStatus);
 
-            while (! file_exists($interruptionDescendantReady) && hrtime(true) < $readyDeadline) {
-                usleep(1_000);
+            if ($launchStatus !== 0) {
+                exit(73);
             }
 
+            $readDescendantState($interruptionDescendantReady, 'The active interruption descendant');
             file_put_contents($interruptionReady, 'ready');
 
             while (true) {
@@ -472,7 +597,18 @@ $assert(
     'An active interruption leaked its concurrency permit.',
 );
 $ffi->drover_engine_free($interruptionEngine);
-usleep(1_000_000);
+$interruptionState = $readDescendantState(
+    $interruptionDescendantReady,
+    'The active interruption descendant',
+);
+$assert(
+    $interruptionState['pgid'] === ($interruptionResult['telemetry']['pgid'] ?? null),
+    'The actively interrupted descendant left its task process group.',
+);
+$assertProcessGone(
+    $interruptionState['pid'],
+    'An actively interrupted descendant remained alive after cleanup.',
+);
 $assert(! file_exists($interruptionEscaped), 'An actively interrupted descendant escaped its process group.');
 @unlink($interruptionReady);
 @unlink($interruptionDescendantReady);
