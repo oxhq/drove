@@ -195,14 +195,21 @@ $tasks = [
                     exit(70);
                 }
 
-                file_put_contents($readyPath, 'ready');
+                $descendantState = sprintf(
+                    'pid=%d ppid=%d pgid=%d started_ns=%d',
+                    getmypid(),
+                    posix_getppid(),
+                    posix_getpgrp(),
+                    hrtime(true),
+                );
+                file_put_contents($readyPath, $descendantState);
                 $escapeAt = hrtime(true) + 1_000_000_000;
 
                 while (($remaining = $escapeAt - hrtime(true)) > 0) {
                     usleep(max(1, min(100_000, intdiv($remaining, 1_000))));
                 }
 
-                file_put_contents($escapedPath, 'escaped');
+                file_put_contents($escapedPath, $descendantState.' escaped_ns='.hrtime(true));
                 exit(0);
             }
 
@@ -343,7 +350,15 @@ $assert($results['task:php-exception']['failure']['kind'] === 'php_exception', '
 $assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout failure drifted.');
 $assert(file_exists($readyPath), 'The timeout descendant did not start before cleanup.');
 usleep(1_200_000);
-$assert(! file_exists($escapedPath), 'A timed-out descendant escaped its process group.');
+$escapedState = @file_get_contents($escapedPath);
+$assert(
+    $escapedState === false,
+    sprintf(
+        'A timed-out descendant escaped its process group (task_pid=%s; %s).',
+        $results['task:timeout-tree']['telemetry']['pid'] ?? 'unknown',
+        $escapedState ?: 'descendant state unavailable',
+    ),
+);
 @unlink($readyPath);
 
 $interruptionReady = '/tmp/drover-active-interruption-'.getmypid().'.ready';
