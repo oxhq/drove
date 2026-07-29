@@ -602,7 +602,7 @@ final class ScopeCompiler
             ));
             $runtimeTests[] = $test + [
                 'source' => $source['source'],
-                'timeout_ms' => $configuration['test_timeouts'][$test['id']] ?? 1_000,
+                'timeout_ms' => $configuration['test_timeouts'][$test['id']] ?? 0,
             ];
         }
 

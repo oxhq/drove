@@ -6,11 +6,13 @@ namespace Drove\Pest;
 
 use Closure;
 use Drove\Kernel\TestOutcome;
+use InvalidArgumentException;
 use LogicException;
 use OutOfBoundsException;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\TestSuite;
+use PHPUnit\Metadata\Parser\Registry as MetadataRegistry;
 use ReflectionClass;
 use RuntimeException;
 use Throwable;
@@ -44,24 +46,26 @@ final class TestCaseRuntime
 
         foreach ($suite->collect() as $case) {
             if (! $case instanceof TestCase) {
-                continue;
+                throw new InvalidArgumentException('Drove only supports generated Pest cases.');
             }
 
             $reflection = new ReflectionClass($case);
 
             if (! $reflection->hasProperty('__filename')) {
-                continue;
+                throw new InvalidArgumentException('Drove only supports generated Pest cases.');
             }
 
             $filename = $reflection->getStaticPropertyValue('__filename');
 
             if (! is_string($filename)) {
-                continue;
+                throw new RuntimeException('Drove received an invalid generated Pest case.');
             }
 
             if (! $compiler->hasPlan($filename)) {
-                continue;
+                throw new RuntimeException('Drove received an unplanned generated Pest case.');
             }
+
+            self::assertSupported($case, $reflection);
 
             $descriptor = $compiler->caseDescriptor(
                 $filename,
@@ -212,5 +216,43 @@ final class TestCaseRuntime
             'Generated Pest case %s failed without a Throwable.',
             $id,
         ));
+    }
+
+    /**
+     * @param  ReflectionClass<TestCase>  $reflection
+     */
+    private static function assertSupported(TestCase $case, ReflectionClass $reflection): void
+    {
+        if ($case->requires() !== []) {
+            throw new InvalidArgumentException('Drove does not support test dependencies yet.');
+        }
+
+        $metadata = MetadataRegistry::parser();
+
+        if ($metadata->forMethod($case::class, $case->name())->isRunInSeparateProcess()->isNotEmpty()) {
+            throw new InvalidArgumentException('Drove does not support PHPUnit process-isolation metadata yet.');
+        }
+
+        $class = $reflection;
+
+        while ($class instanceof ReflectionClass) {
+            if ($metadata->forClass($class->getName())->isRunTestsInSeparateProcesses()->isNotEmpty()) {
+                throw new InvalidArgumentException('Drove does not support PHPUnit process-isolation metadata yet.');
+            }
+
+            $class = $class->getParentClass();
+        }
+
+        $baseClass = $reflection->getParentClass();
+
+        if (! $baseClass instanceof ReflectionClass) {
+            throw new RuntimeException('Drove received an invalid generated Pest TestCase.');
+        }
+
+        foreach (['setUpBeforeClass', 'tearDownAfterClass'] as $method) {
+            if ($baseClass->getMethod($method)->getDeclaringClass()->getName() !== TestCase::class) {
+                throw new InvalidArgumentException('Drove does not support custom static TestCase lifecycle methods yet.');
+            }
+        }
     }
 }

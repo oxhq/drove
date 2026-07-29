@@ -120,9 +120,7 @@ final class Runner
         $previousArguments = $_SERVER['argv'] ?? null;
         $_SERVER['argv'] = $phpunitArguments;
         $outputLevel = ob_get_level();
-        $startedClasses = [];
         $runFailure = null;
-        $teardownFailure = null;
         $run = null;
 
         try {
@@ -133,21 +131,21 @@ final class Runner
             );
             $compiler = ScopeCompiler::activate($rootPath, ownsHooks: true);
             $configuration = (new Builder)->build($phpunitArguments);
+
+            if ($configuration->processIsolation()) {
+                throw new InvalidArgumentException('Drove does not support processIsolation from PHPUnit XML yet.');
+            }
+
+            if ($configuration->enforceTimeLimit()) {
+                throw new InvalidArgumentException('Drove does not support enforceTimeLimit from PHPUnit XML yet.');
+            }
+
             (new PhpHandler)->handle($configuration->php());
             (new BootstrapLoader)->handle($configuration);
             $suite = (new TestSuiteBuilder)->build($configuration);
             (new TestSuiteFilterProcessor)->process($configuration, $suite);
             $runtime = TestCaseRuntime::fromSuite($compiler, $suite);
             $resolvers = $runtime->resolvers();
-            $classes = array_values(array_unique(array_map(
-                static fn (array $resolver): string => $resolver['runtime']::class,
-                $resolvers,
-            )));
-
-            foreach ($classes as $class) {
-                $class::setUpBeforeClass();
-                $startedClasses[] = $class;
-            }
 
             $executor = new LifecycleExecutor(
                 new PcntlScheduler(
@@ -163,14 +161,6 @@ final class Runner
         } catch (Throwable $throwable) {
             $runFailure = $throwable;
         } finally {
-            foreach (array_reverse($startedClasses) as $class) {
-                try {
-                    $class::tearDownAfterClass();
-                } catch (Throwable $throwable) {
-                    $teardownFailure ??= $throwable;
-                }
-            }
-
             while (ob_get_level() > $outputLevel) {
                 ob_end_clean();
             }
@@ -186,10 +176,6 @@ final class Runner
 
         if ($runFailure instanceof Throwable) {
             throw $runFailure;
-        }
-
-        if ($teardownFailure instanceof Throwable) {
-            throw $teardownFailure;
         }
 
         $exitCode = $run['exit_code'] ?? null;
