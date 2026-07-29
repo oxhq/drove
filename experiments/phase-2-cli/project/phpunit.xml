@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php">
+    <testsuites>
+        <testsuite name="Fast">
+            <file>tests/FastTest.php</file>
+        </testsuite>
+        <testsuite name="Other">
+            <file>tests/OtherTest.php</file>
+        </testsuite>
+        <testsuite name="Failure">
+            <file>tests/FailingTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>
