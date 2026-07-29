@@ -184,26 +184,21 @@ $tasks = [
         'scopes' => ['scope:root', 'scope:serial'],
         'timeout_ms' => 500,
         'callback' => static function () use ($escapedPath, $readyPath): never {
-            $script = sprintf(
-                'if (! pcntl_signal(SIGTERM, SIG_IGN)) { exit(70); } '
-                    .'file_put_contents(%s, "ready"); '
-                    .'usleep(1_000_000); '
-                    .'file_put_contents(%s, "escaped");',
-                var_export($readyPath, true),
-                var_export($escapedPath, true),
-            );
-            $process = proc_open(
-                [PHP_BINARY, '-r', $script],
-                [
-                    0 => ['file', '/dev/null', 'r'],
-                    1 => ['file', '/dev/null', 'a'],
-                    2 => ['file', '/dev/null', 'a'],
-                ],
-                $pipes,
-            );
+            $descendant = pcntl_fork();
 
-            if (! is_resource($process)) {
-                throw new RuntimeException('The timeout descendant could not start.');
+            if ($descendant === -1) {
+                throw new RuntimeException('The timeout descendant could not fork.');
+            }
+
+            if ($descendant === 0) {
+                if (! pcntl_signal(SIGTERM, SIG_IGN)) {
+                    exit(70);
+                }
+
+                file_put_contents($readyPath, 'ready');
+                usleep(1_000_000);
+                file_put_contents($escapedPath, 'escaped');
+                exit(0);
             }
 
             usleep(2_000_000);
