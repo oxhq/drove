@@ -46,8 +46,8 @@ $scheduler = new class implements Scheduler
                 'status' => 'passed',
                 'failure' => null,
                 'value' => $value,
-                'stdout' => '',
-                'stderr' => '',
+                'stdout' => $task['kind'] === 'scope' ? 'scope-output' : '',
+                'stderr' => $task['kind'] === 'scope' ? 'scope-diagnostic' : '',
                 'events' => [],
                 'telemetry' => [
                     'pid' => getmypid(),
@@ -145,6 +145,7 @@ $bodies = [
     },
     $ids[4] => function (ScopeContext $context): never {
         $this->trace[] = 'body:'.$context->metadata()['test_id'];
+        echo 'descendant-output';
 
         throw new RuntimeException('original boom');
     },
@@ -172,8 +173,19 @@ $plan = [
             'after_each' => ['hook:after-each'],
             'after_all' => ['hook:after-all'],
         ],
-        'tests' => $tests,
-        'children' => [],
+        'tests' => array_slice($tests, 0, 4),
+        'children' => [[
+            'id' => 'scope:child',
+            'type' => 'describe',
+            'hooks' => [
+                'before_all' => [],
+                'before_each' => [],
+                'after_each' => [],
+                'after_all' => [],
+            ],
+            'tests' => [$tests[4]],
+            'children' => [],
+        ]],
     ],
 ];
 $executor = new LifecycleExecutor(
@@ -186,6 +198,7 @@ $executor = new LifecycleExecutor(
 $run = $executor->run($plan);
 $projection = LifecycleExecutor::semanticProjection($run);
 $results = array_combine(array_column($run['tests'], 'id'), $run['tests']);
+$scopes = array_combine(array_column($run['scopes'], 'id'), $run['scopes']);
 $projectedResults = array_combine(
     array_column($projection['tests'], 'id'),
     $projection['tests'],
@@ -199,7 +212,10 @@ $orderedEventIds = array_values(array_map(
 ));
 
 $expect(array_keys($results) === $ids, 'Kernel results drifted from Scope IR order.');
-$expect($run['completion_order'] === array_reverse($ids), 'The proof did not reverse completion order.');
+$expect(
+    $run['completion_order'] === ['scope:child', $ids[3], $ids[2], $ids[1], $ids[0], $ids[4]],
+    'The proof did not preserve nested completion order.',
+);
 $expect($orderedEventIds === $ids, 'Lifecycle events drifted from Scope IR order.');
 $expect($scopeBindings === [true, true], 'A scope hook was rebound to a test runtime.');
 $expect($results[$ids[0]]['status'] === 'skipped', 'Skipped outcome was not preserved.');
@@ -214,6 +230,9 @@ $expect($results[$ids[4]]['status'] === 'failed', 'Thrown test did not fail.');
 $expect($results[$ids[4]]['failure']['kind'] === FailureKind::PhpException->value, 'Failure kind changed.');
 $expect($results[$ids[4]]['failure']['class'] === RuntimeException::class, 'Throwable class changed.');
 $expect($results[$ids[4]]['failure']['message'] === 'original boom', 'Throwable message changed.');
+$expect($results[$ids[4]]['stdout'] === 'descendant-output', 'Descendant output drifted.');
+$expect($scopes['scope:child']['stdout'] === 'scope-output', 'Scope stdout was lost.');
+$expect($scopes['scope:child']['stderr'] === 'scope-diagnostic', 'Scope stderr was lost.');
 $expect($run['root']['failure'] === $results[$ids[4]]['failure'], 'Skipped or todo test failed the scope.');
 $expect(
     $runtimes[$ids[0]]->trace === [

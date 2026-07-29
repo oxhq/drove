@@ -301,6 +301,12 @@ final readonly class LifecycleExecutor
                 $child = $transport['status'] === 'passed' && is_array($transport['value'])
                     ? $transport['value']
                     : $this->transportScopeFailure($job['node'], $transport);
+
+                foreach (['stdout', 'stderr'] as $stream) {
+                    $child['scope'][$stream] = ($child['scope'][$stream] ?? '').($transport[$stream] ?? '');
+                    $child['scopes'][0][$stream] = $child['scope'][$stream];
+                }
+
                 array_push($tests, ...$child['tests']);
                 array_push($scopes, ...$child['scopes']);
                 array_push($events, ...$child['events']);
