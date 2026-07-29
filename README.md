@@ -75,10 +75,10 @@ execution because they can commit schema changes outside the adapter
 transaction.
 
 The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
-Pest, InvoiceShelf, and the selected Livewire Testbench cohort are proven;
-Filament's full Support selection is the final pending gate. Nucleus is
-deliberately excluded because its Docker/MySQL suite is not part of this
-portable corpus. See
+All four rungs are proven, ending with Filament's 677-case nonserial cohort at
+1, 2, 4, and 8 Drove processes plus its 28-case filesystem-sensitive cohort at
+1. Nucleus is deliberately excluded because its Docker/MySQL suite is not part
+of this portable corpus. See
 [`benchmarks/corpus`](benchmarks/corpus/README.md) for revisions, selections,
 dependency overlays, and observed results.
 

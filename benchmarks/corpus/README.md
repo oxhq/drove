@@ -7,7 +7,7 @@ The versioned ladder is deliberately sequential:
 | Pest | 143 files, 797 cases | Proven: 726 passed, 71 skipped |
 | InvoiceShelf | all `tests/Unit` and `tests/Feature/Customer`, 202 cases | Proven |
 | Livewire | first 20 sorted `src/**/*UnitTest.php` files, 288 cases | Proven: baseline and Drove semantics match |
-| Filament | all `tests/src/Support`, 677 nonserial plus 28 serial cases | Final pending gate |
+| Filament | all `tests/src/Support`, 677 nonserial plus 28 serial cases | Proven: nonserial at 1/2/4/8; serial at 1 |
 
 Every external checkout is fixed to the commit in `manifest.json`. The
 manifest also records the exact Drove revision used for proven results; the
@@ -18,7 +18,7 @@ recorded baseline semantics. An explicit pre-execution rejection is
 `UNEXPECTED_DIVERGENCE`, not an accepted result.
 
 Nucleus is deliberately excluded. Its Docker/MySQL suite is not needed for
-this portable ladder, whose final challenge is Filament.
+this portable ladder, whose final proof is Filament.
 
 ## Select cases
 
@@ -38,6 +38,10 @@ count. The common corpus image includes Git so those checks still run across a
 bind mount. Pest is the inherited source surface in this fork, so it uses the
 exact-count guard and the source-difference boundary recorded in the manifest
 instead of requiring the fork itself to have Pest's upstream commit ID.
+For a Windows checkout mounted into a Linux container, pass
+`-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=core.autocrlf -e GIT_CONFIG_VALUE_0=true`
+so CRLF presentation alone does not trip the clean-root check; the host
+checkout must still have no selected-source diff.
 
 The Pest selection is intentionally conservative. It excludes undeclared
 higher-order, dependency, diagnostic-status, and snapshot surfaces. Eight
@@ -136,52 +140,90 @@ docker run --rm -e APP_ENV=testing -e DB_CONNECTION=testbench \
   -e DROVE_LARAVEL_STATE=sqlite-memory \
   -e DROVE_LARAVEL_DB_CONNECTION=testbench \
   -e DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+  -e DUSK_DRIVER_URL=http://127.0.0.1:9515 \
   -v "$LIVEWIRE:/app" -v "$DROVE:/drove:ro" \
   -v drove-livewire-vendor:/app/vendor -w /app --entrypoint sh drove-corpus -lc \
   'set -- $(sh /drove/benchmarks/corpus/select.sh livewire /app);
    exec php vendor/bin/drove --parallel --processes=1 "$@"'
 ```
 
-## Final pending rung
+`DUSK_DRIVER_URL` prevents Livewire's Testbench-Dusk base class from launching
+a local Chromedriver. This unit-only selection never contacts that endpoint.
 
-Filament is last. Apply the pinned dependency overlay, build the common corpus
-image, and prepare one migrated SQLite master with
+## Final proven rung
+
+Filament is last. Build the common corpus image, install the pinned dependency
+overlay into a named vendor volume, and prepare one migrated SQLite master with
 `vendor/bin/testbench migrate:fresh`. Copy that master into a fresh
 `/drove-work/database.sqlite` (plus an empty `/drove-work/snapshots`) before
 each command below:
 
 ```bash
-DROVE_SOURCE="$DROVE" "$DROVE/benchmarks/corpus/prepare.sh" filament
 docker build -f benchmarks/corpus/Dockerfile -t drove-corpus .
+docker volume create drove-filament-vendor
+
+docker run --rm -v "$FILAMENT:/app" -v "$DROVE:/drove:ro" \
+  -v drove-filament-vendor:/app/vendor -w /app --entrypoint sh drove-corpus -lc \
+  'DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/prepare.sh filament'
+
+MASTER=/absolute/artifacts/master
+mkdir -p "$MASTER/snapshots"
+touch "$MASTER/database.sqlite"
+
+docker run --rm -e APP_ENV=testing \
+  -e APP_KEY=base64:x5m/qWTRn07o2rXmBGZap8zkqzrPybJGqGbi2f8I7Pc=== \
+  -e DB_CONNECTION=sqlite \
+  -e DB_DATABASE=/drove-work/database.sqlite \
+  -v "$FILAMENT:/app" -v drove-filament-vendor:/app/vendor \
+  -v "$MASTER:/drove-work" -w /app --entrypoint sh drove-corpus -lc \
+  'exec php vendor/bin/testbench migrate:fresh --no-interaction'
 
 # Each directory below is a separate fresh copy of the migrated master.
 BASELINE_NONSERIAL=/absolute/artifacts/baseline-nonserial
 BASELINE_SERIAL=/absolute/artifacts/baseline-serial
-DROVE_NONSERIAL=/absolute/artifacts/drove-nonserial
 DROVE_SERIAL=/absolute/artifacts/drove-serial
 
+for directory in "$BASELINE_NONSERIAL" "$BASELINE_SERIAL" "$DROVE_SERIAL"
+do
+  mkdir -p "$directory/snapshots"
+  cp "$MASTER/database.sqlite" "$directory/database.sqlite"
+done
+
+# Repeat this setup and the nonserial Drove command with 1, 2, 4, and 8.
+DROVE_PROCESSES=8
+DROVE_NONSERIAL=/absolute/artifacts/drove-nonserial-$DROVE_PROCESSES
+mkdir -p "$DROVE_NONSERIAL/snapshots"
+cp "$MASTER/database.sqlite" "$DROVE_NONSERIAL/database.sqlite"
+
 docker run --rm -v "$FILAMENT:/app" -v "$DROVE:/drove:ro" \
+  -v drove-filament-vendor:/app/vendor \
   -v "$DROVE/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
   -v "$BASELINE_NONSERIAL:/drove-work" -w /app --entrypoint sh drove-corpus -lc \
   'set -- $(sh /drove/benchmarks/corpus/select.sh filament /app);
    exec php vendor/bin/pest --configuration=phpunit.drove.xml --exclude-group=serial "$@"'
 
 docker run --rm -v "$FILAMENT:/app" -v "$DROVE:/drove:ro" \
+  -v drove-filament-vendor:/app/vendor \
   -v "$DROVE/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
   -v "$BASELINE_SERIAL:/drove-work" -w /app --entrypoint sh drove-corpus -lc \
   'set -- $(sh /drove/benchmarks/corpus/select.sh filament /app);
    exec php vendor/bin/pest --configuration=phpunit.drove.xml --group=serial "$@"'
 
-docker run --rm -e DROVE_LARAVEL_RUNTIME=testbench -e DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+docker run --rm -e APP_ENV=testing -e DROVE_PROCESSES="$DROVE_PROCESSES" \
+  -e DROVE_LARAVEL_RUNTIME=testbench \
+  -e DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
   -v "$FILAMENT:/app" -v "$DROVE:/drove:ro" \
+  -v drove-filament-vendor:/app/vendor \
   -v "$DROVE/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
   -v "$DROVE_NONSERIAL:/drove-work" -w /app --entrypoint sh drove-corpus -lc \
   'set -- $(sh /drove/benchmarks/corpus/select.sh filament /app);
    exec php vendor/bin/drove --configuration=phpunit.drove.xml --parallel \
-     --processes=8 --exclude-group=serial "$@"'
+     --processes="$DROVE_PROCESSES" --exclude-group=serial "$@"'
 
-docker run --rm -e DROVE_LARAVEL_RUNTIME=testbench -e DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+docker run --rm -e APP_ENV=testing -e DROVE_LARAVEL_RUNTIME=testbench \
+  -e DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
   -v "$FILAMENT:/app" -v "$DROVE:/drove:ro" \
+  -v drove-filament-vendor:/app/vendor \
   -v "$DROVE/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
   -v "$DROVE_SERIAL:/drove-work" -w /app --entrypoint sh drove-corpus -lc \
   'set -- $(sh /drove/benchmarks/corpus/select.sh filament /app);
@@ -190,9 +232,13 @@ docker run --rm -e DROVE_LARAVEL_RUNTIME=testbench -e DROVE_LARAVEL_SQLITE_PREPA
 ```
 
 The nonserial baseline is 677 passing cases and 1016 assertions. The serial
-baseline is 28 passing cases and 34 assertions. Filament remains pending until
-all 705 cases execute through Drove with the same semantics; partial folders
-or bypassed guards do not satisfy this gate.
+baseline is 28 passing cases and 34 assertions. Drove preserves those results
+for all 705 cases; the nonserial cohort passes at 1, 2, 4, and 8 processes, and
+the filesystem-sensitive serial cohort passes at 1. Partial folders or bypassed
+guards do not satisfy this gate. Every proof copy retained the migrated
+database SHA-256
+`3954311b739ba71a1b9ab0d872ef46ca5bb227448263b5d1fe4b99ee15299081`
+and left zero snapshots or additional/transient SQLite artifacts.
 
 These are correctness results, not speed claims. Shared-host wall times and
 Docker bind-mount runs are not a publishable performance methodology.

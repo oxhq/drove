@@ -1,7 +1,6 @@
 {
     "schema_version": 2,
-    "manifest_revision": "the Git commit containing this manifest",
-    "proven_drove_revision": "47987bbd19ad477519165f1aff4b1fdd64d663c1",
+    "proven_drove_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
     "ladder": [
         "pest",
         "invoiceshelf",
@@ -14,9 +13,7 @@
         "UNEXPECTED_DIVERGENCE": "The selection exposed a Drove bug and is not an accepted result."
     },
     "gate_statuses": {
-        "PROVEN": "The baseline and Drove result are recorded for the complete selection.",
-        "PENDING_IMPLEMENTATION": "The baseline is fixed, but Drove does not yet execute the selection.",
-        "FINAL_PENDING_GATE": "The final stress selection is fixed and remains blocked until the earlier rungs pass."
+        "PROVEN": "The baseline and Drove result are recorded for the complete selection."
     },
     "corpora": [
         {
@@ -49,13 +46,14 @@
                 "passed": 726,
                 "failed": 0,
                 "skipped": 71,
+                "assertions": 1718,
                 "exit": 0
             },
             "proof_boundary": [
                 "The proof runs Pest's inherited tests from the Drove checkout, not an independently installed Pest consumer.",
                 "142 selected files are byte-identical to v5.0.1; tests/Features/Expect/pipes.php differs only by removal of a redundant property initializer.",
-                "Drove reports total cases rather than assertion totals, so assertion parity is not claimed.",
-                "Single-process execution exceeded five minutes on the shared Docker host; no performance claim is recorded."
+                "Drove and Pest both report 1718 assertions for the selected cases.",
+                "Shared-host wall times are diagnostics only; no performance claim is recorded."
             ]
         },
         {
@@ -85,13 +83,16 @@
                 "runner": "conventional Pest command on the same uplifted dependency graph",
                 "passed": 202,
                 "failed": 0,
+                "assertions": 328,
                 "exit": 0
             },
             "drove": {
                 "passed": 202,
                 "failed": 0,
+                "assertions": 328,
                 "exit": 0,
-                "workspace_artifacts_after": 0
+                "snapshots_after": 0,
+                "additional_sqlite_artifacts_after": 0
             },
             "proof_boundary": [
                 "All 47 selected source files are unchanged from the pinned InvoiceShelf commit.",
@@ -104,8 +105,8 @@
             "position": 3,
             "repository": "https://github.com/livewire/livewire.git",
             "commit": "9c1450739d30c9b0b223ad6512be2a33f8f62f96",
-            "gate_status": "PENDING_IMPLEMENTATION",
-            "classification": "EXPLICITLY_UNSUPPORTED",
+            "gate_status": "PROVEN",
+            "classification": "SUPPORTED",
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh livewire /checkout",
                 "rule": "the lexicographically first 20 src/**/*UnitTest.php files",
@@ -123,21 +124,27 @@
             "baseline": {
                 "runner": "PHPUnit 13 with the selector output as explicit paths",
                 "tests": 288,
+                "passed": 285,
+                "failed": 0,
                 "assertions": 1034,
                 "incomplete": 3,
                 "exit": 0
             },
             "drove": {
-                "status": "pending",
-                "native_phpunit_core": "proven outside Orchestra Testbench on the current Drove branch",
-                "expected_testbench_diagnostic": "Drove Laravel does not support Orchestra Testbench TestCase instances yet.",
-                "real_corpus_run_after_native_phpunit_support": false
+                "runner": "php vendor/bin/drove --parallel --processes=1 with the same explicit paths",
+                "tests": 288,
+                "passed": 285,
+                "failed": 0,
+                "assertions": 1034,
+                "incomplete": 3,
+                "exit": 0
             },
             "proof_boundary": [
                 "The selected files are ordinary PHPUnit cases running on Orchestra Testbench, not Pest cases.",
-                "Native PHPUnit execution outside Testbench does not prove this Laravel/Testbench cohort.",
-                "A disposable child-process proof established that a parent-created Testbench application survives a fork, but it did not execute this corpus through Drove.",
-                "This rung becomes SUPPORTED only after Drove executes all 288 cases with baseline semantics."
+                "All 20 selected source files and the Testbench bootstrap are unchanged from the pinned Livewire commit.",
+                "DUSK_DRIVER_URL disables Livewire's local Chromedriver launcher; this unit-only selection never contacts the driver.",
+                "The non-symlinked Composer overlay records the proven Drove revision.",
+                "The result is correctness evidence only, not a speed comparison."
             ]
         },
         {
@@ -145,17 +152,22 @@
             "position": 4,
             "repository": "https://github.com/filamentphp/filament.git",
             "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
-            "gate_status": "FINAL_PENDING_GATE",
-            "classification": "EXPLICITLY_UNSUPPORTED",
+            "gate_status": "PROVEN",
+            "classification": "SUPPORTED",
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh filament /checkout",
                 "root": "tests/src/Support",
                 "files": 39,
                 "nonserial": {
                     "cases": 677,
+                    "processes_proven": [
+                        1,
+                        2,
+                        4,
+                        8
+                    ],
                     "runner_arguments": [
                         "--parallel",
-                        "--processes=8",
                         "--exclude-group=serial"
                     ]
                 },
@@ -166,7 +178,8 @@
                         "--group=serial"
                     ]
                 },
-                "total_cases": 705
+                "total_cases": 705,
+                "total_assertions": 1050
             },
             "dependency_uplift": {
                 "drove": "0.1.x-dev",
@@ -191,14 +204,40 @@
                 }
             },
             "drove": {
-                "status": "pending",
-                "current_diagnostic": "Drove Laravel does not support Orchestra Testbench TestCase instances yet.",
-                "selected_test_bodies_executed": 0
+                "nonserial": {
+                    "processes": [
+                        1,
+                        2,
+                        4,
+                        8
+                    ],
+                    "passed": 677,
+                    "assertions": 1016,
+                    "exit_codes": [
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "serial": {
+                    "processes": [
+                        1
+                    ],
+                    "passed": 28,
+                    "assertions": 34,
+                    "exit": 0
+                },
+                "snapshots_after": 0,
+                "additional_sqlite_artifacts_after": 0,
+                "database_sha256_after": "3954311b739ba71a1b9ab0d872ef46ca5bb227448263b5d1fe4b99ee15299081"
             },
             "proof_boundary": [
                 "The baseline is complete for the whole Support selection, split only by Filament's serial group.",
-                "The committed provider patch enables Drove package discovery but does not change selected tests.",
-                "This is the final gate; no Filament compatibility claim exists until all 705 cases execute with baseline semantics."
+                "All 39 selected source files and Filament's Testbench bootstrap are unchanged from the pinned commit.",
+                "Composer's non-symlinked path overlay and Filament's existing package discovery load Drove without a provider patch.",
+                "Drove preserves baseline semantics for all 705 cases, including the 677-case nonserial cohort at 1, 2, 4, and 8 processes.",
+                "Shared-host wall times are diagnostics only; no performance claim is recorded."
             ]
         }
     ]
