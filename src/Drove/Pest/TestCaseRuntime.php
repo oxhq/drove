@@ -473,7 +473,7 @@ final class TestCaseRuntime
                 try {
                     $class::setUpBeforeClass();
                 } catch (SkippedTest $skipped) {
-                    throw new SkipScope($skipped->getMessage(), previous: $skipped);
+                    throw new SkipScope($skipped->getMessage(), $skipped->getCode(), previous: $skipped);
                 }
             };
         $afterClass = $lifecycleClass->getMethod('tearDownAfterClass')->getDeclaringClass()->getName() === TestCase::class
@@ -549,7 +549,7 @@ final class TestCaseRuntime
                         }
                     }
 
-                    (new ReflectionMethod($class, $method))->invoke(null);
+                    new ReflectionMethod($class, $method)->invoke(null);
                 } catch (SkipScope $skipped) {
                     throw $skipped;
                 } catch (Throwable $throwable) {
@@ -558,7 +558,7 @@ final class TestCaseRuntime
                             break;
                         }
 
-                        throw new SkipScope($throwable->getMessage(), previous: $throwable);
+                        throw new SkipScope($throwable->getMessage(), $throwable->getCode(), previous: $throwable);
                     }
 
                     $failure ??= $throwable;
