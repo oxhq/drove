@@ -32,6 +32,11 @@ bodies do not render Blade views, launch Dusk, or generate application files.
 Replay metadata must report observed concurrency of exactly 1/2/4/8, preventing
 a serialized run from satisfying the parallel gate.
 
+Pest's 140 parallel-safe files run at eight processes. Three unchanged
+filesystem expectation files share `/tmp/fake.file`, so the gate compares
+those 12 cases in a separate one-process cohort instead of accepting a
+timing-dependent result.
+
 The full Filament cohort runs its 677 parallel-safe cases at 1/2/4/8 processes
 and its 28 filesystem-sensitive cases serially. Every run starts from a fresh
 copy of one migrated database and verifies its SHA-256, an empty snapshot
@@ -110,5 +115,5 @@ contains:
 
 The conservative Pest selection still excludes undeclared higher-order,
 dependency, snapshot, and diagnostic surfaces. Eight additional files assert
-shared mutation between sibling cases; they remain known divergences until
-Drove can reject that dependency before execution.
+shared in-memory mutation between sibling cases; they remain known divergences
+until Drove can reject that dependency before execution.

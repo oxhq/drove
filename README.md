@@ -150,7 +150,11 @@ and the ambiguous bare `--coverage` option remain explicit rejections.
 `--drove-timeout-ms=N` assigns one positive default deadline to every selected
 test; omitting it leaves deadlines disabled. On timeout, SIGINT, or SIGTERM,
 Drover stops scheduling new work, terminates active process groups, escalates
-when needed, and reports a stable failure classification.
+when needed, and reports a stable failure classification. An inert per-task
+group anchor remains live until cleanup, so a PHP executor crash cannot strand
+same-group descendants.
+Native runs require the default `SIGCHLD` disposition so executor and anchor
+children remain waitable.
 
 `--replay=path.json` writes one no-overwrite diagnostic artifact.
 `--replay-on-failure=path.json` writes only for a nonzero run. The artifact
@@ -188,7 +192,9 @@ mutate runner internals are outside the declared alpha surface.
 
 Drove uses exit 1 for any test failure or runtime error and exit 2 for invalid
 or explicitly unsupported input. It does not preserve PHPUnit's separate
-runtime-error exit code.
+runtime-error exit code. Native cleanup covers descendants that remain in the
+task process group; `setsid()`, `setpgid()`, or privilege changes require an OS
+sandbox and are outside this alpha.
 
 Packagist, GitHub Releases, and the hosted workflows above are the live
 publication and proof authorities; a source branch alone is not release

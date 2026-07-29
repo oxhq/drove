@@ -84,34 +84,43 @@ jobs:
           set -euo pipefail
           mkdir -p results
 
-          docker run --rm \
-            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
-            --volume "$PWD/results:/results" \
-            --workdir /drove \
-            --entrypoint sh drove-corpus -lc '
-              selection=$(mktemp)
-              sh benchmarks/corpus/select.sh pest . >"$selection"
-              set -- $(cat "$selection")
-              files=$(wc -l <"$selection" | tr -d "[:space:]")
-              DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
-                pest baseline full 1 "$files" /results/pest-baseline.json -- \
-                php bin/pest --configuration=benchmarks/corpus/phpunit.pest.xml "$@"
-            '
+          for cohort in nonserial serial
+          do
+            drove_processes=8
+            [ "$cohort" = serial ] && drove_processes=1
 
-          docker run --rm \
-            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
-            --volume "$PWD/results:/results" \
-            --workdir /drove \
-            --entrypoint sh drove-corpus -lc '
-              selection=$(mktemp)
-              sh benchmarks/corpus/select.sh pest . >"$selection"
-              set -- $(cat "$selection")
-              files=$(wc -l <"$selection" | tr -d "[:space:]")
-              DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
-                pest drove full 8 "$files" /results/pest-drove-8.json -- \
-                php bin/drove --configuration=benchmarks/corpus/phpunit.pest.xml \
-                  --parallel --processes=8 "$@"
-            '
+            for runner in baseline drove
+            do
+              processes=1
+              [ "$runner" = drove ] && processes=$drove_processes
+
+              docker run --rm \
+                --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+                --env CORPUS_COHORT="$cohort" \
+                --env CORPUS_RUNNER="$runner" \
+                --env CORPUS_PROCESSES="$processes" \
+                --volume "$PWD/results:/results" \
+                --workdir /drove \
+                --entrypoint sh drove-corpus -lc '
+                  selection=$(mktemp)
+                  sh benchmarks/corpus/select.sh "pest-$CORPUS_COHORT" . >"$selection"
+                  files=$(wc -l <"$selection" | tr -d "[:space:]")
+                  output="/results/pest-$CORPUS_RUNNER-$CORPUS_COHORT-$CORPUS_PROCESSES.json"
+
+                  if [ "$CORPUS_RUNNER" = baseline ]; then
+                    DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
+                      pest baseline "$CORPUS_COHORT" 1 "$files" "$output" -- \
+                      php bin/pest --configuration=benchmarks/corpus/phpunit.pest.xml \
+                        $(cat "$selection")
+                  else
+                    DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
+                      pest drove "$CORPUS_COHORT" "$CORPUS_PROCESSES" "$files" "$output" -- \
+                      php bin/drove --configuration=benchmarks/corpus/phpunit.pest.xml \
+                        --parallel --processes="$CORPUS_PROCESSES" $(cat "$selection")
+                  fi
+                '
+            done
+          done
 
       - name: Install locked InvoiceShelf overlay
         run: |
@@ -171,7 +180,10 @@ jobs:
 
           docker run --rm --volume "$PWD/results:/results" drove-corpus \
             php /drove/benchmarks/corpus/verify.php \
-              /results/pest-baseline.json /results/pest-drove-8.json \
+              /results/pest-baseline-nonserial-1.json \
+              /results/pest-drove-nonserial-8.json \
+              /results/pest-baseline-serial-1.json \
+              /results/pest-drove-serial-1.json \
               /results/invoiceshelf-baseline.json /results/invoiceshelf-drove.json \
             | tee results/smoke-verification.json
 
@@ -457,6 +469,13 @@ jobs:
               /results/filament-baseline-serial-1.json \
               /results/filament-drove-serial-1.json \
             | tee results/filament-verification.json
+
+      - name: Restore corpus evidence ownership
+        if: always()
+        run: |
+          if [ -d results ]; then
+            sudo chown -R "$(id -u):$(id -g)" results
+          fi
 
       - name: Upload normalized corpus evidence
         if: always()

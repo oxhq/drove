@@ -367,10 +367,15 @@ pub enum Step {
 struct ActiveTask {
     task: Task,
     pid: libc::pid_t,
+    pgid: libc::pid_t,
     fd: RawFd,
+    anchor_fd: RawFd,
+    exited: bool,
     reaped: bool,
+    anchor_reaped: bool,
     wait_status: Option<i32>,
     eof: bool,
+    eof_ns: Option<u64>,
     buffer: Vec<u8>,
     validator: Validator,
     frames: Vec<Frame>,
@@ -393,7 +398,18 @@ struct ActiveTask {
 }
 
 impl ActiveTask {
-    fn new(task: Task, pid: libc::pid_t, fd: RawFd, run_id: &str) -> Self {
+    fn new(
+        task: Task,
+        pid: libc::pid_t,
+        pgid: libc::pid_t,
+        fd: RawFd,
+        anchor_fd: RawFd,
+        spawned_ns: u64,
+        run_id: &str,
+    ) -> Self {
+        let deadline_ns = (task.timeout_ms > 0)
+            .then(|| spawned_ns.saturating_add(task.timeout_ms.saturating_mul(1_000_000)));
+
         Self {
             validator: Validator::new(
                 run_id.into(),
@@ -404,17 +420,22 @@ impl ActiveTask {
             ),
             task,
             pid,
+            pgid,
             fd,
+            anchor_fd,
+            exited: false,
             reaped: false,
+            anchor_reaped: false,
             wait_status: None,
             eof: false,
+            eof_ns: None,
             buffer: Vec::new(),
             frames: Vec::new(),
             stdout: Vec::new(),
             stderr: Vec::new(),
             value_buffer: Vec::new(),
             started_ns: None,
-            deadline_ns: None,
+            deadline_ns,
             finished_ns: None,
             terminal_received_ns: None,
             terminal: None,
@@ -502,13 +523,6 @@ impl ActiveTask {
                     .as_u64()
                     .ok_or_else(|| "Drove received an invalid child start.".to_string())?;
                 self.started_ns = Some(started_ns);
-                self.deadline_ns = (self.task.timeout_ms > 0)
-                    .then(|| started_ns.checked_add(self.task.timeout_ms.saturating_mul(1_000_000)))
-                    .flatten();
-
-                if self.task.timeout_ms > 0 && self.deadline_ns.is_none() {
-                    return Err("The Drove task deadline overflowed.".into());
-                }
             }
             "task.stdout" | "task.stderr" | "task.value" => {
                 let encoded = frame.payload["data"]
@@ -545,8 +559,50 @@ impl ActiveTask {
         Ok(())
     }
 
+    fn observe_exit(&mut self, now_ns: u64) {
+        if self.exited || self.reaped {
+            return;
+        }
+
+        // Keep an exited worker waitable until its channel is drained or cleanup begins.
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                self.pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+
+        if waited == 0 {
+            if unsafe { info.si_pid() } == self.pid {
+                self.exited = true;
+                self.finished_ns.get_or_insert(now_ns);
+            }
+
+            return;
+        }
+
+        let error = io::Error::last_os_error();
+
+        if error.kind() == io::ErrorKind::Interrupted {
+            return;
+        }
+
+        self.exited = true;
+        self.reaped = true;
+        self.finished_ns.get_or_insert(now_ns);
+        self.protocol_error
+            .get_or_insert_with(|| format!("waitid() lost the Drove child: {error}."));
+    }
+
     fn reap(&mut self, now_ns: u64) {
-        if self.reaped {
+        if self.reaped
+            || !self.exited
+            || self.kill_ns.is_none()
+                && (self.term_ns.is_some() || self.cleanup_term_ns.is_some() || !self.eof)
+        {
             return;
         }
 
@@ -572,6 +628,37 @@ impl ActiveTask {
             self.finished_ns.get_or_insert(now_ns);
             self.protocol_error
                 .get_or_insert_with(|| format!("waitpid() lost the Drove child: {error}."));
+        }
+    }
+
+    fn reap_anchor(&mut self) {
+        if self.anchor_reaped {
+            return;
+        }
+
+        let waited = unsafe { libc::waitpid(self.pgid, std::ptr::null_mut(), libc::WNOHANG) };
+
+        if waited == self.pgid {
+            self.anchor_reaped = true;
+
+            if self.kill_ns.is_none() {
+                self.protocol_error.get_or_insert_with(|| {
+                    "The Drove process-group anchor exited before cleanup.".into()
+                });
+            }
+
+            return;
+        }
+
+        if waited == -1 {
+            let error = io::Error::last_os_error();
+
+            if error.kind() != io::ErrorKind::Interrupted {
+                self.anchor_reaped = true;
+                self.protocol_error.get_or_insert_with(|| {
+                    format!("waitpid() lost the Drove process-group anchor: {error}.")
+                });
+            }
         }
     }
 
@@ -618,10 +705,41 @@ impl ActiveTask {
             return;
         }
 
-        if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, !self.reaped) {
-            self.protocol_error.get_or_insert(error);
-        }
+        self.signal_group(libc::SIGTERM);
         self.cleanup_term_ns = Some(now_ns);
+    }
+
+    fn signal_group(&mut self, signal: i32) {
+        if self.anchor_reaped {
+            if !self.reaped {
+                unsafe {
+                    libc::kill(self.pid, signal);
+                }
+            }
+
+            self.protocol_error.get_or_insert_with(|| {
+                "The Drove process-group anchor exited before cleanup. Direct fallback cannot guarantee descendant cleanup.".into()
+            });
+
+            return;
+        }
+
+        if let Err(error) = signal_process_group(self.pgid, signal) {
+            if !self.reaped {
+                unsafe {
+                    libc::kill(self.pid, signal);
+                }
+            }
+            if !self.anchor_reaped {
+                unsafe {
+                    libc::kill(self.pgid, signal);
+                }
+            }
+
+            self.protocol_error.get_or_insert_with(|| {
+                format!("{error} Direct fallback cannot guarantee descendant cleanup.")
+            });
+        }
     }
 
     fn interrupt(&mut self, signal: i32, now_ns: u64) {
@@ -634,7 +752,11 @@ impl ActiveTask {
     }
 
     fn enforce(&mut self, now_ns: u64, grace_ns: u64) {
-        if !self.reaped
+        if self.eof {
+            self.eof_ns.get_or_insert(now_ns);
+        }
+
+        if !self.exited
             && !self.timed_out
             && self.interrupted_signal.is_none()
             && self.task.timeout_ms > 0
@@ -646,9 +768,7 @@ impl ActiveTask {
                     .unwrap_or_default();
 
                 if now_ns >= deadline_ns.max(terminal_grace) {
-                    if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, true) {
-                        self.protocol_error.get_or_insert(error);
-                    }
+                    self.signal_group(libc::SIGTERM);
                     self.timed_out = true;
                     self.term_ns = Some(now_ns);
                 }
@@ -657,11 +777,22 @@ impl ActiveTask {
 
         self.normalize_terminal_consistency();
 
-        if self.protocol_error.is_some() && !self.reaped {
+        let protocol_stopped_ns = self.terminal_received_ns.or(self.eof_ns);
+
+        if !self.exited
+            && protocol_stopped_ns.is_some_and(|stopped| now_ns.saturating_sub(stopped) >= grace_ns)
+        {
+            self.protocol_error.get_or_insert_with(|| {
+                "The Drove child stopped its result protocol without exiting.".into()
+            });
+        }
+
+        if self.protocol_error.is_some() && self.cleanup_term_ns.is_none() && self.kill_ns.is_none()
+        {
             self.begin_cleanup(now_ns);
         }
 
-        if self.reaped && !self.eof {
+        if self.exited && !self.eof {
             self.begin_cleanup(now_ns);
         }
 
@@ -670,14 +801,16 @@ impl ActiveTask {
         if self.kill_ns.is_none()
             && escalation_ns.is_some_and(|started| now_ns.saturating_sub(started) >= grace_ns)
         {
-            if let Err(error) = signal_process_tree(self.pid, libc::SIGKILL, !self.reaped) {
-                self.protocol_error.get_or_insert(error);
-            }
+            self.signal_group(libc::SIGKILL);
             self.kill_ns = Some(now_ns);
         }
 
-        if self.reaped
-            && !self.eof
+        if self.reaped && self.eof && escalation_ns.is_none() && self.kill_ns.is_none() {
+            self.signal_group(libc::SIGKILL);
+            self.kill_ns = Some(now_ns);
+        }
+
+        if !self.eof
             && self
                 .kill_ns
                 .is_some_and(|killed| now_ns.saturating_sub(killed) >= grace_ns)
@@ -688,13 +821,7 @@ impl ActiveTask {
     }
 
     fn ready(&self) -> bool {
-        let cleanup_complete = if self.term_ns.is_some() || self.cleanup_term_ns.is_some() {
-            self.kill_ns.is_some()
-        } else {
-            true
-        };
-
-        self.reaped && self.eof && cleanup_complete
+        self.reaped && self.anchor_reaped && self.eof && self.kill_ns.is_some()
     }
 
     fn into_result(self) -> TaskResult {
@@ -702,6 +829,7 @@ impl ActiveTask {
         let signal = self.signal();
         let telemetry = telemetry(
             Some(self.pid),
+            Some(self.pgid),
             self.started_ns,
             self.finished_ns,
             exit_code,
@@ -714,6 +842,16 @@ impl ActiveTask {
                 self.task,
                 "child_protocol_failure",
                 error,
+                telemetry,
+                self.frames,
+            );
+        }
+
+        if self.cleanup_failed {
+            return failed_result(
+                self.task,
+                "blocked_descendant",
+                "A Drove descendant kept the task channel open after forced cleanup.".into(),
                 telemetry,
                 self.frames,
             );
@@ -744,16 +882,6 @@ impl ActiveTask {
                 self.task,
                 "signal_termination",
                 format!("The Drove task ended from signal {signal}."),
-                telemetry,
-                self.frames,
-            );
-        }
-
-        if self.cleanup_failed {
-            return failed_result(
-                self.task,
-                "blocked_descendant",
-                "A Drove descendant kept the task channel open after forced cleanup.".into(),
                 telemetry,
                 self.frames,
             );
@@ -890,6 +1018,10 @@ impl Scheduler {
             return Err("Drove task IDs must contain between 1 and 511 bytes.".into());
         }
 
+        if timeout_ms > u64::MAX / 1_000_000 {
+            return Err("The Drove task deadline overflowed.".into());
+        }
+
         if !matches!(kind.as_str(), "scope" | "test") || scope_id.is_empty() {
             return Err("Drove received an invalid process task identity.".into());
         }
@@ -994,12 +1126,23 @@ impl Scheduler {
 
         for (_, child) in active {
             unsafe {
-                libc::kill(-child.pid, libc::SIGKILL);
-                libc::kill(child.pid, libc::SIGKILL);
+                if !child.anchor_reaped {
+                    libc::kill(-child.pgid, libc::SIGKILL);
+                    libc::kill(child.pgid, libc::SIGKILL);
+                }
+                if !child.reaped {
+                    libc::kill(child.pid, libc::SIGKILL);
+                }
                 libc::close(child.fd);
+                libc::close(child.anchor_fd);
             }
 
-            wait_blocking(child.pid);
+            if !child.reaped {
+                wait_blocking(child.pid);
+            }
+            if !child.anchor_reaped {
+                wait_blocking(child.pgid);
+            }
             let _ = self.registry.release(&child.task.permit_names);
         }
 
@@ -1030,6 +1173,20 @@ impl Scheduler {
     }
 
     fn spawn(&mut self, task: Task) -> Result<Step, String> {
+        if let Err(error) = validate_sigchld_disposition() {
+            self.registry.release(&task.permit_names)?;
+
+            return Err(error);
+        }
+
+        let spawned_ns = match monotonic_ns() {
+            Ok(spawned_ns) => spawned_ns,
+            Err(error) => {
+                self.registry.release(&task.permit_names)?;
+
+                return Err(error.to_string());
+            }
+        };
         let sockets = match socket_pair() {
             Ok(sockets) => sockets,
             Err(error) => {
@@ -1046,13 +1203,131 @@ impl Scheduler {
             }
         };
 
+        let anchor_sockets = match socket_pair() {
+            Ok(sockets) => sockets,
+            Err(error) => {
+                close_descriptors(sockets);
+                self.registry.release(&task.permit_names)?;
+                self.completed.push_back(failed_result(
+                    task,
+                    "fork_failure",
+                    format!("Unable to create a Drove anchor channel: {error}."),
+                    empty_telemetry(None),
+                    Vec::new(),
+                ));
+
+                return Ok(Step::Progress);
+            }
+        };
+
+        // An inert sibling keeps the task group alive after the PHP executor exits.
+        let pgid = unsafe { libc::fork() };
+
+        if pgid == -1 {
+            close_descriptors(sockets);
+            close_descriptors(anchor_sockets);
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
+                task,
+                "fork_failure",
+                format!(
+                    "Unable to fork a Drove process-group anchor: {}.",
+                    io::Error::last_os_error()
+                ),
+                empty_telemetry(None),
+                Vec::new(),
+            ));
+
+            return Ok(Step::Progress);
+        }
+
+        if pgid == 0 {
+            unsafe {
+                libc::close(sockets[0]);
+                libc::close(sockets[1]);
+                libc::close(anchor_sockets[1]);
+
+                for active in self.active.values() {
+                    libc::close(active.fd);
+                    libc::close(active.anchor_fd);
+                }
+
+                self.registry.close();
+
+                if !block_anchor_signals() {
+                    libc::_exit(1);
+                }
+            }
+
+            if unsafe { libc::setpgid(0, 0) } != 0 {
+                unsafe {
+                    libc::_exit(1);
+                }
+            }
+
+            if !write_anchor_ready(anchor_sockets[0]) {
+                unsafe {
+                    libc::_exit(1);
+                }
+            }
+
+            wait_for_parent(anchor_sockets[0]);
+        }
+
+        unsafe {
+            libc::close(anchor_sockets[0]);
+        }
+
+        if unsafe { libc::setpgid(pgid, pgid) } != 0 {
+            let error = io::Error::last_os_error();
+
+            unsafe {
+                libc::kill(pgid, libc::SIGKILL);
+                libc::close(anchor_sockets[1]);
+            }
+            close_descriptors(sockets);
+            wait_blocking(pgid);
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
+                task,
+                "fork_failure",
+                format!("Unable to create a Drove process-group anchor: {error}."),
+                empty_telemetry(None),
+                Vec::new(),
+            ));
+
+            return Ok(Step::Progress);
+        }
+
+        if let Err(error) = read_anchor_ready(anchor_sockets[1]) {
+            unsafe {
+                libc::kill(pgid, libc::SIGKILL);
+                libc::close(anchor_sockets[1]);
+            }
+            close_descriptors(sockets);
+            wait_blocking(pgid);
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
+                task,
+                "fork_failure",
+                error,
+                empty_telemetry(None),
+                Vec::new(),
+            ));
+
+            return Ok(Step::Progress);
+        }
+
         let pid = unsafe { libc::fork() };
 
         if pid == -1 {
             unsafe {
-                libc::close(sockets[0]);
-                libc::close(sockets[1]);
+                libc::kill(-pgid, libc::SIGKILL);
+                libc::kill(pgid, libc::SIGKILL);
+                libc::close(anchor_sockets[1]);
             }
+            close_descriptors(sockets);
+            wait_blocking(pgid);
             self.registry.release(&task.permit_names)?;
             self.completed.push_back(failed_result(
                 task,
@@ -1074,17 +1349,22 @@ impl Scheduler {
 
                 for active in self.active.values() {
                     libc::close(active.fd);
+                    libc::close(active.anchor_fd);
                 }
 
                 libc::signal(libc::SIGPIPE, libc::SIG_IGN);
             }
 
-            if unsafe { libc::setpgid(0, 0) } != 0 {
+            if unsafe { libc::setpgid(0, pgid) } != 0 {
                 write_process_group_failure(sockets[1], &self.run_id, &task);
 
                 unsafe {
                     libc::_exit(1);
                 }
+            }
+
+            unsafe {
+                libc::close(anchor_sockets[1]);
             }
 
             return Ok(Step::Child(ChildRole {
@@ -1097,16 +1377,19 @@ impl Scheduler {
 
         unsafe {
             libc::close(sockets[1]);
-            libc::setpgid(pid, pid);
+            libc::setpgid(pid, pgid);
         }
 
         if let Err(error) = set_nonblocking(sockets[0]) {
             unsafe {
-                libc::kill(-pid, libc::SIGKILL);
+                libc::kill(-pgid, libc::SIGKILL);
                 libc::kill(pid, libc::SIGKILL);
+                libc::kill(pgid, libc::SIGKILL);
                 libc::close(sockets[0]);
+                libc::close(anchor_sockets[1]);
             }
             wait_blocking(pid);
+            wait_blocking(pgid);
             self.registry.release(&task.permit_names)?;
             self.completed.push_back(failed_result(
                 task,
@@ -1119,8 +1402,18 @@ impl Scheduler {
             return Ok(Step::Progress);
         }
 
-        self.active
-            .insert(pid, ActiveTask::new(task, pid, sockets[0], &self.run_id));
+        self.active.insert(
+            pid,
+            ActiveTask::new(
+                task,
+                pid,
+                pgid,
+                sockets[0],
+                anchor_sockets[1],
+                spawned_ns,
+                &self.run_id,
+            ),
+        );
         self.max_active = self.max_active.max(self.active.len());
 
         Ok(Step::Progress)
@@ -1143,9 +1436,12 @@ impl Scheduler {
             };
 
             active.read_available();
+            active.observe_exit(now_ns);
             active.reap(now_ns);
+            active.reap_anchor();
             active.read_available();
             active.enforce(now_ns, self.grace_ns);
+            active.reap_anchor();
 
             if active.ready() {
                 ready.push(pid);
@@ -1156,6 +1452,7 @@ impl Scheduler {
             if let Some(active) = self.active.remove(&pid) {
                 unsafe {
                     libc::close(active.fd);
+                    libc::close(active.anchor_fd);
                 }
                 self.registry.release(&active.task.permit_names)?;
                 self.completed.push_back(active.into_result());
@@ -1170,12 +1467,21 @@ impl Scheduler {
         let mut seen = HashSet::new();
 
         for active in self.active.values() {
-            seen.insert(active.fd);
-            descriptors.push(libc::pollfd {
-                fd: active.fd,
-                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
-                revents: 0,
-            });
+            if !active.eof && seen.insert(active.fd) {
+                descriptors.push(libc::pollfd {
+                    fd: active.fd,
+                    events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                });
+            }
+
+            if seen.insert(active.anchor_fd) {
+                descriptors.push(libc::pollfd {
+                    fd: active.anchor_fd,
+                    events: libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                });
+            }
         }
 
         self.registry.append_poll_descriptors(
@@ -1200,6 +1506,8 @@ impl Scheduler {
                 kill_ns.saturating_add(self.grace_ns)
             } else if let Some(term_ns) = active.term_ns.or(active.cleanup_term_ns) {
                 term_ns.saturating_add(self.grace_ns)
+            } else if let Some(stopped_ns) = active.terminal_received_ns.or(active.eof_ns) {
+                stopped_ns.saturating_add(self.grace_ns)
             } else if let Some(deadline_ns) = active.deadline_ns {
                 deadline_ns.max(
                     active
@@ -1376,50 +1684,107 @@ fn wait_blocking(pid: libc::pid_t) {
     }
 }
 
-fn signal_process_tree(
-    pid: libc::pid_t,
-    signal: i32,
-    allow_direct_child: bool,
-) -> Result<(), String> {
-    if unsafe { libc::kill(-pid, signal) } == 0 {
-        return Ok(());
+fn block_anchor_signals() -> bool {
+    let mut signals = unsafe { std::mem::zeroed::<libc::sigset_t>() };
+
+    unsafe {
+        libc::sigfillset(&mut signals) == 0
+            && libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut()) == 0
     }
+}
 
-    let group_error = io::Error::last_os_error();
+fn validate_sigchld_disposition() -> Result<(), String> {
+    let mut action = unsafe { std::mem::zeroed::<libc::sigaction>() };
 
-    if !allow_direct_child {
-        return if group_error.raw_os_error() == Some(libc::ESRCH) {
-            Ok(())
-        } else {
-            Err(format!(
-                "Drover could not send signal {signal} to process group {pid}: {group_error}."
-            ))
-        };
-    }
-
-    if unsafe { libc::kill(pid, signal) } == 0 {
+    if unsafe { libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut action) } != 0 {
         return Err(format!(
-            "Drover could not send signal {signal} to process group {pid}: {group_error}; \
-             the child was signaled directly but descendant cleanup is not guaranteed."
+            "Drover could not inspect SIGCHLD: {}.",
+            io::Error::last_os_error()
         ));
     }
 
-    let process_error = io::Error::last_os_error();
+    if action.sa_sigaction != libc::SIG_DFL || action.sa_flags & libc::SA_NOCLDWAIT != 0 {
+        return Err(
+            "Drover requires SIGCHLD to use the default waitable-child disposition.".into(),
+        );
+    }
 
-    if group_error.raw_os_error() == Some(libc::ESRCH)
-        && process_error.raw_os_error() == Some(libc::ESRCH)
-    {
+    Ok(())
+}
+
+fn write_anchor_ready(fd: RawFd) -> bool {
+    let byte = b'.';
+
+    loop {
+        let written = unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
+
+        if written == 1 {
+            return true;
+        }
+
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
+}
+
+fn read_anchor_ready(fd: RawFd) -> Result<(), String> {
+    let mut byte = 0_u8;
+
+    loop {
+        let read = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
+
+        if read == 1 {
+            return if byte == b'.' {
+                Ok(())
+            } else {
+                Err("The Drove process-group anchor sent an invalid ready signal.".into())
+            };
+        }
+
+        if read == -1 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+
+        return Err("The Drove process-group anchor exited before it was ready.".into());
+    }
+}
+
+fn wait_for_parent(fd: RawFd) -> ! {
+    let mut byte = 0_u8;
+
+    loop {
+        let read = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
+
+        if read > 0 {
+            continue;
+        }
+
+        if read == -1 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+
+        unsafe {
+            libc::kill(0, libc::SIGKILL);
+            libc::_exit(1);
+        }
+    }
+}
+
+fn signal_process_group(pgid: libc::pid_t, signal: i32) -> Result<(), String> {
+    if unsafe { libc::kill(-pgid, signal) } == 0 {
         return Ok(());
     }
 
     Err(format!(
-        "Drover could not send signal {signal} to process group {pid} ({group_error}) \
-         or child {pid} ({process_error})."
+        "Drover could not send signal {signal} to process group {pgid}: {}.",
+        io::Error::last_os_error()
     ))
 }
 
 fn telemetry(
     pid: Option<libc::pid_t>,
+    pgid: Option<libc::pid_t>,
     started_ns: Option<u64>,
     finished_ns: Option<u64>,
     exit_code: Option<i32>,
@@ -1434,7 +1799,7 @@ fn telemetry(
 
     Telemetry {
         pid,
-        pgid: pid,
+        pgid,
         started_ns,
         finished_ns,
         duration_ms,
@@ -1445,7 +1810,7 @@ fn telemetry(
 }
 
 fn empty_telemetry(interrupted_signal: Option<i32>) -> Telemetry {
-    telemetry(None, None, None, None, None, interrupted_signal)
+    telemetry(None, None, None, None, None, None, interrupted_signal)
 }
 
 fn scheduler_failure(kind: &str, message: String) -> Value {
@@ -1612,7 +1977,7 @@ mod tests {
             );
         }
         file.seek(SeekFrom::Start(0)).unwrap();
-        let mut active = ActiveTask::new(task, 42, file.as_raw_fd(), run_id);
+        let mut active = ActiveTask::new(task, 42, 43, file.as_raw_fd(), -1, 0, run_id);
         active.reaped = true;
         active.wait_status = Some(0);
         active.normalize_terminal_consistency();
@@ -1705,7 +2070,15 @@ mod tests {
             timeout_ms: 1,
             permit_names: Vec::new(),
         };
-        let mut active = ActiveTask::new(task, unsafe { libc::getpid() }, -1, "cleanup-error-run");
+        let mut active = ActiveTask::new(
+            task,
+            unsafe { libc::getpid() },
+            unsafe { libc::getpgrp() },
+            -1,
+            -1,
+            0,
+            "cleanup-error-run",
+        );
         active.timed_out = true;
         active.protocol_error = Some("killpg failed".into());
 
@@ -1719,11 +2092,291 @@ mod tests {
     }
 
     #[test]
-    fn reports_group_and_child_signal_failures() {
-        let error = signal_process_tree(unsafe { libc::getpid() }, i32::MAX, true).unwrap_err();
+    fn reports_blocked_descendant_before_timeout_or_interruption() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:blocked-descendant".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1,
+            permit_names: Vec::new(),
+        };
+        let mut active = ActiveTask::new(
+            task,
+            unsafe { libc::getpid() },
+            unsafe { libc::getpgrp() },
+            -1,
+            -1,
+            0,
+            "blocked-descendant-run",
+        );
+        active.cleanup_failed = true;
+        active.timed_out = true;
+        active.interrupted_signal = Some(libc::SIGINT);
 
+        let result = active.into_result();
+
+        assert_eq!(result.failure.unwrap()["kind"], "blocked_descendant");
+    }
+
+    #[test]
+    fn reports_group_signal_failures() {
+        let error = signal_process_group(unsafe { libc::getpgrp() }, i32::MAX).unwrap_err();
         assert!(error.contains("process group"));
-        assert!(error.contains("or child"));
+    }
+
+    #[test]
+    fn rejects_a_nonwaitable_sigchld_disposition() {
+        let pid = unsafe { libc::fork() };
+        assert_ne!(pid, -1);
+
+        if pid == 0 {
+            unsafe {
+                libc::signal(libc::SIGCHLD, libc::SIG_IGN);
+                libc::_exit(i32::from(validate_sigchld_disposition().is_ok()));
+            }
+        }
+
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    #[test]
+    fn latches_a_blocked_channel_after_forced_cleanup() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:blocked-channel".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 0,
+            permit_names: Vec::new(),
+        };
+        let mut active = ActiveTask::new(task, 41, 42, -1, -1, 0, "blocked-channel-run");
+        active.kill_ns = Some(1);
+
+        active.enforce(3, 1);
+
+        assert!(active.cleanup_failed);
+        assert!(active.eof);
+    }
+
+    #[test]
+    fn bounds_live_executors_after_their_result_protocol_stops() {
+        let run_id = "stalled-protocol-run";
+        let engine =
+            Engine::new(run_id.into(), 3, HashMap::new(), Duration::from_millis(20)).unwrap();
+        let mut scheduler = engine.scheduler(3).unwrap();
+
+        for (id, timeout_ms) in [
+            ("task:stalled-eof", 0),
+            ("task:stalled-terminal", 0),
+            ("task:no-start-timeout", 30),
+        ] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    timeout_ms,
+                    false,
+                )
+                .unwrap();
+        }
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut results = HashMap::new();
+
+        while results.len() < 3 {
+            match scheduler.step().unwrap() {
+                Step::Child(child) => {
+                    unsafe {
+                        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+                    }
+
+                    if child.task_id == "task:stalled-eof" {
+                        unsafe {
+                            libc::close(child.fd);
+                        }
+                    } else if child.task_id == "task:stalled-terminal" {
+                        let started_ns = monotonic_ns().unwrap();
+                        write_frame(
+                            child.fd,
+                            &Frame::new(
+                                run_id.into(),
+                                child.task_id.clone(),
+                                "test".into(),
+                                "scope:root".into(),
+                                child.ordinal,
+                                0,
+                                "task.started".into(),
+                                json!({ "started_ns": started_ns }),
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap();
+                        write_frame(
+                            child.fd,
+                            &Frame::new(
+                                run_id.into(),
+                                child.task_id.clone(),
+                                "test".into(),
+                                "scope:root".into(),
+                                child.ordinal,
+                                1,
+                                "task.finished".into(),
+                                json!({
+                                    "status": "passed",
+                                    "failure": null,
+                                    "finished_ns": monotonic_ns().unwrap(),
+                                    "memory_peak_bytes": null
+                                }),
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap();
+                    }
+
+                    loop {
+                        unsafe {
+                            libc::pause();
+                        }
+                    }
+                }
+                Step::Result(result) => {
+                    results.insert(result.id.clone(), result);
+                }
+                Step::Progress => {
+                    if std::time::Instant::now() >= deadline {
+                        scheduler.cancel();
+                        panic!("stalled executor cleanup exceeded its bound");
+                    }
+                }
+                Step::Done => panic!("stalled executors did not produce results"),
+            }
+        }
+
+        assert_eq!(scheduler.active_count(), 0);
+        for id in ["task:stalled-eof", "task:stalled-terminal"] {
+            let failure = results[id].failure.as_ref().unwrap();
+            assert_eq!(failure["kind"], "child_protocol_failure");
+            assert_eq!(
+                failure["message"],
+                "The Drove child stopped its result protocol without exiting."
+            );
+        }
+        assert_eq!(
+            results["task:no-start-timeout"].failure.as_ref().unwrap()["kind"],
+            "timeout"
+        );
+    }
+
+    #[test]
+    fn does_not_signal_reaped_process_identities() {
+        let sockets = socket_pair().unwrap();
+        let sentinel = unsafe { libc::fork() };
+        assert_ne!(sentinel, -1);
+
+        if sentinel == 0 {
+            unsafe {
+                libc::close(sockets[1]);
+            }
+            if unsafe { libc::setpgid(0, 0) } != 0 || !write_anchor_ready(sockets[0]) {
+                unsafe {
+                    libc::_exit(1);
+                }
+            }
+
+            loop {
+                unsafe {
+                    libc::pause();
+                }
+            }
+        }
+
+        unsafe {
+            libc::close(sockets[0]);
+        }
+        read_anchor_ready(sockets[1]).unwrap();
+        unsafe {
+            libc::close(sockets[1]);
+        }
+
+        let task = Task {
+            ordinal: 0,
+            id: "task:reused-identity".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 0,
+            permit_names: Vec::new(),
+        };
+        let mut active =
+            ActiveTask::new(task, sentinel, sentinel, -1, -1, 0, "reused-identity-run");
+        active.reaped = true;
+        active.anchor_reaped = true;
+        active.signal_group(libc::SIGKILL);
+        let survived_signal = unsafe { libc::kill(sentinel, 0) } == 0;
+
+        let engine = Engine::new(
+            "reused-identity-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler.active.insert(sentinel, active);
+        scheduler.cancel();
+        let survived_cancel = unsafe { libc::kill(sentinel, 0) } == 0;
+
+        unsafe {
+            libc::kill(-sentinel, libc::SIGKILL);
+        }
+        wait_blocking(sentinel);
+
+        assert!(survived_signal);
+        assert!(survived_cancel);
+    }
+
+    #[test]
+    fn anchor_dies_when_its_parent_channel_closes() {
+        let sockets = socket_pair().unwrap();
+        let pid = unsafe { libc::fork() };
+        assert_ne!(pid, -1);
+
+        if pid == 0 {
+            unsafe {
+                libc::close(sockets[1]);
+            }
+            if !block_anchor_signals()
+                || unsafe { libc::setpgid(0, 0) } != 0
+                || !write_anchor_ready(sockets[0])
+            {
+                unsafe {
+                    libc::_exit(1);
+                }
+            }
+            wait_for_parent(sockets[0]);
+        }
+
+        unsafe {
+            libc::close(sockets[0]);
+            libc::setpgid(pid, pid);
+        }
+        read_anchor_ready(sockets[1]).unwrap();
+        assert_eq!(unsafe { libc::kill(-pid, libc::SIGUSR1) }, 0);
+        std::thread::sleep(Duration::from_millis(10));
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0);
+
+        unsafe {
+            libc::close(sockets[1]);
+        }
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFSIGNALED(status));
+        assert_eq!(libc::WTERMSIG(status), libc::SIGKILL);
     }
 
     #[test]

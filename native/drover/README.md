@@ -11,7 +11,8 @@ Rust owns:
   pools shared by every descendant;
 - atomic acquisition of every task permit before `fork()`;
 - a fresh bounded map for each scheduling wave;
-- `fork()`, isolated process groups, and nonblocking parent transport;
+- `fork()`, one inert live process-group anchor per task, and nonblocking
+  parent transport;
 - monotonic task deadlines and `SIGTERM` to `SIGKILL` group escalation;
 - `waitpid()`, result aggregation, interruption, and cancellation cleanup;
 - validation of the canonical versioned ChildProtocol frames.
@@ -41,9 +42,9 @@ docker run --rm drove-native-phase-one
 
 The Docker build runs locked Rust tests, warning-clean Clippy, and a release
 build. The PHP smoke then verifies the shared v1 vectors, global and scope
-permit reservation, prepared-memory inheritance, ordered result transport, PHP
-exception and timeout classification, and cleanup of an exec-style descendant
-that ignores `SIGTERM`.
+permit reservation, prepared-memory inheritance, ordered result transport,
+PHP exception, timeout, interruption, and crash classification, plus cleanup
+of `SIGTERM`-ignoring descendants after both timeout and executor crash.
 
 The closure gate is the Phase 1 kernel fixture:
 
@@ -64,6 +65,9 @@ tree cleanup, and native child `_exit` behavior.
   groups.
 - FFI remains the native bridge; Drove is not a PHP extension.
 - The scheduler is single-threaded and uses `poll()`, not pidfds/epoll.
+- Cleanup contains descendants that remain in the task process group; code
+  that creates a new session or process group requires a stronger OS sandbox.
+- The host must keep the default `SIGCHLD` disposition while a map runs.
 - Bail policy and a general output artifact store remain outside this slice.
 - Protocol v1 limits an individual frame to 1 MiB and aggregate stdout,
   stderr, or value data to 64 MiB. `ChildProtocol` chunks normal payloads.

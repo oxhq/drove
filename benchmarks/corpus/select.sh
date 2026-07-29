@@ -12,10 +12,14 @@ fi
 cd "$root"
 
 case "$target" in
-    pest)
+    pest|pest-nonserial|pest-serial)
         # Pest is the inherited source surface in this fork, not an external checkout.
         commit=
-        expected_files=143
+        case "$target" in
+            pest) expected_files=143 ;;
+            pest-nonserial) expected_files=140 ;;
+            pest-serial) expected_files=3 ;;
+        esac
         set -- tests/Unit tests/Features
         ;;
     invoiceshelf)
@@ -39,7 +43,7 @@ case "$target" in
         set -- tests/src/Support
         ;;
     *)
-        echo "usage: $0 pest|invoiceshelf|livewire|livewire-parallel|filament [corpus-root]" >&2
+        echo "usage: $0 pest|pest-nonserial|pest-serial|invoiceshelf|livewire|livewire-parallel|filament [corpus-root]" >&2
         exit 2
         ;;
 esac
@@ -74,7 +78,7 @@ selection=$(mktemp)
 trap 'rm -f "$selection"' EXIT HUP INT TERM
 
 case "$target" in
-    pest)
+    pest|pest-nonserial)
         find tests/Unit tests/Features -type f -name '*.php' -print |
             LC_ALL=C sort |
             while IFS= read -r path; do
@@ -136,10 +140,26 @@ case "$target" in
                         ;;
                 esac
 
+                if [ "$target" = pest-nonserial ]; then
+                    case "$path" in
+                        tests/Features/Expect/toBeFile.php|\
+                        tests/Features/Expect/toBeReadableFile.php|\
+                        tests/Features/Expect/toBeWritableFile.php)
+                            continue
+                            ;;
+                    esac
+                fi
+
                 if grep -Eq '(^|[^[:alnum:]_])(test|it|describe)[[:space:]]*\(' "$path"; then
                     printf '%s\n' "$path"
                 fi
             done > "$selection"
+        ;;
+    pest-serial)
+        printf '%s\n' \
+            tests/Features/Expect/toBeFile.php \
+            tests/Features/Expect/toBeReadableFile.php \
+            tests/Features/Expect/toBeWritableFile.php > "$selection"
         ;;
     invoiceshelf)
         find tests/Unit tests/Feature/Customer -type f -name '*.php' -print |

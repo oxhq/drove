@@ -193,6 +193,7 @@ final class DroverScheduler implements Scheduler
             return ['results' => [], 'completion_order' => []];
         }
 
+        $this->assertWaitableChildren();
         $normalized = [];
 
         foreach ($tasks as $ordinal => $task) {
@@ -607,5 +608,12 @@ final class DroverScheduler implements Scheduler
     private function releaseHeldPermits(): void
     {
         $this->ffi->drover_engine_release_all($this->engine);
+    }
+
+    private function assertWaitableChildren(): void
+    {
+        if (pcntl_signal_get_handler(SIGCHLD) !== SIG_DFL) {
+            throw new RuntimeException('Drover requires SIGCHLD to use its default waitable-child disposition.');
+        }
     }
 }
