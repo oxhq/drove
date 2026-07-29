@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../compatibility-bootstrap.php" failOnRisky="true">
+    <testsuites>
+        <testsuite name="Risky">
+            <file>NativeRiskyTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

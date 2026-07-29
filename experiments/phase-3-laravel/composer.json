@@ -47,14 +47,21 @@
             "Tests\\": "tests/"
         }
     },
+    "require-dev": {
+        "livewire/livewire": "^4.3.3",
+        "orchestra/testbench": "^11.1"
+    },
     "scripts": {
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"
         ],
         "proof": "php proof.php",
+        "proof:data-provider": "php proof-data-provider.php",
         "proof:guards": "php proof-runtime-guards.php",
-        "proof:mysql": "php proof-mysql.php"
+        "proof:mysql": "php proof-mysql.php",
+        "proof:testbench-guards": "php proof-testbench-guards.php",
+        "proof:testbench": "php proof-testbench.php"
     },
     "config": {
         "allow-plugins": {

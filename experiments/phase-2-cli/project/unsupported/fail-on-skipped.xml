@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../compatibility-bootstrap.php" failOnSkipped="true">
+    <testsuites>
+        <testsuite name="Skipped">
+            <file>NativeSkippedTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

@@ -17,15 +17,35 @@ final class Renderer
         $tests = is_array($run['tests'] ?? null) ? $run['tests'] : [];
         $scopes = is_array($run['scopes'] ?? null) ? $run['scopes'] : [];
         $lines = [sprintf('Drove %s', $run['run_id'] ?? '')];
-        $counts = array_fill_keys(['passed', 'failed', 'blocked', 'skipped', 'todo'], 0);
+        $counts = array_fill_keys(['passed', 'failed', 'blocked', 'skipped', 'todo', 'incomplete', 'risky'], 0);
+        $assertions = null;
+        $assertionsComplete = true;
 
         foreach ($tests as $test) {
             if (! is_array($test)) {
+                $assertionsComplete = false;
+
                 continue;
             }
 
             $status = is_string($test['status'] ?? null) ? $test['status'] : 'failed';
             $counts[$status] = ($counts[$status] ?? 0) + 1;
+            $value = $test['value'] ?? null;
+
+            if (is_array($value)
+                && is_int($value['assertions'] ?? null)
+                && is_string($value['phpunit_status'] ?? null)
+                && is_string($value['test_case'] ?? null)) {
+                $assertions ??= 0;
+                $assertions += $value['assertions'];
+            } else {
+                $assertionsComplete = false;
+            }
+
+            if (in_array($status, ['failed', 'blocked'], true)) {
+                $assertionsComplete = false;
+            }
+
             $name = is_string($test['name'] ?? null)
                 ? $test['name']
                 : (string) ($test['id'] ?? 'unknown test');
@@ -33,9 +53,9 @@ final class Renderer
             $message = $test['failure']['message'] ?? $test['message'] ?? null;
 
             if (! is_string($message)
-                && in_array($status, ['skipped', 'todo'], true)
-                && is_string($test['value'] ?? null)) {
-                $message = $test['value'];
+                && in_array($status, ['skipped', 'todo', 'incomplete', 'risky'], true)
+                && is_string(is_array($value) ? ($value['message'] ?? null) : $value)) {
+                $message = is_array($value) ? $value['message'] : $value;
             }
 
             if (is_string($message) && $message !== '') {
@@ -100,7 +120,7 @@ final class Renderer
 
         $summary = [];
 
-        foreach (['failed', 'blocked', 'skipped', 'todo', 'passed'] as $status) {
+        foreach (['failed', 'blocked', 'risky', 'skipped', 'todo', 'incomplete', 'passed'] as $status) {
             if ($counts[$status] > 0) {
                 $summary[] = sprintf('%d %s', $counts[$status], $status);
             }
@@ -112,7 +132,15 @@ final class Renderer
             $lines[] = 'Run: failed';
         }
 
+        if (($run['phpunit_warnings'] ?? false) === true) {
+            $lines[] = 'PHPUnit warnings: detected';
+        }
+
         $lines[] = sprintf('Tests: %s (%d)', implode(', ', $summary), count($tests));
+
+        if ($assertionsComplete && is_int($assertions)) {
+            $lines[] = sprintf('Assertions: %d', $assertions);
+        }
 
         return implode(PHP_EOL, $lines).PHP_EOL;
     }
@@ -123,6 +151,8 @@ final class Renderer
             'passed' => '✓',
             'skipped' => '-',
             'todo' => '…',
+            'incomplete' => '?',
+            'risky' => 'R',
             'blocked' => '!',
             default => '⨯',
         };

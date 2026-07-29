@@ -21,13 +21,23 @@ final readonly class TestOutcome
         return new self('passed', $value);
     }
 
-    public static function skipped(?string $reason = null): self
+    public static function skipped(mixed $value = null): self
     {
-        return new self('skipped', $reason);
+        return new self('skipped', $value);
     }
 
-    public static function todo(?string $reason = null): self
+    public static function todo(mixed $value = null): self
     {
-        return new self('todo', $reason);
+        return new self('todo', $value);
+    }
+
+    public static function incomplete(mixed $value = null): self
+    {
+        return new self('incomplete', $value);
+    }
+
+    public static function risky(mixed $value = null): self
+    {
+        return new self('risky', $value);
     }
 }

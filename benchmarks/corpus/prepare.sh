@@ -5,8 +5,8 @@ target=${1:-}
 drove_source=${DROVE_SOURCE:-}
 
 case "$target" in
-    invoiceshelf|larastreamers|phpreleases|filament) ;;
-    *) echo "usage: DROVE_SOURCE=/absolute/drove/path $0 invoiceshelf|larastreamers|phpreleases|filament" >&2; exit 2 ;;
+    invoiceshelf|livewire|filament) ;;
+    *) echo "usage: DROVE_SOURCE=/absolute/drove/path $0 invoiceshelf|livewire|filament" >&2; exit 2 ;;
 esac
 
 if [ -z "$drove_source" ] || [ ! -f "$drove_source/composer.json" ]; then
@@ -19,6 +19,20 @@ laravel_repository=$(printf '{"type":"path","url":"%s/packages/drove-laravel","o
 
 composer config --json repositories.drove "$drove_repository"
 composer config --json repositories.drove-laravel "$laravel_repository"
+
+if [ "$target" = livewire ]; then
+    composer require --dev --no-update --no-interaction \
+        laravel/framework:'13.23.0' \
+        oxhq/drove:'0.1.x-dev' \
+        oxhq/drove-laravel:'1.0.x-dev' \
+        phpunit/phpunit:'13.2.4'
+    composer update oxhq/drove oxhq/drove-laravel laravel/framework \
+        orchestra/testbench orchestra/testbench-core phpunit/phpunit \
+        --with-all-dependencies --no-scripts --no-interaction --no-progress
+    composer dump-autoload --no-interaction --optimize
+    exit 0
+fi
+
 composer remove --dev pestphp/pest --no-update --no-interaction
 composer require --dev --no-update --no-interaction \
     oxhq/drove:'0.1.x-dev' \
@@ -34,22 +48,8 @@ case "$target" in
             pestphp/pest-plugin-laravel pestphp/pest-plugin-faker phpunit/phpunit \
             --with-all-dependencies --no-scripts --no-interaction --no-progress
         ;;
-    larastreamers)
-        composer config platform.php 8.4.1
-        composer require --no-update --no-interaction laravel/framework:'13.23.0'
-        composer update oxhq/drove oxhq/drove-laravel laravel/framework \
-            pestphp/pest-plugin-laravel phpunit/phpunit \
-            --with-all-dependencies --no-scripts --no-interaction --no-progress
-        ;;
-    phpreleases)
-        composer require --no-update --no-interaction laravel/framework:'13.23.0'
-        composer update oxhq/drove oxhq/drove-laravel laravel/framework \
-            pestphp/pest-plugin-laravel phpunit/phpunit \
-            --with-all-dependencies --no-scripts --no-interaction --no-progress
-        ;;
     filament)
         composer require --dev --no-update --no-interaction pestphp/pest-plugin-browser:'5.0.0'
-        git apply "$drove_source/benchmarks/corpus/filament-provider.patch"
         composer update oxhq/drove oxhq/drove-laravel pestphp/pest-plugin-browser \
             pestphp/pest-plugin-laravel phpunit/phpunit \
             --with-all-dependencies --no-scripts --no-interaction --no-progress

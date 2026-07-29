@@ -47,6 +47,13 @@ $processGuard = $run(
     [PHP_BINARY, 'runtime-guard-worker.php', 'process'],
     ['APP_ENV' => 'production'],
 );
+$connectionGuard = $run(
+    [PHP_BINARY, 'runtime-guard-worker.php', 'connection'],
+    [
+        'APP_ENV' => 'testing',
+        'DROVE_LARAVEL_DB_CONNECTION' => 'secondary',
+    ],
+);
 $cacheBuild = null;
 $applicationGuard = null;
 $cachedEnvironment = null;
@@ -75,6 +82,7 @@ try {
 
 $cacheRemoved = ! file_exists($cache);
 $passed = ($processGuard['exit_code'] ?? null) === 0
+    && ($connectionGuard['exit_code'] ?? null) === 0
     && ($cacheBuild['exit_code'] ?? null) === 0
     && $cachedEnvironment === 'production'
     && ($applicationGuard['exit_code'] ?? null) === 0
@@ -83,6 +91,7 @@ $passed = ($processGuard['exit_code'] ?? null) === 0
 fwrite(STDOUT, json_encode([
     'status' => $passed ? 'passed' : 'failed',
     'process_guard' => $processGuard,
+    'connection_guard' => $connectionGuard,
     'cache_build' => $cacheBuild,
     'cached_environment' => $cachedEnvironment,
     'application_guard' => $applicationGuard,

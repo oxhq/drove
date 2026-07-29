@@ -26,10 +26,23 @@ Run from the repository root:
 ```bash
 docker build -f experiments/phase-3-laravel/Dockerfile -t drove-phase-three-laravel .
 docker run --rm drove-phase-three-laravel
+docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
+docker run --rm drove-phase-three-laravel php proof-testbench.php
+docker run --rm drove-phase-three-laravel php proof-data-provider.php
 ```
 
-This proves one file-backed SQLite path only. It does not prove queues, WAL,
-reflinks, multiple databases, Redis, HTTP resources, or production readiness.
+This proves one file-backed SQLite default connection only. The configured
+selected connection must equal Laravel's default. It does not prove queues,
+WAL, reflinks, multiple databases, Redis, HTTP resources, or production
+readiness. Explicit secondary writes may happen before cleanup rejects the
+newly resolved connection, so every configured database must be disposable.
+
+The three focused commands prove the Testbench profile and attribute guards, a
+single prepared Testbench application over inherited in-memory SQLite, the
+required `prepared_schema=true` contract for `RefreshDatabase`, and application
+data-provider expansion after Laravel boot. `DROVE_LARAVEL_RUNTIME=auto`
+selects a normal application when `bootstrap/app.php` exists and otherwise
+defers to Testbench; `application` and `testbench` force either mode.
 
 ## MySQL transaction proof
 
@@ -39,8 +52,8 @@ must be supplied by the caller. The proof creates and commits one prepared row
 in file `beforeAll`, confirms two distinct transactional children each run at
 transaction depth one and see only their own write, confirms `afterAll` sees
 only the prepared row, confirms paired cleanup after a failed transaction
-`beforeDispatch`, rejects Laravel's migration/truncation traits while allowing
-`DatabaseTransactions`, and drops the proof table.
+`beforeDispatch`, rejects Laravel's migration/transaction/truncation traits,
+and drops the proof table.
 
 For an image named `drove-phase-three-laravel`, run:
 

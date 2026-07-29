@@ -1,6 +1,6 @@
 FROM drove-phase-three-laravel:latest
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libicu-dev \
+    && apt-get install -y --no-install-recommends git libicu-dev \
     && rm -rf /var/lib/apt/lists/* \
     && docker-php-ext-install intl sockets

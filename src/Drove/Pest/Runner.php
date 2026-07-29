@@ -13,6 +13,11 @@ use InvalidArgumentException;
 use ParaTest\Options;
 use Pest\Kernel as PestKernel;
 use Pest\TestSuite as PestTestSuite;
+use PHPUnit\Event\Facade as EventFacade;
+use PHPUnit\Framework\TestSuite;
+use PHPUnit\Runner\DeprecationCollector\Facade as DeprecationCollector;
+use PHPUnit\Runner\TestSuiteSorter;
+use PHPUnit\TestRunner\TestResult\Facade as TestResultFacade;
 use PHPUnit\TextUI\Configuration\BootstrapLoader;
 use PHPUnit\TextUI\Configuration\Builder;
 use PHPUnit\TextUI\Configuration\PhpHandler;
@@ -126,6 +131,10 @@ final class Runner
         $outputLevel = ob_get_level();
         $runFailure = null;
         $run = null;
+        $failOnRisky = false;
+        $failOnEmptyTestSuite = false;
+        $failOnPhpunitWarning = true;
+        $phpunitWarnings = false;
 
         try {
             PestKernel::boot(
@@ -144,16 +153,89 @@ final class Runner
                 throw new InvalidArgumentException('Drove does not support enforceTimeLimit from PHPUnit XML yet.');
             }
 
+            if ($configuration->failOnIncomplete()) {
+                throw new InvalidArgumentException('Drove does not support failOnIncomplete from PHPUnit XML yet.');
+            }
+
+            if ($configuration->failOnAllIssues()
+                || $configuration->failOnDeprecation()
+                || $configuration->failOnPhpunitDeprecation()
+                || $configuration->failOnPhpunitNotice()
+                || $configuration->failOnNotice()
+                || $configuration->failOnSkipped()
+                || $configuration->failOnWarning()) {
+                throw new InvalidArgumentException('Drove does not support this PHPUnit failOn policy from XML yet.');
+            }
+
+            if ($configuration->stopOnDefectThreshold() > 0
+                || $configuration->stopOnDeprecationThreshold() > 0
+                || $configuration->stopOnErrorThreshold() > 0
+                || $configuration->stopOnFailureThreshold() > 0
+                || $configuration->stopOnIncompleteThreshold() > 0
+                || $configuration->stopOnNoticeThreshold() > 0
+                || $configuration->stopOnRiskyThreshold() > 0
+                || $configuration->stopOnSkippedThreshold() > 0
+                || $configuration->stopOnWarningThreshold() > 0
+                || $configuration->hasSpecificDeprecationToStopOn()) {
+                throw new InvalidArgumentException('Drove does not support PHPUnit stopOn policies from XML yet.');
+            }
+
+            if ($configuration->beStrictAboutChangesToGlobalState()) {
+                throw new InvalidArgumentException('Drove does not support beStrictAboutChangesToGlobalState from PHPUnit XML yet.');
+            }
+
+            if ($configuration->strictCoverage()
+                || $configuration->requireCoverageContribution()
+                || $configuration->requireCoverageMetadata()) {
+                throw new InvalidArgumentException('Drove does not support strict PHPUnit coverage modes from XML yet.');
+            }
+
+            if ($configuration->disallowTestOutput()) {
+                throw new InvalidArgumentException('Drove does not support disallowTestOutput from PHPUnit XML yet.');
+            }
+
+            if ($configuration->extensionBootstrappers() !== []) {
+                throw new InvalidArgumentException('Drove does not support PHPUnit extensions yet.');
+            }
+
+            if ($configuration->executionOrder() !== TestSuiteSorter::ORDER_DEFAULT
+                || $configuration->executionOrderDefects() !== TestSuiteSorter::ORDER_DEFAULT) {
+                throw new InvalidArgumentException('Drove does not support non-default PHPUnit execution order yet.');
+            }
+
+            $failOnRisky = $configuration->failOnRisky();
+            $failOnEmptyTestSuite = $configuration->failOnEmptyTestSuite();
+            $failOnPhpunitWarning = $configuration->failOnPhpunitWarning();
+            DeprecationCollector::init();
+            TestResultFacade::init();
             (new PhpHandler)->handle($configuration->php());
             (new BootstrapLoader)->handle($configuration);
-            $laravel = $this->laravelRuntime($rootPath);
+            $this->bootLaravelBeforeSuite($rootPath);
             $suite = (new TestSuiteBuilder)->build($configuration);
             (new TestSuiteFilterProcessor)->process($configuration, $suite);
+            $laravel = $this->laravelRuntime($rootPath, $suite);
             $runtime = TestCaseRuntime::fromSuite(
                 $compiler,
                 $suite,
                 $this->callback($laravel, 'bindTestCase'),
+                $configuration->reportUselessTests(),
+                capturePhpunitWarnings: true,
             );
+            EventFacade::instance()->seal();
+            $phpunitResult = TestResultFacade::result();
+
+            if ($phpunitResult->hasErrors()) {
+                throw new InvalidArgumentException(
+                    'Drove cannot plan a suite that triggered a PHPUnit error during discovery.',
+                );
+            }
+
+            $phpunitWarnings = $phpunitResult->testTriggeredPhpunitWarningEvents() !== []
+                || array_any(
+                    $phpunitResult->testRunnerTriggeredWarningEvents(),
+                    static fn (object $event): bool => $event->message()
+                        !== 'No tests found in class "Pest\\TestCases\\IgnorableTestCase".',
+                );
             $resolvers = $runtime->resolvers();
 
             $executor = new LifecycleExecutor(
@@ -198,6 +280,32 @@ final class Runner
             throw new RuntimeException('Drove produced an invalid exit code.');
         }
 
+        if ($failOnRisky
+            && array_any(
+                is_array($run['tests'] ?? null) ? $run['tests'] : [],
+                static fn (mixed $test): bool => is_array($test)
+                    && ($test['status'] ?? null) === 'risky',
+            )) {
+            $run['exit_code'] = $exitCode = 1;
+        }
+
+        $phpunitWarnings = $phpunitWarnings || array_any(
+            is_array($run['tests'] ?? null) ? $run['tests'] : [],
+            static fn (mixed $test): bool => is_array($test)
+                && is_array($test['value'] ?? null)
+                && ($test['value']['phpunit_warnings'] ?? 0) > 0,
+        );
+        $run['phpunit_warnings'] = $phpunitWarnings;
+
+        if ($failOnPhpunitWarning && $phpunitWarnings) {
+            $run['exit_code'] = $exitCode = 1;
+        }
+
+        if ($failOnEmptyTestSuite
+            && (is_array($run['tests'] ?? null) ? $run['tests'] : []) === []) {
+            $run['exit_code'] = $exitCode = 1;
+        }
+
         if (fwrite(STDOUT, (new Renderer)->render($run)) === false) {
             throw new RuntimeException('Drove could not write its result.');
         }
@@ -205,7 +313,7 @@ final class Runner
         return $exitCode;
     }
 
-    private function laravelRuntime(string $rootPath): ?object
+    private function laravelRuntime(string $rootPath, TestSuite $suite): ?object
     {
         $class = 'Drove\\Laravel\\LaravelRuntime';
 
@@ -214,12 +322,12 @@ final class Runner
         }
 
         try {
-            $boot = new ReflectionMethod($class, 'boot');
+            $boot = new ReflectionMethod($class, 'bootForSuite');
         } catch (ReflectionException) {
-            throw new RuntimeException('drove-laravel is missing boot().');
+            throw new RuntimeException('drove-laravel is missing bootForSuite().');
         }
 
-        $runtime = $boot->invoke(null, $rootPath);
+        $runtime = $boot->invoke(null, $rootPath, $suite);
 
         if (! is_object($runtime)) {
             throw new RuntimeException('drove-laravel returned an invalid runtime.');
@@ -242,6 +350,27 @@ final class Runner
         }
 
         return $runtime;
+    }
+
+    private function bootLaravelBeforeSuite(string $rootPath): void
+    {
+        $class = 'Drove\\Laravel\\LaravelRuntime';
+
+        if (! class_exists($class)) {
+            return;
+        }
+
+        try {
+            $boot = new ReflectionMethod($class, 'bootBeforeSuite');
+        } catch (ReflectionException) {
+            throw new RuntimeException('drove-laravel is missing bootBeforeSuite().');
+        }
+
+        $runtime = $boot->invoke(null, $rootPath);
+
+        if ($runtime !== null && ! is_object($runtime)) {
+            throw new RuntimeException('drove-laravel returned an invalid pre-suite runtime.');
+        }
     }
 
     private function callback(?object $runtime, string $method): ?Closure

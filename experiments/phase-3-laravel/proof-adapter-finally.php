@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Drove\Kernel\StateAdapterException;
 use Drove\Laravel\LaravelRuntime;
+use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -11,14 +12,13 @@ require __DIR__.'/vendor/autoload.php';
 
 $runtime = LaravelRuntime::boot(__DIR__);
 $scope = $runtime->scopeContext();
-$testbenchCase = new class('placeholder') extends PHPUnit\Framework\TestCase
+$testbenchCase = new class('placeholder') extends Orchestra\Testbench\TestCase
 {
     public function placeholder(): void
     {
         //
     }
 };
-class_alias($testbenchCase::class, 'Orchestra\\Testbench\\TestCase');
 $testbenchFailure = null;
 
 try {
@@ -40,7 +40,7 @@ try {
 
 $passed = $beforeFailure === 'Drove Laravel received an invalid descendant task.'
     && $testbenchFailure
-        === 'Drove Laravel does not support Orchestra Testbench TestCase instances yet.';
+        === 'Drove Laravel Orchestra Testbench cases require bootForSuite().';
 
 try {
     $runtime->afterDispatch($scope, $invalidTasks);
@@ -51,6 +51,7 @@ try {
 
 $sqliteTraitChecked = $runtime->stateAdapter()->name() === 'sqlite-copy';
 $sqliteTraitFailure = null;
+$sqliteTruncationFailure = null;
 
 if ($sqliteTraitChecked) {
     $case = new class('placeholder') extends TestCase
@@ -69,6 +70,27 @@ if ($sqliteTraitChecked) {
         $sqliteTraitFailure = $throwable::class.': '.$throwable->getMessage();
         $passed = false;
     }
+
+    $truncationCase = new class('placeholder') extends TestCase
+    {
+        use DatabaseTruncation;
+
+        public function placeholder(): void
+        {
+            //
+        }
+    };
+
+    try {
+        $runtime->bindTestCase($truncationCase, $scope);
+    } catch (StateAdapterException $exception) {
+        $sqliteTruncationFailure = $exception->getMessage();
+    }
+
+    $passed = $passed
+        && $sqliteTruncationFailure
+            === 'Drove Laravel sqlite-copy mode does not support TestCase trait '
+                .DatabaseTruncation::class.'.';
 }
 
 fwrite(STDOUT, json_encode([
@@ -79,6 +101,7 @@ fwrite(STDOUT, json_encode([
     'testbench_failure' => $testbenchFailure,
     'sqlite_refresh_database_checked' => $sqliteTraitChecked,
     'sqlite_refresh_database_failure' => $sqliteTraitFailure,
+    'sqlite_truncation_failure' => $sqliteTruncationFailure,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);
 
 exit($passed ? 0 : 1);
