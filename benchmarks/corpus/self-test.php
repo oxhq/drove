@@ -3,7 +3,13 @@
 declare(strict_types=1);
 
 $samples = [
-    "Tests:    71 skipped, 726 passed (1718 assertions)\n" => [
+    "  Tests:    71 skipped, 726 passed (1718 assertions)\n" => [
+        'tests' => 797,
+        'passed' => 726,
+        'skipped' => 71,
+        'assertions' => 1718,
+    ],
+    "Tests: 71 skipped, 726 passed (797)\nAssertions: 1718\n" => [
         'tests' => 797,
         'passed' => 726,
         'skipped' => 71,

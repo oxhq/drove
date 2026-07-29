@@ -32,7 +32,7 @@ $summary = [
     'assertions' => 0,
 ];
 
-preg_match_all('/^Tests:\s*(.+)$/mi', $plain, $matches);
+preg_match_all('/^\s*Tests:\s*(.+)$/mi', $plain, $matches);
 $line = trim((string) end($matches[1]));
 
 if ($line === '') {
@@ -94,6 +94,13 @@ if ($line === '') {
         $summary,
         array_flip(['passed', 'failed', 'errors', 'skipped', 'incomplete', 'risky']),
     ));
+}
+
+preg_match_all('/^\s*Assertions:\s*(\d+)\s*$/mi', $plain, $assertionMatches);
+$assertions = end($assertionMatches[1]);
+
+if ($assertions !== false) {
+    $summary['assertions'] = (int) $assertions;
 }
 
 $result = [
