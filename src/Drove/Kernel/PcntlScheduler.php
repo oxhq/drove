@@ -647,6 +647,16 @@ final class PcntlScheduler implements Scheduler
             'signal' => $signal,
         ];
 
+        if ($child['cleanup_failed']) {
+            return $this->failedResult(
+                $task,
+                FailureKind::BlockedDescendant,
+                'A Drove descendant kept the task channel open after forced cleanup.',
+                $telemetry,
+                $child['frames'],
+            );
+        }
+
         if ($child['interrupted_signal'] !== null) {
             return $this->failedResult(
                 $task,
@@ -662,16 +672,6 @@ final class PcntlScheduler implements Scheduler
                 $task,
                 FailureKind::Timeout,
                 'The Drove task exceeded its timeout.',
-                $telemetry,
-                $child['frames'],
-            );
-        }
-
-        if ($child['cleanup_failed']) {
-            return $this->failedResult(
-                $task,
-                FailureKind::BlockedDescendant,
-                'A Drove descendant kept the task channel open after forced cleanup.',
                 $telemetry,
                 $child['frames'],
             );

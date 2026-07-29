@@ -662,7 +662,12 @@ impl ActiveTask {
             return;
         }
 
-        if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, !self.reaped) {
+        if let Err(error) = signal_process_tree(
+            self.pid,
+            libc::SIGTERM,
+            !self.reaped,
+            self.exited && !self.reaped,
+        ) {
             self.protocol_error.get_or_insert(error);
         }
         self.cleanup_term_ns = Some(now_ns);
@@ -690,7 +695,7 @@ impl ActiveTask {
                     .unwrap_or_default();
 
                 if now_ns >= deadline_ns.max(terminal_grace) {
-                    if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, true) {
+                    if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, true, false) {
                         self.protocol_error.get_or_insert(error);
                     }
                     self.timed_out = true;
@@ -714,7 +719,12 @@ impl ActiveTask {
         if self.kill_ns.is_none()
             && escalation_ns.is_some_and(|started| now_ns.saturating_sub(started) >= grace_ns)
         {
-            if let Err(error) = signal_process_tree(self.pid, libc::SIGKILL, !self.reaped) {
+            if let Err(error) = signal_process_tree(
+                self.pid,
+                libc::SIGKILL,
+                !self.reaped,
+                self.exited && !self.reaped,
+            ) {
                 self.protocol_error.get_or_insert(error);
             }
             self.kill_ns = Some(now_ns);
@@ -763,6 +773,16 @@ impl ActiveTask {
             );
         }
 
+        if self.cleanup_failed {
+            return failed_result(
+                self.task,
+                "blocked_descendant",
+                "A Drove descendant kept the task channel open after forced cleanup.".into(),
+                telemetry,
+                self.frames,
+            );
+        }
+
         if let Some(interrupted) = self.interrupted_signal {
             return failed_result(
                 self.task,
@@ -788,16 +808,6 @@ impl ActiveTask {
                 self.task,
                 "signal_termination",
                 format!("The Drove task ended from signal {signal}."),
-                telemetry,
-                self.frames,
-            );
-        }
-
-        if self.cleanup_failed {
-            return failed_result(
-                self.task,
-                "blocked_descendant",
-                "A Drove descendant kept the task channel open after forced cleanup.".into(),
                 telemetry,
                 self.frames,
             );
@@ -1425,6 +1435,7 @@ fn signal_process_tree(
     pid: libc::pid_t,
     signal: i32,
     allow_direct_child: bool,
+    zombie_anchor: bool,
 ) -> Result<(), String> {
     if unsafe { libc::kill(-pid, signal) } == 0 {
         return Ok(());
@@ -1443,6 +1454,15 @@ fn signal_process_tree(
     }
 
     if unsafe { libc::kill(pid, signal) } == 0 {
+        // Darwin can reject a group SIGKILL when its retained leader is a zombie.
+        if cfg!(target_os = "macos")
+            && signal == libc::SIGKILL
+            && zombie_anchor
+            && group_error.raw_os_error() == Some(libc::EPERM)
+        {
+            return Ok(());
+        }
+
         return Err(format!(
             "Drover could not send signal {signal} to process group {pid}: {group_error}; \
              the child was signaled directly but descendant cleanup is not guaranteed."
@@ -1764,6 +1784,31 @@ mod tests {
     }
 
     #[test]
+    fn reports_blocked_descendant_before_timeout_or_interruption() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:blocked-descendant".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1,
+            permit_names: Vec::new(),
+        };
+        let mut active = ActiveTask::new(
+            task,
+            unsafe { libc::getpid() },
+            -1,
+            "blocked-descendant-run",
+        );
+        active.cleanup_failed = true;
+        active.timed_out = true;
+        active.interrupted_signal = Some(libc::SIGINT);
+
+        let result = active.into_result();
+
+        assert_eq!(result.failure.unwrap()["kind"], "blocked_descendant");
+    }
+
+    #[test]
     fn retains_exited_group_leader_until_forced_cleanup() {
         for mode in ["timeout", "interruption", "crash"] {
             let pid = unsafe { libc::fork() };
@@ -1826,7 +1871,8 @@ mod tests {
 
     #[test]
     fn reports_group_and_child_signal_failures() {
-        let error = signal_process_tree(unsafe { libc::getpid() }, i32::MAX, true).unwrap_err();
+        let error =
+            signal_process_tree(unsafe { libc::getpid() }, i32::MAX, true, false).unwrap_err();
 
         assert!(error.contains("process group"));
         assert!(error.contains("or child"));

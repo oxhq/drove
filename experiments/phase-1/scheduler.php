@@ -110,7 +110,7 @@ $assert(
 $escaped = new PcntlScheduler('scheduler-escaped', 1, termGraceMs: 25);
 $started = hrtime(true);
 $escapedRun = $escaped->map(
-    [$task('escaped-descendant')],
+    [$task('escaped-descendant', timeout: 200)],
     static function (): string {
         $pid = pcntl_fork();
 
@@ -124,6 +124,8 @@ $escapedRun = $escaped->map(
             exit(0);
         }
 
+        usleep(1_500_000);
+
         return 'parent-finished';
     },
 );
@@ -131,7 +133,7 @@ $escapedMs = (hrtime(true) - $started) / 1_000_000;
 $assert(
     $escapedRun['results'][0]['failure']['kind'] === FailureKind::BlockedDescendant->value
         && $escapedMs < 700,
-    'An escaped descendant kept the PHP scheduler blocked.',
+    'A timed-out escaped descendant was not classified as blocked.',
 );
 
 $nested = new PcntlScheduler('scheduler-nested', 1, termGraceMs: 25);
