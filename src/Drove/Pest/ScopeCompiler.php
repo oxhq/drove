@@ -566,11 +566,15 @@ final class ScopeCompiler
             }
         }
 
-        $node['tests'] = $tests;
-        $node['children'] = array_map(
+        $children = array_map(
             fn (array $child): array => $this->expandCases($child, $expanded),
             $node['children'],
         );
+        $node['tests'] = $tests;
+        $node['children'] = array_values(array_filter(
+            $children,
+            static fn (array $child): bool => $child['tests'] !== [] || $child['children'] !== [],
+        ));
 
         return $node;
     }

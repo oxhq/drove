@@ -54,6 +54,26 @@ test('rethrows the original assertion failure', function (): void {
     expect('actual')->toBe('expected');
 });
 
-test('is removed by PHPUnit filtering', function (): never {
-    throw new RuntimeException('A filtered Pest case was cataloged.');
-})->group('filtered-out');
+describe('filtered parent', function (): void {
+    beforeAll(function (): void {
+        $GLOBALS['drove_phase_two_filtered_hooks']++;
+    });
+
+    afterAll(function (): void {
+        $GLOBALS['drove_phase_two_filtered_hooks']++;
+    });
+
+    describe('filtered child', function (): void {
+        beforeAll(function (): void {
+            $GLOBALS['drove_phase_two_filtered_hooks']++;
+        });
+
+        afterAll(function (): void {
+            $GLOBALS['drove_phase_two_filtered_hooks']++;
+        });
+
+        test('is removed by PHPUnit filtering', function (): never {
+            throw new RuntimeException('A filtered Pest case was cataloged.');
+        })->group('filtered-out');
+    });
+});

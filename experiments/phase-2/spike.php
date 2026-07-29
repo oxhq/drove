@@ -33,6 +33,7 @@ $GLOBALS['drove_phase_two_hooks'] = [
 ];
 $GLOBALS['drove_phase_two_custom'] = [];
 $GLOBALS['drove_phase_two_bodies'] = [];
+$GLOBALS['drove_phase_two_filtered_hooks'] = 0;
 
 $outputBufferLevel = ob_get_level();
 PestKernel::boot(
@@ -117,6 +118,16 @@ try {
         $compiler->hook($hookId)->call($scopeContext);
     }
 
+    foreach ($file['children'] as $child) {
+        foreach ($child['hooks']['before_all'] as $hookId) {
+            $compiler->hook($hookId)->call($scopeContext);
+        }
+
+        foreach (array_reverse($child['hooks']['after_all']) as $hookId) {
+            $compiler->hook($hookId)->call($scopeContext);
+        }
+    }
+
     foreach ($tests as $test) {
         $id = $test['id'];
         $resolver = $resolvers[$id];
@@ -195,6 +206,8 @@ $assert(
     ],
     'Pest hooks were lost or executed twice.',
 );
+$assert($GLOBALS['drove_phase_two_filtered_hooks'] === 0, 'Hooks ran for a fully filtered describe subtree.');
+$assert($file['children'] === [], 'A fully filtered describe subtree remained in Scope IR.');
 $assert(
     array_keys($GLOBALS['drove_phase_two_bodies']) === ['alpha', 'beta']
         && array_column($GLOBALS['drove_phase_two_bodies'], 'binding') === [
