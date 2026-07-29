@@ -15,6 +15,9 @@ use Throwable;
  */
 final readonly class LifecycleExecutor
 {
+    /**
+     * @param  Closure(string): (Closure|array{closure: Closure, runtime?: object})  $testResolver
+     */
     public function __construct(
         private Scheduler $scheduler,
         private Closure $hookResolver,
@@ -347,14 +350,14 @@ final readonly class LifecycleExecutor
 
         $descendantFailed = array_any(
             $tests,
-            static fn (array $test): bool => $test['status'] !== 'passed',
+            static fn (array $test): bool => $test['failure'] !== null,
         ) || array_any(
             $scopes,
-            static fn (array $child): bool => $child['status'] !== 'passed',
+            static fn (array $child): bool => $child['failure'] !== null,
         );
         $failedDescendant = array_find(
             [...$tests, ...$scopes],
-            static fn (array $result): bool => $result['status'] !== 'passed',
+            static fn (array $result): bool => $result['failure'] !== null,
         );
         $scope['status'] = $scopeFailures === [] && ! $descendantFailed ? 'passed' : 'failed';
         $scope['failure'] = $scopeFailures[0] ?? $failedDescendant['failure'] ?? null;
@@ -389,10 +392,13 @@ final readonly class LifecycleExecutor
         }
 
         $scopeId = $levels[count($levels) - 1]['id'];
+        $context = $context->child(['test_id' => $testId]);
+        ['closure' => $body, 'runtime' => $runtime] = $this->test($testId);
         $events = [$this->event('test.started', $scopeId, $testId, status: 'running')];
         $completed = [];
         $primaryFailure = null;
         $teardownFailures = [];
+        $outcome = TestOutcome::passed();
         $outputLevel = ob_get_level();
         ob_start();
 
@@ -409,7 +415,7 @@ final readonly class LifecycleExecutor
                 );
 
                 try {
-                    $this->invoke($this->hook($hookId), $context);
+                    $this->invoke($this->hook($hookId), $context, $runtime);
                     $events[] = $this->event(
                         'hook.finished',
                         $level['id'],
@@ -451,12 +457,15 @@ final readonly class LifecycleExecutor
             );
 
             try {
-                $this->invoke($this->test($testId), $context);
+                $returned = $this->invoke($body, $context, $runtime);
+                $outcome = $returned instanceof TestOutcome
+                    ? $returned
+                    : TestOutcome::passed();
                 $events[] = $this->event(
                     'test.body.finished',
                     $scopeId,
                     $testId,
-                    status: 'passed',
+                    status: $outcome->status,
                 );
             } catch (Throwable $throwable) {
                 $primaryFailure = $this->failure($throwable, 'test', null);
@@ -489,7 +498,7 @@ final readonly class LifecycleExecutor
                 );
 
                 try {
-                    $this->invoke($this->hook($hookId), $context);
+                    $this->invoke($this->hook($hookId), $context, $runtime);
                     $events[] = $this->event(
                         'hook.finished',
                         $level['id'],
@@ -521,7 +530,7 @@ final readonly class LifecycleExecutor
             $stdout = ob_get_clean().$stdout;
         }
 
-        $status = $primaryFailure === null ? 'passed' : 'failed';
+        $status = $primaryFailure === null ? $outcome->status : 'failed';
         $events[] = $this->event(
             'test.finished',
             $scopeId,
@@ -534,10 +543,11 @@ final readonly class LifecycleExecutor
             'id' => $testId,
             'scope_id' => $scopeId,
             'scopes' => array_column($levels, 'id'),
+            ...$this->testMetadata($test),
             'status' => $status,
             'failure' => $primaryFailure,
             'teardown_failures' => $teardownFailures,
-            'value' => null,
+            'value' => $outcome->value,
             'stdout' => $stdout,
             'stderr' => '',
             'events' => $events,
@@ -571,6 +581,7 @@ final readonly class LifecycleExecutor
                 'id' => $id,
                 'scope_id' => $scopeId,
                 'scopes' => [$scopeId],
+                ...$this->testMetadata($test),
                 'status' => 'blocked',
                 'failure' => $blockedFailure,
                 'teardown_failures' => [],
@@ -685,6 +696,7 @@ final readonly class LifecycleExecutor
             'id' => $this->string($test, 'id'),
             'scope_id' => $transport['scope_id'],
             'scopes' => $scopes,
+            ...$this->testMetadata($test),
             'status' => 'failed',
             'failure' => $transport['failure'],
             'teardown_failures' => [],
@@ -779,16 +791,33 @@ final readonly class LifecycleExecutor
             : throw new RuntimeException(sprintf('Drove could not resolve hook %s.', $id));
     }
 
-    private function test(string $id): Closure
+    /**
+     * @return array{closure: Closure, runtime: ?object}
+     */
+    private function test(string $id): array
     {
         $test = ($this->testResolver)($id);
 
-        return $test instanceof Closure
-            ? $test
-            : throw new RuntimeException(sprintf('Drove could not resolve test %s.', $id));
+        if ($test instanceof Closure) {
+            return ['closure' => $test, 'runtime' => null];
+        }
+
+        $closure = is_array($test) ? ($test['closure'] ?? null) : null;
+        $runtime = is_array($test) ? ($test['runtime'] ?? null) : null;
+
+        if (! $closure instanceof Closure
+            || ($runtime !== null && ! is_object($runtime))) {
+            throw new RuntimeException(sprintf('Drove could not resolve test %s.', $id));
+        }
+
+        return ['closure' => $closure, 'runtime' => $runtime];
     }
 
-    private function invoke(Closure $closure, ScopeContext $context): mixed
+    private function invoke(
+        Closure $closure,
+        ScopeContext $context,
+        ?object $runtime = null,
+    ): mixed
     {
         $reflection = new ReflectionFunction($closure);
 
@@ -800,7 +829,39 @@ final readonly class LifecycleExecutor
 
         return $reflection->isStatic()
             ? $closure(...$arguments)
-            : $closure->call($context, ...$arguments);
+            : $closure->call($runtime ?? $context, ...$arguments);
+    }
+
+    /**
+     * @param  array<string, mixed>  $test
+     * @return array{name: ?string, source: array{path: string, line: int}|null, dataset: array{key: int|string, label: string}|null, groups: list<string>}
+     */
+    private function testMetadata(array $test): array
+    {
+        $name = $test['name'] ?? null;
+        $source = $test['source'] ?? null;
+        $dataset = $test['dataset'] ?? null;
+        $groups = $test['groups'] ?? [];
+
+        if (($name !== null && ! is_string($name))
+            || ($source !== null && (! is_array($source)
+                || ! is_string($source['path'] ?? null)
+                || ! is_int($source['line'] ?? null)))
+            || ($dataset !== null && (! is_array($dataset)
+                || (! is_int($dataset['key'] ?? null) && ! is_string($dataset['key'] ?? null))
+                || ! is_string($dataset['label'] ?? null)))
+            || ! is_array($groups)
+            || ! array_is_list($groups)
+            || array_any($groups, static fn (mixed $group): bool => ! is_string($group))) {
+            throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+        }
+
+        return [
+            'name' => $name,
+            'source' => $source,
+            'dataset' => $dataset,
+            'groups' => $groups,
+        ];
     }
 
     /**
