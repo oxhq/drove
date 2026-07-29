@@ -57,14 +57,51 @@ fi
 
 mkdir -p "$(dirname "$output")"
 raw="${output%.json}.raw.log"
+measurement="${output%.json}.measurement.json"
+run=${CORPUS_RUN:-1}
+
+case "$run" in
+    ''|*[!0-9]*|0)
+        echo "CORPUS_RUN must be a positive integer" >&2
+        exit 2
+        ;;
+esac
+
+replay=
+
+for argument in "$@"; do
+    case "$argument" in
+        --replay=*)
+            if [ -n "$replay" ]; then
+                echo "Drove corpus records require exactly one --replay= artifact" >&2
+                exit 2
+            fi
+
+            replay=${argument#--replay=}
+            ;;
+    esac
+done
+
+if [ "$runner" = drove ] && [ -z "$replay" ]; then
+    echo "Drove corpus records require --replay= metadata" >&2
+    exit 2
+fi
 
 set +e
-"$@" >"$raw" 2>&1
+php "$drove_source/benchmarks/corpus/measure.php" "$measurement" "$raw" -- "$@"
 status=$?
 set -e
 
-cat "$raw"
+if [ -f "$raw" ]; then
+    cat "$raw"
+fi
+
+if [ "$runner" = drove ] && [ ! -f "$replay" ]; then
+    echo "Drove replay artifact was not created: $replay" >&2
+    exit 2
+fi
 
 php "$drove_source/benchmarks/corpus/normalize.php" \
     "$corpus" "$runner" "$cohort" "$processes" "$selected_files" \
-    "$revision" "$status" "$raw" "$output"
+    "$revision" "$status" "$run" "$raw" "$measurement" \
+    "${replay:--}" "$output"

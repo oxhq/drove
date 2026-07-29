@@ -130,9 +130,12 @@ vendor/bin/drove --parallel --processes=8 \
 
 The destination directory must already exist, and Drove never overwrites an
 existing artifact. The JSON records a plan hash, counts, failure kinds,
-completion order, concurrency, platform, and redacted arguments. It omits
-outputs, values, environment variables, and failure messages. Inspect it
-before sharing because paths and non-secret command arguments remain visible.
+completion order, concurrency, sampled PHP memory, platform, redacted
+arguments, and a whitelist-only projection of environment providers and
+capabilities. It omits outputs, values, environment variables, failure
+messages, and unknown environment fields. Inspect it before sharing because
+paths and non-secret command arguments remain visible. PHP memory is the
+maximum of the root and available descendant process peaks, not aggregate RSS.
 This is diagnostic metadata, not an executable replay file.
 
 ## Plugin observers and registry

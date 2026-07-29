@@ -42,7 +42,8 @@ and its 28 filesystem-sensitive cases serially. Every run starts from a fresh
 copy of one migrated database and verifies its SHA-256, an empty snapshot
 directory, and the absence of transient SQLite files.
 
-The workflow uploads raw logs, normalized JSON, and replay metadata. The gate
+The workflow uploads raw logs, measurement JSON, normalized results, replay
+metadata, and one aggregate `benchmark-report.json` for 90 days. The gate
 rejects:
 
 - a corpus commit or selected-file count mismatch;
@@ -85,18 +86,79 @@ selection roots, required directories, and exact file counts.
 
 ## Result contract
 
-`record.sh` captures one runner invocation and calls `normalize.php`. A result
-contains:
+`record.sh` captures one runner invocation and calls `normalize.php`. Its v2
+shape is shown below with illustrative metric values:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "corpus": "livewire",
   "runner": "drove",
-  "cohort": "parallel",
-  "processes": 8,
-  "selected_files": 7,
+  "runner_identity": {
+    "command": "drove",
+    "executable": "vendor/bin/drove",
+    "frontend": "phpunit",
+    "runtime": "testbench",
+    "state": "sqlite-memory"
+  },
+  "selection": {
+    "mode": "curated",
+    "whole_suite": false,
+    "cohort": "parallel",
+    "selected_files": 7
+  },
+  "requested_processes": 8,
+  "observed_lanes": 8,
+  "observed_lanes_source": "drove_replay",
+  "run": 1,
   "drove_revision": "40-character Git SHA",
+  "environment_plan": {
+    "runtime": "testbench",
+    "state": "sqlite-memory",
+    "replay": {
+      "schema": 1,
+      "coordination": "best-effort",
+      "resources": {
+        "database": {
+          "kind": "database",
+          "provider": "sqlite-memory",
+          "capabilities": ["branchable", "scope-isolated"]
+        },
+        "filesystem": {
+          "kind": "filesystem",
+          "provider": null,
+          "capabilities": []
+        },
+        "cache": {
+          "kind": "cache",
+          "provider": null,
+          "capabilities": []
+        },
+        "queue": {
+          "kind": "queue",
+          "provider": null,
+          "capabilities": []
+        },
+        "object-storage": {
+          "kind": "object-storage",
+          "provider": null,
+          "capabilities": []
+        }
+      }
+    }
+  },
+  "metrics": {
+    "wall_ms": 1409.61,
+    "container_peak_memory_bytes": 640000000,
+    "replay_duration_ms": 1375.42,
+    "replay_php_peak_memory_bytes": 52000000
+  },
+  "platform": {
+    "os_family": "Linux",
+    "os": "Linux",
+    "architecture": "x86_64",
+    "php": "8.4.0"
+  },
   "outcome": {
     "tests": 36,
     "passed": 36,
@@ -109,9 +171,41 @@ contains:
     "assertions": 68,
     "exit": 0
   },
-  "raw_sha256": "SHA-256 of the retained raw log"
+  "artifacts": {
+    "raw_sha256": "64-character SHA-256",
+    "measurement_sha256": "64-character SHA-256",
+    "replay_sha256": "64-character SHA-256"
+  }
 }
 ```
+
+`command` is the runner identity, while `executable` is the allowlisted path
+observed by the measurement wrapper. Pest and PHPUnit are frontends; Testbench
+is a runtime, not a third runner. Process counts are requested configuration.
+Drove's observed lanes come from replay metadata and must match; a baseline is
+explicitly identified as an assumed one-process lane. Drove environment
+providers and capabilities also come from replay and must match the manifest
+expectation; a baseline has no replay plan.
+
+`wall_ms` uses a monotonic clock around only the test command.
+`container_peak_memory_bytes` is the aggregate cgroup-v2 peak for that fresh
+lane container. The cgroup peak cannot be reset without privilege, so it also
+includes container and selection work before the timed command. It is not PSS,
+USS, or a claim about copy-on-write savings. Replay duration and sampled PHP
+peak memory are secondary Drove-only diagnostics; PHP peak is the maximum root
+or descendant process sample, not their sum.
+
+`run` is a one-based sample ordinal. The verifier accepts contiguous repeated
+runs and reports min/median/max plus the run count. Hosted lanes currently
+record one sample, so their three summaries are identical. No threshold is
+applied and the report explicitly records `performance_claim: none`; the
+numbers are diagnostic until repeated, controlled fixtures prove a claim. The
+standalone report retains the Drove revision, platform, selection, outcome,
+runner identity, and environment plan for each group.
+
+Every current rung declares `selection.mode=curated` and
+`selection.whole_suite=false`. These results do not satisfy the proposed v1
+whole-suite gate.
 
 The conservative Pest selection still excludes undeclared higher-order,
 dependency, snapshot, and diagnostic surfaces. Eight additional files assert

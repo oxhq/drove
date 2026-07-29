@@ -1,5 +1,5 @@
 {
-    "schema_version": 3,
+    "schema_version": 4,
     "initial_proof_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
     "release_overlay_version": "0.4.0-alpha.1",
     "ladder": [
@@ -40,12 +40,32 @@
             "tag": "v5.0.1",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "bin/pest",
+                    "frontend": "pest",
+                    "runtime": "plain",
+                    "state": "none"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "bin/drove",
+                    "frontend": "pest",
+                    "runtime": "plain",
+                    "state": "none"
+                }
+            },
+            "environment_expectation": null,
             "hosted_gate_matrix": {
                 "nonserial": {
                     "baseline": [
                         1
                     ],
                     "drove": [
+                        1,
                         8
                     ]
                 },
@@ -129,7 +149,8 @@
                 "142 selected files are byte-identical to v5.0.1; tests/Features/Expect/pipes.php differs only by removal of a redundant property initializer.",
                 "Three unchanged files share /tmp/fake.file and are therefore compared in an explicit one-process cohort; the remaining 140 files run at eight processes.",
                 "Drove and Pest both report 1718 assertions for the selected cases.",
-                "Shared-host wall times are diagnostics only; no performance claim is recorded."
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Shared-host measurements are diagnostics only; no performance claim is recorded."
             ]
         },
         {
@@ -139,6 +160,34 @@
             "commit": "403a4d67225a153838ec126c484339abf60229d1",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "vendor/bin/pest",
+                    "frontend": "pest",
+                    "runtime": "laravel",
+                    "state": "sqlite-copy"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "frontend": "pest",
+                    "runtime": "laravel",
+                    "state": "sqlite-copy"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-copy",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/invoiceshelf.lock",
                 "sha256": "b7eb7b86d205a5dbb9f985a56e756882af60eaa5913a095187fa65fcb0d98f47"
@@ -149,6 +198,7 @@
                         1
                     ],
                     "drove": [
+                        1,
                         8
                     ]
                 }
@@ -188,7 +238,8 @@
             "proof_boundary": [
                 "All 47 selected source files are unchanged from the pinned InvoiceShelf commit.",
                 "The dependency uplift is a compatibility overlay; it is not evidence for InvoiceShelf's original dependency graph.",
-                "The result is correctness evidence only, not a speed comparison."
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Recorded measurements are diagnostics only, not a performance claim."
             ]
         },
         {
@@ -198,6 +249,34 @@
             "commit": "9c1450739d30c9b0b223ad6512be2a33f8f62f96",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "runner_identity": {
+                "baseline": {
+                    "command": "phpunit",
+                    "executable": "vendor/bin/phpunit",
+                    "frontend": "phpunit",
+                    "runtime": "testbench",
+                    "state": "sqlite-memory"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "frontend": "phpunit",
+                    "runtime": "testbench",
+                    "state": "sqlite-memory"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-memory",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/livewire.lock",
                 "sha256": "d54b9564f5364cd57f6b0c37eaa4e910abe4f3bf611e19f43b6713cc2862ce52"
@@ -300,7 +379,8 @@
                 "The 36-case parallel cohort keeps real Testbench application and sqlite-memory lifecycle while excluding test bodies that use those unmanaged filesystem paths; replay metadata must observe the requested 1, 2, 4, and 8 concurrency.",
                 "Pinned Livewire uses RefreshDatabase only in browser tests, so this unit cohort proves inherited-PDO identity guards but does not claim external RefreshDatabase trait coverage.",
                 "The non-symlinked Composer overlay records the proven Drove revision.",
-                "The result is correctness evidence only, not a speed comparison."
+                "The curated selections are not a whole-suite compatibility claim.",
+                "Recorded measurements are diagnostics only, not a performance claim."
             ]
         },
         {
@@ -310,6 +390,34 @@
             "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
             "gate_status": "PROVEN",
             "classification": "SUPPORTED",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "vendor/bin/pest",
+                    "frontend": "pest",
+                    "runtime": "testbench",
+                    "state": "sqlite-copy"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "frontend": "pest",
+                    "runtime": "testbench",
+                    "state": "sqlite-copy"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-copy",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/filament.lock",
                 "sha256": "07470ae723c2b11e5ac330e9ee3d54676fabb3ee58fb83e98a27834d19d4797b"
@@ -418,7 +526,8 @@
                 "All 39 selected source files and Filament's Testbench bootstrap are unchanged from the pinned commit.",
                 "Composer's non-symlinked path overlay and Filament's existing package discovery load Drove without a provider patch.",
                 "Drove preserves baseline semantics for all 705 cases, including the 677-case nonserial cohort at 1, 2, 4, and 8 processes.",
-                "Shared-host wall times are diagnostics only; no performance claim is recorded."
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Shared-host measurements are diagnostics only; no performance claim is recorded."
             ]
         }
     ]

@@ -391,13 +391,18 @@ final readonly class LifecycleExecutor
 
         foreach ($mapped['results'] as $transport) {
             $job = $jobs[$transport['id']];
+            $telemetry = $transport['telemetry'];
+            $memoryPeakBytes = $transport['memory_peak_bytes'] ?? null;
+            $telemetry['memory_peak_bytes'] = is_int($memoryPeakBytes) && $memoryPeakBytes >= 0
+                ? $memoryPeakBytes
+                : null;
             $events[] = $this->taskEvent('task.started', $transport);
 
             if ($job['kind'] === 'test') {
                 $test = $transport['status'] === 'passed' && is_array($transport['value'])
                     ? $transport['value']
                     : $this->transportTestFailure($job['node'], $scopeIds, $transport);
-                $test['telemetry'] = $transport['telemetry'];
+                $test['telemetry'] = $telemetry;
                 $test['stdout'] = ($test['stdout'] ?? '').($transport['stdout'] ?? '');
                 $test['stderr'] = ($test['stderr'] ?? '').($transport['stderr'] ?? '');
                 $tests[] = $test;
@@ -406,8 +411,8 @@ final readonly class LifecycleExecutor
                 $child = $transport['status'] === 'passed' && is_array($transport['value'])
                     ? $transport['value']
                     : $this->transportScopeFailure($job['node'], $transport);
-                $child['scope']['telemetry'] = $transport['telemetry'];
-                $child['scopes'][0]['telemetry'] = $transport['telemetry'];
+                $child['scope']['telemetry'] = $telemetry;
+                $child['scopes'][0]['telemetry'] = $telemetry;
 
                 foreach (['stdout', 'stderr'] as $stream) {
                     $child['scope'][$stream] = ($child['scope'][$stream] ?? '').($transport[$stream] ?? '');

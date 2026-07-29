@@ -86,39 +86,43 @@ jobs:
 
           for cohort in nonserial serial
           do
-            drove_processes=8
-            [ "$cohort" = serial ] && drove_processes=1
-
             for runner in baseline drove
             do
-              processes=1
-              [ "$runner" = drove ] && processes=$drove_processes
+              process_list=1
+              if [ "$runner" = drove ] && [ "$cohort" = nonserial ]; then
+                process_list="1 8"
+              fi
 
-              docker run --rm \
-                --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
-                --env CORPUS_COHORT="$cohort" \
-                --env CORPUS_RUNNER="$runner" \
-                --env CORPUS_PROCESSES="$processes" \
-                --volume "$PWD/results:/results" \
-                --workdir /drove \
-                --entrypoint sh drove-corpus -lc '
-                  selection=$(mktemp)
-                  sh benchmarks/corpus/select.sh "pest-$CORPUS_COHORT" . >"$selection"
-                  files=$(wc -l <"$selection" | tr -d "[:space:]")
-                  output="/results/pest-$CORPUS_RUNNER-$CORPUS_COHORT-$CORPUS_PROCESSES.json"
+              for processes in $process_list
+              do
+                docker run --rm \
+                  --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+                  --env CORPUS_COHORT="$cohort" \
+                  --env CORPUS_RUNNER="$runner" \
+                  --env CORPUS_PROCESSES="$processes" \
+                  --volume "$PWD/results:/results" \
+                  --workdir /drove \
+                  --entrypoint sh drove-corpus -lc '
+                    selection=$(mktemp)
+                    sh benchmarks/corpus/select.sh "pest-$CORPUS_COHORT" . >"$selection"
+                    files=$(wc -l <"$selection" | tr -d "[:space:]")
+                    output="/results/pest-$CORPUS_RUNNER-$CORPUS_COHORT-$CORPUS_PROCESSES.json"
 
-                  if [ "$CORPUS_RUNNER" = baseline ]; then
-                    DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
-                      pest baseline "$CORPUS_COHORT" 1 "$files" "$output" -- \
-                      php bin/pest --configuration=benchmarks/corpus/phpunit.pest.xml \
-                        $(cat "$selection")
-                  else
-                    DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
-                      pest drove "$CORPUS_COHORT" "$CORPUS_PROCESSES" "$files" "$output" -- \
-                      php bin/drove --configuration=benchmarks/corpus/phpunit.pest.xml \
-                        --parallel --processes="$CORPUS_PROCESSES" $(cat "$selection")
-                  fi
-                '
+                    if [ "$CORPUS_RUNNER" = baseline ]; then
+                      DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
+                        pest baseline "$CORPUS_COHORT" 1 "$files" "$output" -- \
+                        php bin/pest --configuration=benchmarks/corpus/phpunit.pest.xml \
+                          $(cat "$selection")
+                    else
+                      replay="/results/pest-drove-$CORPUS_COHORT-$CORPUS_PROCESSES-replay.json"
+                      DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
+                        pest drove "$CORPUS_COHORT" "$CORPUS_PROCESSES" "$files" "$output" -- \
+                        php bin/drove --configuration=benchmarks/corpus/phpunit.pest.xml \
+                          --parallel --processes="$CORPUS_PROCESSES" \
+                          --replay="$replay" $(cat "$selection")
+                    fi
+                  '
+              done
             done
           done
 
@@ -139,41 +143,48 @@ jobs:
       - name: Run InvoiceShelf smoke
         run: |
           set -euo pipefail
-          mkdir -p work/invoiceshelf-baseline/snapshots work/invoiceshelf-drove/snapshots
-          touch work/invoiceshelf-baseline/database.sqlite work/invoiceshelf-drove/database.sqlite
 
           for runner in baseline drove
           do
-            workspace="$PWD/work/invoiceshelf-$runner"
-
             if [ "$runner" = baseline ]; then
-              command='php vendor/bin/pest --configuration=phpunit.drove.xml "$@"'
-              processes=1
+              process_list=1
             else
-              command='php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=8 "$@"'
-              processes=8
+              process_list="1 8"
             fi
 
-            docker run --rm \
-              --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
-              --volume "$PWD/corpora/invoiceshelf:/app" \
-              --volume drove-invoiceshelf-vendor:/app/vendor \
-              --volume "$PWD/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
-              --volume "$workspace:/drove-work" \
-              --volume "$PWD/results:/results" \
-              --workdir /app \
-              --entrypoint sh drove-corpus -lc "
-                selection=\$(mktemp)
-                sh /drove/benchmarks/corpus/select.sh invoiceshelf /app >\"\$selection\"
-                set -- \$(cat \"\$selection\")
-                files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
-                DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
-                  invoiceshelf $runner full $processes \"\$files\" \
-                  /results/invoiceshelf-$runner.json -- $command
-              "
+            for processes in $process_list
+            do
+              workspace="$PWD/work/invoiceshelf-$runner-$processes"
+              mkdir -p "$workspace/snapshots"
+              touch "$workspace/database.sqlite"
 
-            test -z "$(find "$workspace/snapshots" -type f -print -quit)"
-            test "$(find "$workspace" -maxdepth 1 -type f -name '*.sqlite*' | wc -l)" -eq 1
+              if [ "$runner" = baseline ]; then
+                command='php vendor/bin/pest --configuration=phpunit.drove.xml "$@"'
+              else
+                command="php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=$processes --replay=/results/invoiceshelf-drove-$processes-replay.json \"\$@\""
+              fi
+
+              docker run --rm \
+                --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+                --volume "$PWD/corpora/invoiceshelf:/app" \
+                --volume drove-invoiceshelf-vendor:/app/vendor \
+                --volume "$PWD/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
+                --volume "$workspace:/drove-work" \
+                --volume "$PWD/results:/results" \
+                --workdir /app \
+                --entrypoint sh drove-corpus -lc "
+                  selection=\$(mktemp)
+                  sh /drove/benchmarks/corpus/select.sh invoiceshelf /app >\"\$selection\"
+                  set -- \$(cat \"\$selection\")
+                  files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
+                  DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                    invoiceshelf $runner full $processes \"\$files\" \
+                    /results/invoiceshelf-$runner-$processes.json -- $command
+                "
+
+              test -z "$(find "$workspace/snapshots" -type f -print -quit)"
+              test "$(find "$workspace" -maxdepth 1 -type f -name '*.sqlite*' | wc -l)" -eq 1
+            done
           done
           printf '{"schema_version":1,"snapshots_after":0,"additional_sqlite_artifacts_after":0}\n' \
             >results/invoiceshelf-state.json
@@ -181,11 +192,18 @@ jobs:
           docker run --rm --volume "$PWD/results:/results" drove-corpus \
             php /drove/benchmarks/corpus/verify.php \
               /results/pest-baseline-nonserial-1.json \
+              /results/pest-drove-nonserial-1.json \
               /results/pest-drove-nonserial-8.json \
               /results/pest-baseline-serial-1.json \
               /results/pest-drove-serial-1.json \
-              /results/invoiceshelf-baseline.json /results/invoiceshelf-drove.json \
+              /results/invoiceshelf-baseline-1.json \
+              /results/invoiceshelf-drove-1.json \
+              /results/invoiceshelf-drove-8.json \
             | tee results/smoke-verification.json
+
+          if [ "$RUN_FULL" != true ]; then
+            cp results/smoke-verification.json results/benchmark-report.json
+          fi
 
       - name: Clone remaining pinned corpora
         if: env.RUN_FULL == 'true'
@@ -450,11 +468,11 @@ jobs:
           for processes in 1 2 4 8
           do
             run_filament drove nonserial "$processes" "filament-drove-nonserial-$processes" \
-              "php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=$processes --exclude-group=serial \"\$@\""
+              "php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=$processes --exclude-group=serial --replay=/results/filament-drove-nonserial-$processes-replay.json \"\$@\""
           done
 
           run_filament drove serial 1 filament-drove-serial-1 \
-            'php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=1 --group=serial "$@"'
+            'php vendor/bin/drove --configuration=phpunit.drove.xml --parallel --processes=1 --group=serial --replay=/results/filament-drove-serial-1-replay.json "$@"'
 
           printf '{"schema_version":1,"database_sha256":"%s","snapshots_after":0,"additional_sqlite_artifacts_after":0}\n' \
             "$master_sha" >results/filament-state.json
@@ -470,6 +488,36 @@ jobs:
               /results/filament-drove-serial-1.json \
             | tee results/filament-verification.json
 
+      - name: Store full benchmark comparison
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --volume "$PWD/results:/results" drove-corpus \
+            php /drove/benchmarks/corpus/verify.php --complete \
+              /results/pest-baseline-nonserial-1.json \
+              /results/pest-drove-nonserial-1.json \
+              /results/pest-drove-nonserial-8.json \
+              /results/pest-baseline-serial-1.json \
+              /results/pest-drove-serial-1.json \
+              /results/invoiceshelf-baseline-1.json \
+              /results/invoiceshelf-drove-1.json \
+              /results/invoiceshelf-drove-8.json \
+              /results/livewire-baseline-full-1.json \
+              /results/livewire-drove-full-1.json \
+              /results/livewire-baseline-parallel-1.json \
+              /results/livewire-drove-parallel-1.json \
+              /results/livewire-drove-parallel-2.json \
+              /results/livewire-drove-parallel-4.json \
+              /results/livewire-drove-parallel-8.json \
+              /results/filament-baseline-nonserial-1.json \
+              /results/filament-drove-nonserial-1.json \
+              /results/filament-drove-nonserial-2.json \
+              /results/filament-drove-nonserial-4.json \
+              /results/filament-drove-nonserial-8.json \
+              /results/filament-baseline-serial-1.json \
+              /results/filament-drove-serial-1.json \
+            | tee results/benchmark-report.json
+
       - name: Restore corpus evidence ownership
         if: always()
         run: |
@@ -484,4 +532,4 @@ jobs:
           name: corpus-${{ env.RUN_FULL == 'true' && 'full' || 'smoke' }}-${{ env.EXPECTED_SHA }}
           path: results/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90

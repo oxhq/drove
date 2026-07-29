@@ -129,6 +129,7 @@ execution because they can commit schema changes outside the adapter
 transaction.
 
 The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
+Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
 nonserial cohort at 1, 2, 4, and 8 Drove processes plus its 28-case
 filesystem-sensitive cohort at 1. A release requires a successful exact-SHA
@@ -159,10 +160,13 @@ children remain waitable.
 `--replay=path.json` writes one no-overwrite diagnostic artifact.
 `--replay-on-failure=path.json` writes only for a nonzero run. The artifact
 contains version/platform data, redacted arguments, a plan hash, status counts,
-failure kinds, completion order, and observed concurrency. It excludes test
-output, values, environment variables, and failure messages, but should still
-be inspected before sharing. It is metadata for reproducing a run; Drove does
-not yet consume it to rerun the suite.
+failure kinds, completion order, observed concurrency, sampled PHP memory, and
+a whitelist-only projection of environment providers and capabilities. It
+excludes test output, values, environment variables, failure messages, and
+unknown environment fields, but should still be inspected before sharing. It
+records the maximum of the root and available descendant PHP-process peaks,
+not aggregate RSS. It is metadata for reproducing a run; Drove does not yet
+consume it to rerun the suite.
 
 ## Plugin and compatibility boundary
 
