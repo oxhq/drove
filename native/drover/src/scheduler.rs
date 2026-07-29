@@ -1551,7 +1551,19 @@ fn signal_process_tree(
     allow_direct_child: bool,
     _zombie_anchor: bool,
 ) -> Result<(), String> {
-    if unsafe { libc::kill(-pid, signal) } == 0 {
+    let group_signaled = unsafe { libc::kill(-pid, signal) } == 0;
+
+    #[cfg(target_os = "macos")]
+    if group_signaled && signal == libc::SIGKILL && _zombie_anchor {
+        return signal_darwin_process_group_members(pid, signal).map_err(|error| {
+            format!(
+                "Drover signaled process group {pid}, but could not verify its Darwin \
+                 descendants: {error}"
+            )
+        });
+    }
+
+    if group_signaled {
         return Ok(());
     }
 
