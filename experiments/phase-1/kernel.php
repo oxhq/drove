@@ -296,7 +296,15 @@ $expectedKinds = [
 ];
 
 foreach ($expectedKinds as $name => $kind) {
-    $assert($test($name)['failure']['kind'] === $kind, $name.' was misclassified.');
+    $failed = $test($name);
+    $actual = $failed['failure']['kind'];
+    $assert($actual === $kind, sprintf(
+        '%s was %s (%s), expected %s.',
+        $name,
+        $actual,
+        $failed['failure']['message'],
+        $kind,
+    ));
 }
 
 $large = $test('frames large output');

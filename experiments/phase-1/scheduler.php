@@ -52,6 +52,24 @@ $assert(
     'The child protocol truncated a structured value larger than one frame.',
 );
 
+$oom = new PcntlScheduler('scheduler-oom', 1);
+$oomRun = $oom->map(
+    [$task('out-of-memory')],
+    static function (): never {
+        if (ini_set('memory_limit', '32M') === false) {
+            throw new RuntimeException('Unable to lower the child memory limit.');
+        }
+
+        str_repeat('x', 64 * 1024 * 1024);
+
+        exit(2);
+    },
+);
+$assert(
+    $oomRun['results'][0]['failure']['kind'] === FailureKind::OutOfMemory->value,
+    'An out-of-memory fatal error was not classified.',
+);
+
 $cleanup = new PcntlScheduler('scheduler-cleanup', 1, termGraceMs: 25);
 $started = hrtime(true);
 $cleanupRun = $cleanup->map(
@@ -131,6 +149,7 @@ echo json_encode([
     'status' => 'passed',
     'bounded_children' => 1,
     'large_value_bytes' => 1_200_000,
+    'oom' => FailureKind::OutOfMemory->value,
     'cleanup_ms' => round($cleanupMs, 3),
     'escaped_ms' => round($escapedMs, 3),
     'nested_ms' => round($nestedMs, 3),

@@ -40,4 +40,11 @@ enum FailureKind: string
             ? self::AssertionFailure
             : self::PhpException;
     }
+
+    public static function forFatal(string $message): self
+    {
+        return str_contains($message, 'Allowed memory size')
+            ? self::OutOfMemory
+            : self::PhpFatalError;
+    }
 }

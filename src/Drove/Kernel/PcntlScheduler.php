@@ -395,7 +395,10 @@ final class PcntlScheduler implements Scheduler
             public bool $finished = false;
         };
         $reporterPid = getmypid();
-        register_shutdown_function(function () use ($report, $reporterPid, $socket, $task): void {
+        $emergencyReserve = str_repeat(' ', 262_144);
+        register_shutdown_function(function () use (&$emergencyReserve, $report, $reporterPid, $socket, $task): void {
+            $emergencyReserve = null;
+
             if (getmypid() !== $reporterPid || $report->finished) {
                 return;
             }
@@ -422,7 +425,7 @@ final class PcntlScheduler implements Scheduler
                     'failed',
                     null,
                     [
-                        'kind' => FailureKind::PhpFatalError->value,
+                        'kind' => FailureKind::forFatal($error['message'])->value,
                         'message' => $error['message'],
                         'class' => null,
                         'file' => $error['file'],
@@ -452,11 +455,8 @@ final class PcntlScheduler implements Scheduler
             $value = $execute($task);
         } catch (Throwable $throwable) {
             $status = 'failed';
-            $kind = is_a($throwable, 'PHPUnit\Framework\AssertionFailedError')
-                ? FailureKind::AssertionFailure
-                : FailureKind::PhpException;
             $failure = [
-                'kind' => $kind->value,
+                'kind' => FailureKind::for($throwable, 'executor')->value,
                 'message' => $throwable->getMessage(),
                 'class' => $throwable::class,
                 'file' => $throwable->getFile(),
