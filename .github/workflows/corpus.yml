@@ -458,6 +458,13 @@ jobs:
               /results/filament-drove-serial-1.json \
             | tee results/filament-verification.json
 
+      - name: Restore corpus evidence ownership
+        if: always()
+        run: |
+          if [ -d results ]; then
+            sudo chown -R "$(id -u):$(id -g)" results
+          fi
+
       - name: Upload normalized corpus evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

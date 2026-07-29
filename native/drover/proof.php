@@ -196,7 +196,12 @@ $tasks = [
                 }
 
                 file_put_contents($readyPath, 'ready');
-                usleep(1_000_000);
+                $escapeAt = hrtime(true) + 1_000_000_000;
+
+                while (($remaining = $escapeAt - hrtime(true)) > 0) {
+                    usleep(max(1, min(100_000, intdiv($remaining, 1_000))));
+                }
+
                 file_put_contents($escapedPath, 'escaped');
                 exit(0);
             }
@@ -339,6 +344,7 @@ $assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout
 $assert(file_exists($readyPath), 'The timeout descendant did not start before cleanup.');
 usleep(1_200_000);
 $assert(! file_exists($escapedPath), 'A timed-out descendant escaped its process group.');
+@unlink($readyPath);
 
 $interruptionReady = '/tmp/drover-active-interruption-'.getmypid().'.ready';
 $interruptionDescendantReady = '/tmp/drover-active-interruption-'.getmypid().'.descendant-ready';
