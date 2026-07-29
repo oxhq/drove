@@ -63,6 +63,7 @@ jobs:
         docker run --rm drove-phase-one php inactive.php
         docker run --rm drove-phase-one php kernel.php
         docker run --rm drove-phase-one timeout 15 php scheduler.php
+        docker run --rm drove-phase-one timeout 15 php interruption.php
 
     - name: Phase 2 regression
       run: |

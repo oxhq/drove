@@ -81,20 +81,44 @@ final class PcntlScheduler implements Scheduler
         $children = [];
         $results = [];
         $completionOrder = [];
+        $interruptedSignal = null;
 
         foreach ($tasks as $ordinal => $task) {
             $pending[$ordinal] = $this->normalizeTask($task, $ordinal);
         }
 
+        $previousAsyncSignals = pcntl_async_signals(false);
+        $previousHandlers = [
+            SIGINT => pcntl_signal_get_handler(SIGINT),
+            SIGTERM => pcntl_signal_get_handler(SIGTERM),
+        ];
+        $interrupt = static function (int $signal) use (&$interruptedSignal): void {
+            $interruptedSignal ??= $signal;
+        };
+        pcntl_signal(SIGINT, $interrupt);
+        pcntl_signal(SIGTERM, $interrupt);
+        pcntl_async_signals(true);
+
         // ponytail: the PHP backend polls a shared pipe; native Drover owns the
         // production queue and fairness policy.
+        try {
         while ($pending !== [] || $children !== []) {
             foreach (array_keys($pending) as $ordinal) {
+                if ($interruptedSignal !== null) {
+                    break;
+                }
+
                 $task = $pending[$ordinal];
                 $permitNames = $task['permit'] ? $this->poolNames($task['scopes']) : [];
 
                 if ($permitNames !== [] && ! $this->tryAcquire($permitNames)) {
                     continue;
+                }
+
+                if ($interruptedSignal !== null) {
+                    $this->release($permitNames);
+
+                    break;
                 }
 
                 $this->rememberPermits($permitNames);
@@ -117,6 +141,21 @@ final class PcntlScheduler implements Scheduler
             }
 
             [$parentSocket, $childSocket] = $sockets;
+
+                if ($interruptedSignal !== null) {
+                    fclose($parentSocket);
+                    fclose($childSocket);
+                    $this->forgetPermits($permitNames);
+                    $this->release($permitNames);
+                    $results[$ordinal] = $this->parentFailure(
+                        $task,
+                        FailureKind::UserInterruption,
+                        sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                    );
+
+                    break;
+                }
+
             $pid = pcntl_fork();
 
             if ($pid === -1) {
@@ -179,6 +218,8 @@ final class PcntlScheduler implements Scheduler
                 'eof' => false,
                 'timed_out' => false,
                 'term_ns' => null,
+                    'interrupted_signal' => null,
+                    'interruption_term_ns' => null,
                 'kill_sent' => false,
                     'kill_ns' => null,
                 'cleanup_term_ns' => null,
@@ -189,6 +230,28 @@ final class PcntlScheduler implements Scheduler
             }
 
             $now = hrtime(true);
+
+            if ($interruptedSignal !== null) {
+                foreach ($pending as $ordinal => $task) {
+                    $results[$ordinal] = $this->parentFailure(
+                        $task,
+                        FailureKind::UserInterruption,
+                        sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                    );
+                }
+
+                $pending = [];
+
+                foreach ($children as $pid => &$child) {
+                    if ($child['interrupted_signal'] === null) {
+                        $child['interrupted_signal'] = $interruptedSignal;
+                        $child['interruption_term_ns'] = $now;
+                        @posix_kill(-$pid, SIGTERM);
+                    }
+                }
+
+                unset($child);
+            }
 
             foreach (array_keys($children) as $pid) {
                 $child = &$children[$pid];
@@ -215,6 +278,7 @@ final class PcntlScheduler implements Scheduler
                 if ($child['started_ns'] !== null
                     && ! $child['reaped']
                     && $child['task']['timeout_ms'] > 0
+                    && $child['interrupted_signal'] === null
                     && ! $child['timed_out']
                     && $now >= max(
                         $child['deadline_ns'],
@@ -235,7 +299,18 @@ final class PcntlScheduler implements Scheduler
                     $child['kill_ns'] = $now;
                 }
 
-                if ($child['reaped'] && ! $child['eof'] && ! $child['timed_out']) {
+                if ($child['interrupted_signal'] !== null
+                    && ! $child['kill_sent']
+                    && $now - $child['interruption_term_ns'] >= $this->termGraceMs * 1_000_000) {
+                    @posix_kill(-$pid, SIGKILL);
+                    $child['kill_sent'] = true;
+                    $child['kill_ns'] = $now;
+                }
+
+                if ($child['reaped']
+                    && ! $child['eof']
+                    && ! $child['timed_out']
+                    && $child['interrupted_signal'] === null) {
                     if ($child['cleanup_term_ns'] === null) {
                         @posix_kill(-$pid, SIGTERM);
                         $child['cleanup_term_ns'] = $now;
@@ -285,6 +360,15 @@ final class PcntlScheduler implements Scheduler
             'results' => array_values($results),
             'completion_order' => $completionOrder,
         ];
+        } finally {
+            pcntl_async_signals(false);
+
+            foreach ($previousHandlers as $signal => $handler) {
+                pcntl_signal($signal, $handler);
+            }
+
+            pcntl_async_signals($previousAsyncSignals);
+        }
     }
 
     /**
@@ -540,6 +624,16 @@ final class PcntlScheduler implements Scheduler
             'exit_code' => $exitCode,
             'signal' => $signal,
         ];
+
+        if ($child['interrupted_signal'] !== null) {
+            return $this->failedResult(
+                $task,
+                FailureKind::UserInterruption,
+                sprintf('The Drove run was interrupted by signal %d.', $child['interrupted_signal']),
+                $telemetry,
+                $child['frames'],
+            );
+        }
 
         if ($child['timed_out']) {
             return $this->failedResult(
