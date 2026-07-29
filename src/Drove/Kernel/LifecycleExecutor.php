@@ -314,7 +314,7 @@ final readonly class LifecycleExecutor
                             }
                         }
 
-                        if ($primaryFailure !== null) {
+                        if ($primaryFailure instanceof Throwable) {
                             throw $primaryFailure;
                         }
 
@@ -332,7 +332,7 @@ final readonly class LifecycleExecutor
             $scopeFailures[] = $this->failure($throwable, 'after_dispatch', null);
         }
 
-        if ($mapFailure !== null) {
+        if ($mapFailure instanceof Throwable) {
             throw $mapFailure;
         }
 
@@ -673,8 +673,11 @@ final readonly class LifecycleExecutor
         array $failure,
     ): void {
         foreach (array_reverse(array_keys($events)) as $index) {
-            if (($events[$index]['type'] ?? null) !== $type
-                || ($events[$index][$idKey] ?? null) !== $id) {
+            if (($events[$index]['type'] ?? null) !== $type) {
+                continue;
+            }
+
+            if (($events[$index][$idKey] ?? null) !== $id) {
                 continue;
             }
 

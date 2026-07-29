@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use Monolog\Handler\NullHandler;
+use Monolog\Handler\StreamHandler;
+
 return [
     'default' => 'stderr',
     'deprecations' => [
@@ -11,7 +14,7 @@ return [
     'channels' => [
         'stderr' => [
             'driver' => 'monolog',
-            'handler' => Monolog\Handler\StreamHandler::class,
+            'handler' => StreamHandler::class,
             'with' => [
                 'stream' => 'php://stderr',
             ],
@@ -19,7 +22,7 @@ return [
         ],
         'null' => [
             'driver' => 'monolog',
-            'handler' => Monolog\Handler\NullHandler::class,
+            'handler' => NullHandler::class,
         ],
     ],
 ];

@@ -7,6 +7,7 @@ namespace Drove\Laravel\State;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
+use Illuminate\Foundation\Application;
 use Throwable;
 
 final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
@@ -39,7 +40,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         parent::__construct($connection);
     }
 
-    public function boot(\Illuminate\Foundation\Application $application): void
+    public function boot(Application $application): void
     {
         parent::boot($application);
         $database = $this->configuredDatabasePath();

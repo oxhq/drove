@@ -19,6 +19,8 @@ use PHPUnit\TextUI\Configuration\PhpHandler;
 use PHPUnit\TextUI\Configuration\TestSuiteBuilder;
 use PHPUnit\TextUI\Exception as PHPUnitCliException;
 use PHPUnit\TextUI\TestSuiteFilterProcessor;
+use ReflectionException;
+use ReflectionMethod;
 use RuntimeException;
 use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -211,11 +213,13 @@ final class Runner
             return null;
         }
 
-        if (! method_exists($class, 'boot')) {
+        try {
+            $boot = new ReflectionMethod($class, 'boot');
+        } catch (ReflectionException) {
             throw new RuntimeException('drove-laravel is missing boot().');
         }
 
-        $runtime = Closure::fromCallable([$class, 'boot'])($rootPath);
+        $runtime = $boot->invoke(null, $rootPath);
 
         if (! is_object($runtime)) {
             throw new RuntimeException('drove-laravel returned an invalid runtime.');
@@ -242,7 +246,11 @@ final class Runner
 
     private function callback(?object $runtime, string $method): ?Closure
     {
-        return $runtime === null ? null : Closure::fromCallable([$runtime, $method]);
+        if ($runtime === null) {
+            return null;
+        }
+
+        return new ReflectionMethod($runtime, $method)->getClosure($runtime);
     }
 
     private function scopeContext(?object $runtime): ?ScopeContext

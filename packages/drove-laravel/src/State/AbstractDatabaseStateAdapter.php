@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Drove\Laravel\State;
 
-use Drove\Laravel\Contracts\DatabaseStateAdapter;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
+use Drove\Laravel\Contracts\DatabaseStateAdapter;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
