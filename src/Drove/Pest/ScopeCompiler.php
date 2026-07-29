@@ -9,19 +9,35 @@ use InvalidArgumentException;
 use OutOfBoundsException;
 use Pest\Contracts\HasPrintableTestCaseName;
 use Pest\Factories\TestCaseFactory;
+use Pest\Factories\TestCaseMethodFactory;
 use Pest\Support\Description;
+use Pest\Support\HigherOrderMessage;
+use Pest\Support\Reflection as PestReflection;
+use Pest\Support\Str;
 use ReflectionClass;
 use ReflectionFunction;
 use RuntimeException;
 
 /**
  * @internal
+ *
+ * @phpstan-type TestDescriptor array{
+ *     id: string,
+ *     name: string,
+ *     scope: list<string>,
+ *     source: array{path: string, line: int},
+ *     groups?: list<string>,
+ *     disposition?: 'run'|'todo',
+ *     dataset?: array{key: int|string, label: string}|null
+ * }
+ * @phpstan-type FilePlan array{id: string, type: string, path: string, tests: list<TestDescriptor>}
+ * @phpstan-type CaseBinding array{file: string, base_id: string, test: TestDescriptor}
  */
 final class ScopeCompiler
 {
     private static ?self $active = null;
 
-    /** @var array<string, array{id: string, type: string, path: string, tests: list<array{id: string, name: string, scope: list<string>, source: array{path: string, line: int}}>}> */
+    /** @var array<string, FilePlan> */
     private array $plans = [];
 
     /** @var array<string, Closure> */
@@ -39,12 +55,20 @@ final class ScopeCompiler
     /** @var array<string, array<string, mixed>> */
     private array $scopePlans = [];
 
-    private function __construct(private readonly string $rootPath)
-    {
+    /** @var array<string, array<string, array{test: TestDescriptor, disposition: 'run'|'todo'}>> */
+    private array $caseTemplates = [];
+
+    /** @var array<string, true> */
+    private array $boundCases = [];
+
+    private function __construct(
+        private readonly string $rootPath,
+        private readonly bool $ownsHooks,
+    ) {
         //
     }
 
-    public static function activate(string $rootPath): self
+    public static function activate(string $rootPath, bool $ownsHooks = false): self
     {
         $rootPath = realpath($rootPath);
 
@@ -52,7 +76,12 @@ final class ScopeCompiler
             throw new InvalidArgumentException('The Drove root path does not exist.');
         }
 
-        return self::$active = new self(str_replace('\\', '/', $rootPath));
+        return self::$active = new self(str_replace('\\', '/', $rootPath), $ownsHooks);
+    }
+
+    public static function ownsHooks(): bool
+    {
+        return self::$active instanceof self && self::$active->ownsHooks;
     }
 
     public static function capture(?TestCaseFactory $factory): void
@@ -92,7 +121,7 @@ final class ScopeCompiler
     }
 
     /**
-     * @return array{id: string, type: string, path: string, tests: list<array{id: string, name: string, scope: list<string>, source: array{path: string, line: int}}>}
+     * @return FilePlan
      */
     public function plan(string $filename): array
     {
@@ -131,6 +160,91 @@ final class ScopeCompiler
             'No Pest hook was captured for %s.',
             $hookId,
         ));
+    }
+
+    public function hasPlan(string $filename): bool
+    {
+        return isset($this->plans[$this->canonicalPath($filename)]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function files(): array
+    {
+        return array_keys($this->plans);
+    }
+
+    /**
+     * @param  list<string>  $groups
+     * @return CaseBinding
+     */
+    public function caseDescriptor(
+        string $filename,
+        string $method,
+        int|string $dataset,
+        string $datasetLabel,
+        array $groups,
+    ): array {
+        $filename = $this->canonicalPath($filename);
+        $template = $this->caseTemplates[$filename][$method] ?? throw new OutOfBoundsException(sprintf(
+            'No Drove test template was captured for %s::%s.',
+            $filename,
+            $method,
+        ));
+        $test = $template['test'];
+        $baseId = $test['id'];
+
+        $hasDataset = $dataset !== '';
+        $datasetKey = $hasDataset
+            ? (is_int($dataset) ? 'index:' : 'name:').rawurlencode((string) $dataset)
+            : null;
+        $test['id'] = $baseId.($datasetKey === null ? '' : '::dataset:'.$datasetKey);
+        $test['name'] .= $hasDataset ? $datasetLabel : '';
+        $test['groups'] = array_values(array_unique($groups));
+        $test['disposition'] = $template['disposition'];
+        $test['dataset'] = $hasDataset
+            ? ['key' => $dataset, 'label' => $datasetLabel]
+            : null;
+
+        return ['file' => $filename, 'base_id' => $baseId, 'test' => $test];
+    }
+
+    /**
+     * @param  array<string, list<CaseBinding>>  $casesByFile
+     */
+    public function bindCases(array $casesByFile): void
+    {
+        foreach ($casesByFile as $filename => $cases) {
+            $filename = $this->canonicalPath($filename);
+
+            if (isset($this->boundCases[$filename])) {
+                throw new RuntimeException(sprintf('Drove cases were already bound for %s.', $filename));
+            }
+
+            $expanded = [];
+            $tests = [];
+            $ids = [];
+
+            foreach ($cases as $case) {
+                $id = $case['test']['id'];
+
+                if (isset($ids[$id])) {
+                    throw new RuntimeException(sprintf('Drove received a duplicate case ID for %s.', $filename));
+                }
+
+                $ids[$id] = true;
+                $expanded[$case['base_id']][] = $case['test'];
+                $tests[] = $case['test'];
+            }
+
+            $this->plans[$filename]['tests'] = $tests;
+            $this->scopePlans[$filename] = $this->expandCases(
+                $this->scopePlans[$filename],
+                $expanded,
+            );
+            $this->boundCases[$filename] = true;
+        }
     }
 
     /**
@@ -209,13 +323,14 @@ final class ScopeCompiler
         $placements = [];
 
         foreach ($factory->methods as $method) {
-            if ($method->description === null || ! $method->closure instanceof Closure || $method->receivesArguments()) {
-                throw new RuntimeException('Drove file plans only support explicit Pest closures without arguments.');
+            if ($method->description === null || ! $method->closure instanceof Closure) {
+                throw new RuntimeException('Drove file plans only support explicit Pest closures.');
             }
 
             $source = new ReflectionFunction($method->closure);
+            $sourceFile = $this->canonicalPath((string) $source->getFileName());
 
-            if ($this->canonicalPath((string) $source->getFileName()) !== $filename) {
+            if ($sourceFile !== $filename && ! $method->todo) {
                 throw new RuntimeException('Drove file plans require test closures declared in their test file.');
             }
 
@@ -225,7 +340,9 @@ final class ScopeCompiler
                 throw new RuntimeException(sprintf('Duplicate Drove test ID %s.', $id));
             }
 
-            $line = $source->getStartLine();
+            $line = $sourceFile === $filename
+                ? $source->getStartLine()
+                : $this->todoLine($method, $filename);
 
             if ($line === false) {
                 throw new RuntimeException('Drove could not read a test source line.');
@@ -237,9 +354,13 @@ final class ScopeCompiler
                 'name' => $method->description,
                 'scope' => array_values(array_map(strval(...), $method->describing)),
                 'source' => [
-                    'path' => $this->relativePath((string) $source->getFileName()),
+                    'path' => $this->relativePath($filename),
                     'line' => $line,
                 ],
+            ];
+            $this->caseTemplates[$filename][Str::evaluable($method->description)] = [
+                'test' => $test,
+                'disposition' => $method->todo ? 'todo' : 'run',
             ];
             $tests[] = $test;
             $scopeIds = ['file:'.$path];
@@ -429,6 +550,33 @@ final class ScopeCompiler
 
     /**
      * @param  array<string, mixed>  $node
+     * @param  array<string, list<TestDescriptor>>  $expanded
+     * @return array<string, mixed>
+     */
+    private function expandCases(array $node, array $expanded): array
+    {
+        $tests = [];
+
+        foreach ($node['tests'] as $test) {
+            foreach ($expanded[$test['id']] ?? [] as $case) {
+                $tests[] = $case + [
+                    'before_each' => $test['before_each'],
+                    'after_each' => $test['after_each'],
+                ];
+            }
+        }
+
+        $node['tests'] = $tests;
+        $node['children'] = array_map(
+            fn (array $child): array => $this->expandCases($child, $expanded),
+            $node['children'],
+        );
+
+        return $node;
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
      * @param  array<string, array<string, mixed>>  $tests
      * @param  array<string, mixed>  $configuration
      * @return array<string, mixed>
@@ -459,6 +607,23 @@ final class ScopeCompiler
         );
 
         return $node;
+    }
+
+    private function todoLine(TestCaseMethodFactory $method, string $filename): int
+    {
+        $messages = PestReflection::getPropertyValue($method->chains, 'messages');
+
+        if (is_array($messages)) {
+            foreach ($messages as $message) {
+                if ($message instanceof HigherOrderMessage
+                    && $message->name === 'markTestSkipped'
+                    && $this->canonicalPath($message->filename) === $filename) {
+                    return $message->line;
+                }
+            }
+        }
+
+        throw new RuntimeException('Drove could not locate a todo source line.');
     }
 
     private function canonicalPath(string $path): string

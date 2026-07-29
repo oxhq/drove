@@ -52,6 +52,10 @@ if (! function_exists('beforeAll')) {
 
         $captured = ScopeCompiler::captureHook('before_all', $filename, $closure, $describing);
 
+        if ($captured && ScopeCompiler::ownsHooks()) {
+            return;
+        }
+
         if ($describing !== []) {
             if (! $captured) {
                 throw new BeforeAllWithinDescribe($filename);
@@ -73,12 +77,17 @@ if (! function_exists('beforeEach')) {
     function beforeEach(?Closure $closure = null): BeforeEachCall
     {
         $filename = Backtrace::testFile();
+        $captured = false;
 
         if ($closure instanceof Closure) {
-            ScopeCompiler::captureHook('before_each', $filename, $closure, array_values(DescribeCall::describing()));
+            $captured = ScopeCompiler::captureHook('before_each', $filename, $closure, array_values(DescribeCall::describing()));
         }
 
-        return new BeforeEachCall(TestSuite::getInstance(), $filename, $closure);
+        return new BeforeEachCall(
+            TestSuite::getInstance(),
+            $filename,
+            $captured && ScopeCompiler::ownsHooks() ? null : $closure,
+        );
     }
 }
 
@@ -195,12 +204,17 @@ if (! function_exists('afterEach')) {
     function afterEach(?Closure $closure = null): AfterEachCall
     {
         $filename = Backtrace::testFile();
+        $captured = false;
 
         if ($closure instanceof Closure) {
-            ScopeCompiler::captureHook('after_each', $filename, $closure, array_values(DescribeCall::describing()));
+            $captured = ScopeCompiler::captureHook('after_each', $filename, $closure, array_values(DescribeCall::describing()));
         }
 
-        return new AfterEachCall(TestSuite::getInstance(), $filename, $closure);
+        return new AfterEachCall(
+            TestSuite::getInstance(),
+            $filename,
+            $captured && ScopeCompiler::ownsHooks() ? null : $closure,
+        );
     }
 }
 
@@ -214,6 +228,10 @@ if (! function_exists('afterAll')) {
         $describing = array_values(DescribeCall::describing());
 
         $captured = ScopeCompiler::captureHook('after_all', $filename, $closure, $describing);
+
+        if ($captured && ScopeCompiler::ownsHooks()) {
+            return;
+        }
 
         if ($describing !== []) {
             if (! $captured) {

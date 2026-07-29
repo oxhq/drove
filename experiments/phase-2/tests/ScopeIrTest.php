@@ -1,61 +1,59 @@
 <?php
 
 declare(strict_types=1);
+use Tests\TestCase;
 
 beforeAll(function (): void {
-    $proof = $GLOBALS['drove_before_all_proof'];
-    $proof->count++;
-    $proof->pid = getmypid();
+    $GLOBALS['drove_phase_two_hooks']['before_all']++;
+});
 
-    $GLOBALS['drove_scope_state']->mutations[] = 'prepared';
+beforeEach(function (): void {
+    if ($this->bindingMarker() !== 'custom-test-case') {
+        throw new RuntimeException('Drove beforeEach lost TestCase binding.');
+    }
+
+    $GLOBALS['drove_phase_two_hooks']['before_each']++;
+});
+
+afterEach(function (): void {
+    if ($this->bindingMarker() !== 'custom-test-case') {
+        throw new RuntimeException('Drove afterEach lost TestCase binding.');
+    }
+
+    $GLOBALS['drove_phase_two_hooks']['after_each']++;
 });
 
 afterAll(function (): void {
-    $proof = $GLOBALS['drove_after_all_proof'];
-    $proof->count++;
-    $proof->pid = getmypid();
+    $GLOBALS['drove_phase_two_hooks']['after_all']++;
 });
 
-describe('prepared siblings', function (): void {
-    it('runs beta from prepared state', function (): void {
-        $rootPid = $GLOBALS['drove_root_pid'];
-        $scopeState = $GLOBALS['drove_scope_state'];
-        $startState = $scopeState->mutations;
-        $scopeState->mutations[] = 'beta';
+test('runs a generated dataset case', function (string $label, int $number): void {
+    $GLOBALS['drove_phase_two_bodies'][$label] = [
+        'class' => $this::class,
+        'binding' => $this->bindingMarker(),
+        'number' => $number,
+    ];
 
-        $GLOBALS['drove_pest_execution'] = [
-            'marker' => 'beta',
-            'start_state' => $startState,
-            'pid' => getmypid(),
-            'ppid' => posix_getppid(),
-            'generated_method' => $this->name(),
-            'end_state' => $scopeState->mutations,
-        ];
+    echo $label.':'.$number;
 
-        expect($startState)->toBe(['root', 'prepared'])
-            ->and(getmypid())->not->toBe($rootPid)
-            ->and(posix_getppid())->toBe($rootPid)
-            ->and($scopeState->mutations)->toBe(['root', 'prepared', 'beta']);
-    });
+    expect($this)->toBeInstanceOf(TestCase::class)
+        ->and($this->bindingMarker())->toBe('custom-test-case')
+        ->and($number)->toBe($label === 'alpha' ? 1 : 2);
+})->with([
+    'alpha' => ['alpha', 1],
+    'beta' => ['beta', 2],
+])->group('datasets', 'fast');
 
-    it('runs alpha from prepared state', function (): void {
-        $rootPid = $GLOBALS['drove_root_pid'];
-        $scopeState = $GLOBALS['drove_scope_state'];
-        $startState = $scopeState->mutations;
-        $scopeState->mutations[] = 'alpha';
+test('preserves a skipped case', function (): never {
+    throw new RuntimeException('A skipped Pest body ran.');
+})->skip('intentional skip')->group('state');
 
-        $GLOBALS['drove_pest_execution'] = [
-            'marker' => 'alpha',
-            'start_state' => $startState,
-            'pid' => getmypid(),
-            'ppid' => posix_getppid(),
-            'generated_method' => $this->name(),
-            'end_state' => $scopeState->mutations,
-        ];
+todo('preserves a todo case')->group('state');
 
-        expect($startState)->toBe(['root', 'prepared'])
-            ->and(getmypid())->not->toBe($rootPid)
-            ->and(posix_getppid())->toBe($rootPid)
-            ->and($scopeState->mutations)->toBe(['root', 'prepared', 'alpha']);
-    });
+test('rethrows the original assertion failure', function (): void {
+    expect('actual')->toBe('expected');
 });
+
+test('is removed by PHPUnit filtering', function (): never {
+    throw new RuntimeException('A filtered Pest case was cataloged.');
+})->group('filtered-out');
