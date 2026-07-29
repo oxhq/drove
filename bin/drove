@@ -1,0 +1,20 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Drove\Pest\Runner;
+
+$installedAutoload = dirname(__DIR__, 4).'/vendor/autoload.php';
+$localAutoload = dirname(__DIR__).'/vendor/autoload.php';
+$autoload = file_exists($installedAutoload) ? $installedAutoload : $localAutoload;
+
+if (! file_exists($autoload)) {
+    fwrite(STDERR, "Drove could not find Composer's autoloader.".PHP_EOL);
+
+    exit(2);
+}
+
+require_once $autoload;
+
+exit(Runner::main($_SERVER['argv'], dirname($autoload, 2)));

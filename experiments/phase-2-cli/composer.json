@@ -1,0 +1,31 @@
+{
+    "name": "oxhq/drove-phase-two-cli",
+    "description": "Installed-project proof for the Drove Phase 2 CLI",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "/drove",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "pestphp/pest": "5.x-dev"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-pcntl": "*",
+        "pestphp/pest": "^5.0@dev"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "preferred-install": "dist",
+        "sort-packages": true
+    }
+}

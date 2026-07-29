@@ -78,6 +78,7 @@
         }
     },
     "bin": [
+        "bin/drove",
         "bin/pest"
     ],
     "scripts": {

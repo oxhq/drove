@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [5.x]
+    branches: [develop]
   pull_request:
   schedule:
     - cron: '0 9 * * *'
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   tests:
-    if: github.event_name != 'schedule' || github.repository == 'pestphp/pest'
+    if: github.event_name != 'schedule' || github.repository == 'oxhq/drove'
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
