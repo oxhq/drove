@@ -9,6 +9,8 @@ RUN apt-get update \
 
 WORKDIR /drove
 
+COPY tests ./tests
+
 RUN COMPOSER_ROOT_VERSION=0.4.0-alpha.1 \
     composer install --no-interaction --no-progress --prefer-dist --optimize-autoloader
 

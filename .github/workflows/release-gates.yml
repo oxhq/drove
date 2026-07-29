@@ -74,7 +74,7 @@ jobs:
         composer check-platform-reqs
         php native/drover/resolver-proof.php
         php -d ffi.enable=true native/drover/proof.php
-        php -d ffi.enable=true vendor/bin/drove --version
+        php -d ffi.enable=true bin/drove --version
 
     - name: Install Laravel and Testbench proof
       env:
