@@ -64,6 +64,7 @@ jobs:
         docker run --rm drove-phase-one php kernel.php
         docker run --rm drove-phase-one timeout 15 php scheduler.php
         docker run --rm drove-phase-one timeout 15 php interruption.php
+        docker run --rm drove-phase-one php -d ffi.enable=true /pest/native/drover/proof.php
 
     - name: Phase 2 regression
       run: |

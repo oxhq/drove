@@ -29,7 +29,7 @@ final class PcntlScheduler implements Scheduler
     private array $heldPermits = [];
 
     /**
-     * @param  array<string, int>  $scopeConcurrency
+     * @param  array<string, mixed>  $scopeConcurrency
      */
     public function __construct(
         private readonly string $runId,
@@ -50,7 +50,11 @@ final class PcntlScheduler implements Scheduler
             }
         }
 
-        if ($runId === '' || $concurrency < 1 || $defaultTimeoutMs < 1 || $termGraceMs < 1) {
+        if ($runId === ''
+            || $concurrency < 1
+            || $concurrency > 256
+            || $defaultTimeoutMs < 1
+            || $termGraceMs < 1) {
             throw new InvalidArgumentException('Drove received invalid scheduler configuration.');
         }
 
@@ -58,8 +62,8 @@ final class PcntlScheduler implements Scheduler
         $this->pools['@global'] = $this->createPool($concurrency);
 
         foreach ($scopeConcurrency as $scopeId => $limit) {
-            if ($scopeId === '' || $limit < 1) {
-                throw new InvalidArgumentException('Drove scope concurrency limits must be positive.');
+            if ($scopeId === '' || ! is_int($limit) || $limit < 1 || $limit > 256) {
+                throw new InvalidArgumentException('Drove scope concurrency limits must be between 1 and 256.');
             }
 
             $this->pools['scope:'.$scopeId] = $this->createPool($limit);
@@ -81,7 +85,25 @@ final class PcntlScheduler implements Scheduler
         $children = [];
         $results = [];
         $completionOrder = [];
-        $interruptedSignal = null;
+        $interruption = new class
+        {
+            private ?int $signal = null;
+
+            public function capture(int $signal): void
+            {
+                $this->signal ??= $signal;
+            }
+
+            /**
+             * @phpstan-impure
+             */
+            public function current(): ?int
+            {
+                pcntl_signal_dispatch();
+
+                return $this->signal;
+            }
+        };
 
         foreach ($tasks as $ordinal => $task) {
             $pending[$ordinal] = $this->normalizeTask($task, $ordinal);
@@ -92,8 +114,8 @@ final class PcntlScheduler implements Scheduler
             SIGINT => pcntl_signal_get_handler(SIGINT),
             SIGTERM => pcntl_signal_get_handler(SIGTERM),
         ];
-        $interrupt = static function (int $signal) use (&$interruptedSignal): void {
-            $interruptedSignal ??= $signal;
+        $interrupt = static function (int $signal) use ($interruption): void {
+            $interruption->capture($signal);
         };
         pcntl_signal(SIGINT, $interrupt);
         pcntl_signal(SIGTERM, $interrupt);
@@ -104,7 +126,7 @@ final class PcntlScheduler implements Scheduler
         try {
             while ($pending !== [] || $children !== []) {
                 foreach (array_keys($pending) as $ordinal) {
-                    if ($interruptedSignal !== null) {
+                    if ($interruption->current() !== null) {
                         break;
                     }
 
@@ -115,7 +137,7 @@ final class PcntlScheduler implements Scheduler
                         continue;
                     }
 
-                    if ($interruptedSignal !== null) {
+                    if ($interruption->current() !== null) {
                         $this->release($permitNames);
 
                         break;
@@ -142,7 +164,7 @@ final class PcntlScheduler implements Scheduler
 
                     [$parentSocket, $childSocket] = $sockets;
 
-                    if ($interruptedSignal !== null) {
+                    if (($signal = $interruption->current()) !== null) {
                         fclose($parentSocket);
                         fclose($childSocket);
                         $this->forgetPermits($permitNames);
@@ -150,7 +172,7 @@ final class PcntlScheduler implements Scheduler
                         $results[$ordinal] = $this->parentFailure(
                             $task,
                             FailureKind::UserInterruption,
-                            sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                            sprintf('The Drove run was interrupted by signal %d.', $signal),
                         );
 
                         break;
@@ -231,12 +253,12 @@ final class PcntlScheduler implements Scheduler
 
                 $now = hrtime(true);
 
-                if ($interruptedSignal !== null) {
+                if (($signal = $interruption->current()) !== null) {
                     foreach ($pending as $ordinal => $task) {
                         $results[$ordinal] = $this->parentFailure(
                             $task,
                             FailureKind::UserInterruption,
-                            sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                            sprintf('The Drove run was interrupted by signal %d.', $signal),
                         );
                     }
 
@@ -244,7 +266,7 @@ final class PcntlScheduler implements Scheduler
 
                     foreach ($children as $pid => &$child) {
                         if ($child['interrupted_signal'] === null) {
-                            $child['interrupted_signal'] = $interruptedSignal;
+                            $child['interrupted_signal'] = $signal;
                             $child['interruption_term_ns'] = $now;
                             @posix_kill(-$pid, SIGTERM);
                         }

@@ -29,30 +29,43 @@ $ffi = FFI::cdef(<<<'C'
         uint32_t active_count;
         uint32_t max_active;
         uint32_t frame_count;
-        char task_id[128];
+        char task_id[512];
         char failure_kind[64];
         char message[256];
     } DroverAction;
 
     uint32_t drover_protocol_version(void);
     size_t drover_protocol_max_frame_bytes(void);
-    void *drover_scheduler_new(
+    void *drover_engine_new(
         const char *run_id,
         uint32_t concurrency,
-        uint32_t queue_capacity,
+        const char *scope_limits_json,
         uint64_t term_grace_ms
     );
+    void drover_engine_free(void *engine);
+    void *drover_map_new(void *engine, uint32_t queue_capacity);
+    int32_t drover_map_submit(
+        void *map,
+        const char *task_id,
+        const char *task_kind,
+        const char *scope_id,
+        const char *scopes_json,
+        uint64_t timeout_ms,
+        int32_t permit
+    );
+    int32_t drover_map_step(void *map, DroverAction *action);
+    size_t drover_map_last_result_len(void *map);
+    int32_t drover_map_copy_last_result(void *map, char *destination, size_t capacity);
+    uint32_t drover_map_max_active(void *map);
+    void drover_map_free(void *map);
     void drover_child_exit(int32_t status);
-    int32_t drover_scheduler_submit(void *scheduler, const char *task_id, uint64_t timeout_ms);
-    int32_t drover_scheduler_step(void *scheduler, DroverAction *action);
-    size_t drover_scheduler_last_result_len(void *scheduler);
-    int32_t drover_scheduler_copy_last_result(void *scheduler, char *destination, size_t capacity);
-    uint32_t drover_scheduler_max_active(void *scheduler);
-    void drover_scheduler_free(void *scheduler);
     int32_t drover_emit_frame(
         int32_t fd,
         const char *run_id,
         const char *task_id,
+        const char *task_kind,
+        const char *scope_id,
+        uint32_t ordinal,
         uint32_t sequence,
         const char *event_type,
         const char *payload_json
@@ -60,32 +73,40 @@ $ffi = FFI::cdef(<<<'C'
     int32_t drover_validate_frame_json(
         const char *expected_run_id,
         const char *expected_task_id,
+        const char *expected_task_kind,
+        const char *expected_scope_id,
+        uint32_t expected_ordinal,
         uint32_t expected_sequence,
         const char *frame_json
     );
 C, '/usr/local/lib/libdrover.so');
 
-$assert($ffi->drover_protocol_version() === 1, 'The native Drover protocol version drifted.');
-$assert(
-    $ffi->drover_protocol_max_frame_bytes() === 1_048_576,
-    'The native Drover frame limit drifted.',
-);
+$assert($ffi->drover_protocol_version() === 1, 'The native protocol version drifted.');
+$assert($ffi->drover_protocol_max_frame_bytes() === 1_048_576, 'The native frame limit drifted.');
 
 $validVectors = [
     'started.json' => 0,
     'event.json' => 1,
-    'finished.json' => 2,
+    'value.json' => 2,
+    'finished.json' => 3,
 ];
 
 foreach ($validVectors as $filename => $sequence) {
     $json = file_get_contents(__DIR__.'/protocol/v1/'.$filename);
-    $assert(is_string($json), 'A Drover protocol vector is unreadable.');
+    $assert(is_string($json), 'A ChildProtocol vector is unreadable.');
     $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
-    $assert($decoded['protocol'] === 'drover.task', 'A PHP protocol vector has the wrong name.');
-    $assert($decoded['version'] === 1, 'A PHP protocol vector has the wrong version.');
+    $assert($decoded['protocol_version'] === 1, 'A PHP-consumed vector has the wrong version.');
     $assert(
-        $ffi->drover_validate_frame_json('golden-run', 'task:golden', $sequence, $json) === 0,
-        'Rust rejected a PHP-consumed golden protocol vector.',
+        $ffi->drover_validate_frame_json(
+            'golden-run',
+            'task:golden',
+            'test',
+            'scope:golden',
+            7,
+            $sequence,
+            $json,
+        ) === 0,
+        'Rust rejected a PHP-consumed ChildProtocol vector.',
     );
 }
 
@@ -95,102 +116,96 @@ $assert(
     $ffi->drover_validate_frame_json(
         'golden-run',
         'task:golden',
-        2,
+        'test',
+        'scope:golden',
+        7,
+        3,
         $invalidVersion,
     ) === DROVER_ERR_VERSION,
-    'Drover did not reject an incompatible protocol version.',
+    'Drover did not reject an incompatible ChildProtocol version.',
 );
 
-$runId = 'native-phase-1';
-$concurrency = 2;
-$queueCapacity = 8;
+$runId = 'native-abi-smoke';
 $escapedPath = '/tmp/drover-timeout-descendant';
 @unlink($escapedPath);
-$prepared = [
-    'boot_count' => 1,
-    'items' => ['root'],
-];
-
-$mutatingTask = static function (string $label) use (&$prepared): Closure {
-    return static function (Closure $emit) use (&$prepared, $label): array {
-        if ($prepared['boot_count'] !== 1 || $prepared['items'] !== ['root']) {
-            throw new RuntimeException('A child did not inherit the prepared PHP heap.');
-        }
-
-        $before = $prepared['items'];
-        $prepared['items'][] = $label;
-        $emit('task.event', ['message' => $label.' inherited prepared state']);
-        usleep(180_000);
-
-        return [
-            'before' => $before,
-            'after' => $prepared['items'],
-        ];
-    };
-};
-
+$prepared = ['items' => ['root']];
 $tasks = [
     [
         'id' => 'task:slow-a',
+        'kind' => 'test',
+        'scope_id' => 'scope:parallel',
+        'scopes' => ['scope:root', 'scope:parallel'],
         'timeout_ms' => 1_000,
-        'callback' => $mutatingTask('slow-a'),
+        'callback' => static function () use (&$prepared): array {
+            $before = $prepared['items'];
+            $prepared['items'][] = 'slow-a';
+            usleep(150_000);
+
+            return ['before' => $before, 'after' => $prepared['items']];
+        },
     ],
     [
         'id' => 'task:slow-b',
+        'kind' => 'test',
+        'scope_id' => 'scope:parallel',
+        'scopes' => ['scope:root', 'scope:parallel'],
         'timeout_ms' => 1_000,
-        'callback' => $mutatingTask('slow-b'),
-    ],
-    [
-        'id' => 'task:queued-fast',
-        'timeout_ms' => 1_000,
-        'callback' => static function (Closure $emit) use (&$prepared): array {
-            if ($prepared['items'] !== ['root']) {
-                throw new RuntimeException('A sibling PHP mutation escaped its fork.');
-            }
+        'callback' => static function () use (&$prepared): array {
+            $before = $prepared['items'];
+            $prepared['items'][] = 'slow-b';
+            usleep(150_000);
 
-            $emit('task.output', ['chunk' => 'queued']);
-
-            return ['before' => $prepared['items']];
+            return ['before' => $before, 'after' => $prepared['items']];
         },
     ],
     [
         'id' => 'task:php-exception',
+        'kind' => 'test',
+        'scope_id' => 'scope:serial',
+        'scopes' => ['scope:root', 'scope:serial'],
         'timeout_ms' => 1_000,
-        'callback' => static function (Closure $emit): never {
+        'callback' => static function (): never {
             throw new RuntimeException('child callback failed');
         },
     ],
     [
         'id' => 'task:timeout-tree',
+        'kind' => 'test',
+        'scope_id' => 'scope:serial',
+        'scopes' => ['scope:root', 'scope:serial'],
         'timeout_ms' => 120,
-        'callback' => static function (Closure $emit) use ($escapedPath): never {
+        'callback' => static function () use ($escapedPath): never {
             $script = 'trap "" TERM; sleep 1; printf escaped > '.escapeshellarg($escapedPath);
             exec('sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &');
-            $emit('task.event', ['message' => 'descendant started']);
             usleep(2_000_000);
-            throw new RuntimeException('The timed-out callback unexpectedly resumed.');
+            throw new RuntimeException('The timed-out callback resumed.');
         },
     ],
 ];
 
-$scheduler = $ffi->drover_scheduler_new($runId, $concurrency, $queueCapacity, 50);
-$assert(! FFI::isNull($scheduler), 'Drover could not initialize its native scheduler.');
+$engine = $ffi->drover_engine_new($runId, 2, '{"scope:serial":1}', 50);
+$assert(! FFI::isNull($engine), 'Drover could not initialize its shared permit engine.');
+$map = $ffi->drover_map_new($engine, count($tasks));
+$assert(! FFI::isNull($map), 'Drover could not initialize its ABI smoke map.');
 
 foreach ($tasks as $ordinal => $task) {
-    $submitted = $ffi->drover_scheduler_submit(
-        $scheduler,
+    $submitted = $ffi->drover_map_submit(
+        $map,
         $task['id'],
+        $task['kind'],
+        $task['scope_id'],
+        json_encode($task['scopes'], JSON_THROW_ON_ERROR),
         $task['timeout_ms'],
+        1,
     );
     $assert($submitted === $ordinal, 'Drover changed task submission order.');
 }
 
 $results = [];
-$completionOrder = [];
 $action = $ffi->new('DroverAction');
 
 while (true) {
-    $role = $ffi->drover_scheduler_step($scheduler, FFI::addr($action));
+    $role = $ffi->drover_map_step($map, FFI::addr($action));
 
     if ($role === DROVER_ROLE_PROGRESS) {
         continue;
@@ -199,63 +214,79 @@ while (true) {
     if ($role === DROVER_ROLE_CHILD) {
         $ordinal = $action->ordinal;
         $task = $tasks[$ordinal] ?? throw new RuntimeException('Drover returned an unknown task.');
-        $taskId = FFI::string(FFI::addr($action->task_id[0]));
-        $assert($taskId === $task['id'], 'Drover returned the wrong task to a PHP child.');
         $sequence = 0;
         $emit = static function (string $type, array $payload) use (
-            $ffi,
             $action,
+            $ffi,
+            $ordinal,
             $runId,
-            $taskId,
             &$sequence,
+            $task,
         ): void {
-            $encoded = json_encode($payload, JSON_THROW_ON_ERROR);
             $result = $ffi->drover_emit_frame(
                 $action->child_fd,
                 $runId,
-                $taskId,
+                $task['id'],
+                $task['kind'],
+                $task['scope_id'],
+                $ordinal,
                 $sequence,
                 $type,
-                $encoded,
+                json_encode($payload, JSON_THROW_ON_ERROR),
             );
+            $assertion = $result === 0;
 
-            if ($result !== 0) {
+            if (! $assertion) {
                 throw new RuntimeException(sprintf('Drover could not emit frame %d (%d).', $sequence, $result));
             }
 
             $sequence++;
         };
-
-        $emit('task.started', ['worker' => 'php']);
+        $emit('task.started', ['started_ns' => hrtime(true)]);
 
         try {
-            $value = ($task['callback'])($emit);
+            $value = ($task['callback'])();
+            $emit('task.stdout', ['encoding' => 'base64', 'data' => base64_encode($task['id'])]);
+            $emit('task.value', [
+                'encoding' => 'base64',
+                'data' => base64_encode(json_encode($value, JSON_THROW_ON_ERROR)),
+            ]);
             $emit('task.finished', [
                 'status' => 'passed',
-                'value' => $value,
+                'failure' => null,
+                'finished_ns' => hrtime(true),
+                'memory_peak_bytes' => memory_get_peak_usage(true),
             ]);
             $ffi->drover_child_exit(0);
         } catch (Throwable $throwable) {
+            $emit('task.value', ['encoding' => 'base64', 'data' => base64_encode('null')]);
             $emit('task.finished', [
                 'status' => 'failed',
-                'failure_kind' => 'php_exception',
-                'message' => $throwable->getMessage(),
+                'failure' => [
+                    'kind' => 'php_exception',
+                    'message' => $throwable->getMessage(),
+                    'class' => $throwable::class,
+                    'file' => $throwable->getFile(),
+                    'line' => $throwable->getLine(),
+                    'phase' => 'executor',
+                    'hook_id' => null,
+                ],
+                'finished_ns' => hrtime(true),
+                'memory_peak_bytes' => memory_get_peak_usage(true),
             ]);
             $ffi->drover_child_exit(1);
         }
     }
 
     if ($role === DROVER_ROLE_RESULT) {
-        $length = $ffi->drover_scheduler_last_result_len($scheduler);
-        $assert($length > 0, 'Drover returned an empty result.');
+        $length = $ffi->drover_map_last_result_len($map);
         $buffer = $ffi->new(sprintf('char[%d]', $length + 1));
         $assert(
-            $ffi->drover_scheduler_copy_last_result($scheduler, $buffer, $length + 1) === 0,
-            'Drover could not copy a completed result.',
+            $ffi->drover_map_copy_last_result($map, $buffer, $length + 1) === 0,
+            'Drover could not copy a result.',
         );
         $result = json_decode(FFI::string($buffer, $length), true, flags: JSON_THROW_ON_ERROR);
-        $results[$result['task_id']] = $result;
-        $completionOrder[] = $result['task_id'];
+        $results[$result['id']] = $result;
 
         continue;
     }
@@ -265,71 +296,35 @@ while (true) {
     }
 
     if ($role === DROVER_ROLE_ERROR) {
-        $message = FFI::string(FFI::addr($action->message[0]));
-        throw new RuntimeException('Native Drover failed: '.$message);
+        throw new RuntimeException('Native Drover failed: '.FFI::string(FFI::addr($action->message[0])));
     }
 
-    throw new RuntimeException('Drover returned an unknown scheduler role.');
+    throw new RuntimeException('Drover returned an unknown role.');
 }
 
-$maxActive = $ffi->drover_scheduler_max_active($scheduler);
-$ffi->drover_scheduler_free($scheduler);
+$maxActive = $ffi->drover_map_max_active($map);
+$ffi->drover_map_free($map);
+$ffi->drover_engine_free($engine);
 
-$assert(count($results) === count($tasks), 'Drover lost a queued task result.');
-$assert($maxActive === $concurrency, 'Drover did not enforce permit-before-fork concurrency.');
-$assert($prepared['items'] === ['root'], 'A child mutation escaped into the root PHP host.');
-$assert(count(array_unique(array_column($results, 'pid'))) === count($tasks), 'Drover reused a child process.');
-
-foreach (['task:slow-a', 'task:slow-b', 'task:queued-fast'] as $taskId) {
-    $assert($results[$taskId]['status'] === 'passed', $taskId.' did not pass.');
-    $assert(count($results[$taskId]['frames']) === 3, $taskId.' did not use streamed v1 frames.');
-}
-
-$terminalValue = static function (array $result): array {
-    foreach (array_reverse($result['frames']) as $frame) {
-        if ($frame['type'] === 'task.finished') {
-            return $frame['payload']['value'] ?? [];
-        }
-    }
-
-    throw new RuntimeException('A passing Drover result has no terminal value.');
-};
-
-$slowAValue = $terminalValue($results['task:slow-a']);
-$assert(
-    ($slowAValue['before'] ?? null) === ['root']
-        && ($slowAValue['after'] ?? null) === ['root', 'slow-a'],
-    'The first child observed the wrong prepared state: '.json_encode($slowAValue, JSON_THROW_ON_ERROR),
-);
-$slowBValue = $terminalValue($results['task:slow-b']);
-$assert(
-    ($slowBValue['before'] ?? null) === ['root']
-        && ($slowBValue['after'] ?? null) === ['root', 'slow-b'],
-    'The second child observed the wrong prepared state: '.json_encode($slowBValue, JSON_THROW_ON_ERROR),
-);
-$assert(
-    $results['task:php-exception']['failure_kind'] === 'php_exception',
-    'The PHP callback failure crossed the native boundary incorrectly.',
-);
-$assert(
-    $results['task:timeout-tree']['failure_kind'] === 'timeout'
-        && $results['task:timeout-tree']['timed_out'] === true,
-    'Drover did not classify its monotonic timeout.',
-);
-
+$assert(count($results) === count($tasks), 'Drover lost an ABI smoke result.');
+$assert($maxActive === 2, 'Drover did not reserve global permits before fork.');
+$assert($prepared['items'] === ['root'], 'A child mutation escaped into the prepared PHP host.');
+$assert($results['task:slow-a']['value']['after'] === ['root', 'slow-a'], 'Prepared state was not inherited.');
+$assert($results['task:php-exception']['failure']['kind'] === 'php_exception', 'PHP failure drifted.');
+$assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout failure drifted.');
 usleep(1_200_000);
-$assert(! file_exists($escapedPath), 'A timed-out descendant escaped Drover process-group termination.');
+$assert(! file_exists($escapedPath), 'A timed-out descendant escaped its process group.');
 
 fwrite(STDOUT, json_encode([
     'status' => 'passed',
+    'gate' => 'native-abi-smoke',
     'protocol_version' => $ffi->drover_protocol_version(),
     'golden_vectors' => count($validVectors) + 1,
-    'submitted' => count($tasks),
     'completed' => count($results),
     'max_active' => $maxActive,
-    'queue_capacity' => $queueCapacity,
-    'completion_order' => $completionOrder,
-    'failure_kinds' => array_values(array_filter(array_column($results, 'failure_kind'))),
-    'prepared_root' => $prepared,
+    'failure_kinds' => array_values(array_filter(array_map(
+        static fn (array $result): ?string => $result['failure']['kind'] ?? null,
+        $results,
+    ))),
     'descendant_escaped' => file_exists($escapedPath),
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);

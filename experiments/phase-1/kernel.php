@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Drove\Kernel\ChildProtocol;
+use Drove\Kernel\DroverScheduler;
 use Drove\Kernel\FailureKind;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\PcntlScheduler;
@@ -15,6 +17,72 @@ use PHPUnit\TextUI\TestSuiteFilterProcessor;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 
+$backend = getenv('DROVE_KERNEL_BACKEND');
+
+if ($backend === false || $backend === '') {
+    $summaries = [];
+
+    foreach (['pcntl', 'drover'] as $candidate) {
+        putenv('DROVE_KERNEL_BACKEND='.$candidate);
+        $process = proc_open(
+            [PHP_BINARY, __FILE__],
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w'],
+            ],
+            $pipes,
+        );
+
+        if (! is_resource($process)) {
+            throw new RuntimeException('Unable to start the '.$candidate.' kernel conformance run.');
+        }
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0 || ! is_string($stdout)) {
+            throw new RuntimeException(sprintf(
+                "%s kernel conformance failed (exit %d).\n%s\n%s",
+                $candidate,
+                $exitCode,
+                is_string($stdout) ? $stdout : '',
+                is_string($stderr) ? $stderr : '',
+            ));
+        }
+
+        $summary = json_decode($stdout, true, flags: JSON_THROW_ON_ERROR);
+
+        if (! is_array($summary) || ($summary['status'] ?? null) !== 'passed') {
+            throw new RuntimeException($candidate.' returned an invalid kernel conformance summary.');
+        }
+
+        $summaries[$candidate] = $summary;
+    }
+
+    putenv('DROVE_KERNEL_BACKEND');
+
+    if ($summaries['pcntl']['semantic_hash'] !== $summaries['drover']['semantic_hash']) {
+        throw new RuntimeException('Pcntl and Drover changed the Phase 1 semantic projection.');
+    }
+
+    fwrite(STDOUT, json_encode([
+        'status' => 'passed',
+        'backends' => $summaries,
+        'semantic_hash' => $summaries['pcntl']['semantic_hash'],
+    ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);
+
+    exit(0);
+}
+
+if (! in_array($backend, ['pcntl', 'drover'], true)) {
+    throw new RuntimeException('Unknown Drove kernel backend: '.$backend);
+}
+
 require __DIR__.'/vendor/autoload.php';
 
 $assert = static function (bool $condition, string $message): void {
@@ -22,6 +90,77 @@ $assert = static function (bool $condition, string $message): void {
         throw new RuntimeException($message);
     }
 };
+
+$firstDifference = null;
+$firstDifference = static function (mixed $expected, mixed $actual, string $path = '$') use (&$firstDifference): ?string {
+    if (get_debug_type($expected) !== get_debug_type($actual)) {
+        return sprintf(
+            '%s type is %s, expected %s',
+            $path,
+            get_debug_type($actual),
+            get_debug_type($expected),
+        );
+    }
+
+    if (is_array($expected)) {
+        if (array_keys($expected) !== array_keys($actual)) {
+            return sprintf('%s keys differ', $path);
+        }
+
+        foreach ($expected as $key => $value) {
+            $difference = $firstDifference($value, $actual[$key], $path.'['.json_encode($key).']');
+
+            if ($difference !== null) {
+                return $difference;
+            }
+        }
+
+        return null;
+    }
+
+    if ($expected !== $actual) {
+        $expectedValue = substr(json_encode($expected, JSON_THROW_ON_ERROR), 0, 160);
+        $actualValue = substr(json_encode($actual, JSON_THROW_ON_ERROR), 0, 160);
+
+        return sprintf('%s is %s, expected %s', $path, $actualValue, $expectedValue);
+    }
+
+    return null;
+};
+
+$vectorDirectory = getenv('DROVER_PROTOCOL_VECTORS')
+    ?: realpath(__DIR__.'/../../native/drover/protocol/v1');
+
+if (! is_string($vectorDirectory) || ! is_dir($vectorDirectory)) {
+    throw new RuntimeException('The shared ChildProtocol v1 vectors are unavailable.');
+}
+
+$vectorTask = [
+    'id' => 'task:golden',
+    'kind' => 'test',
+    'scope_id' => 'scope:golden',
+    'scopes' => ['scope:golden'],
+    'timeout_ms' => 1_000,
+    'permit' => true,
+    'ordinal' => 7,
+];
+$vectors = array_map(
+    static function (string $filename) use ($vectorDirectory): string {
+        $json = file_get_contents($vectorDirectory.'/'.$filename);
+
+        return is_string($json)
+            ? $json
+            : throw new RuntimeException('Unable to read shared protocol vector '.$filename);
+    },
+    ['started.json', 'event.json', 'value.json', 'finished.json'],
+);
+$vectorResult = (new ChildProtocol('golden-run'))->validateSequence($vectorTask, $vectors);
+$assert(
+    $vectorResult['stdout'] === 'golden'
+        && $vectorResult['stderr'] === ''
+        && $vectorResult['value'] === ['ok' => true],
+    'PHP rejected the shared ChildProtocol v1 vectors.',
+);
 
 $outputBufferLevel = ob_get_level();
 PestKernel::boot(
@@ -143,19 +282,29 @@ $contextTest = static function (ScopeContext $context): void {
 };
 
 $runAt = static function (int $concurrency) use (
+    $backend,
     $compiler,
     $contextTest,
     $contextTestId,
     $limits,
     $plan,
 ): array {
-    $scheduler = new PcntlScheduler(
-        'phase-1-c'.$concurrency,
-        $concurrency,
-        $limits,
-        3_000,
-        50,
-    );
+    $scheduler = match ($backend) {
+        'pcntl' => new PcntlScheduler(
+            'phase-1-c'.$concurrency,
+            $concurrency,
+            $limits,
+            3_000,
+            50,
+        ),
+        'drover' => new DroverScheduler(
+            'phase-1-c'.$concurrency,
+            $concurrency,
+            $limits,
+            3_000,
+            50,
+        ),
+    };
     $executor = new LifecycleExecutor(
         $scheduler,
         static fn (string $id): Closure => $compiler->hook($id),
@@ -175,10 +324,12 @@ $runAt = static function (int $concurrency) use (
 
 $sequential = $runAt(1);
 $parallel = $runAt(8);
+$sequentialProjection = LifecycleExecutor::semanticProjection($sequential);
+$parallelProjection = LifecycleExecutor::semanticProjection($parallel);
 $assert(
-    LifecycleExecutor::semanticProjection($sequential)
-        === LifecycleExecutor::semanticProjection($parallel),
-    'Concurrency 1 and 8 changed Phase 1 semantics.',
+    $sequentialProjection === $parallelProjection,
+    'Concurrency 1 and 8 changed Phase 1 semantics: '
+        .($firstDifference($sequentialProjection, $parallelProjection) ?? 'unknown difference'),
 );
 $assert($sequential['status'] === 'failed' && $sequential['exit_code'] === 1, 'The failing matrix did not aggregate exit 1.');
 $assert($parallel['status'] === 'failed' && $parallel['exit_code'] === 1, 'Parallel aggregate status drifted.');
@@ -320,6 +471,61 @@ foreach ([$sequential, $parallel] as $run) {
     );
 }
 
+$nativeChildExitChecked = false;
+
+if ($backend === 'drover') {
+    $sentinelPrefix = '/tmp/drove-inherited-shutdown-'.bin2hex(random_bytes(8)).'-';
+    $parentPid = getmypid();
+    register_shutdown_function(static function () use ($parentPid, $sentinelPrefix): void {
+        if (getmypid() !== $parentPid) {
+            file_put_contents($sentinelPrefix.getmypid(), 'inherited shutdown ran');
+        }
+    });
+    $exitProbe = new DroverScheduler('phase-1-native-child-exit', 1, termGraceMs: 25);
+    $exitProbeRun = $exitProbe->map(
+        [
+            [
+                'id' => 'normal-native-exit',
+                'kind' => 'test',
+                'scope_id' => 'root',
+                'scopes' => ['root'],
+                'timeout_ms' => 1_000,
+                'permit' => true,
+            ],
+            [
+                'id' => 'signal-native-exit',
+                'kind' => 'scope',
+                'scope_id' => 'root',
+                'scopes' => ['root'],
+                'timeout_ms' => 100,
+                'permit' => false,
+            ],
+        ],
+        static function (array $task): string {
+            if ($task['id'] === 'signal-native-exit') {
+                usleep(2_000_000);
+            }
+
+            return 'native exit';
+        },
+    );
+    $exitResults = array_column($exitProbeRun['results'], null, 'id');
+    $assert(
+        $exitResults['normal-native-exit']['status'] === 'passed'
+            && $exitResults['signal-native-exit']['failure']['kind'] === FailureKind::Timeout->value,
+        'The native child-exit lifecycle probe did not exercise both termination paths.',
+    );
+
+    foreach ($exitResults as $result) {
+        $assert(
+            ! file_exists($sentinelPrefix.$result['telemetry']['pid']),
+            'A Drover child ran inherited PHP shutdown machinery.',
+        );
+    }
+
+    $nativeChildExitChecked = true;
+}
+
 foreach ($parallel['events'] as $sequence => $event) {
     $assert($event['sequence'] === $sequence, 'Canonical event sequence is not contiguous.');
     $assert($event['run_id'] === 'phase-1-c8', 'An event has the wrong run ID.');
@@ -327,8 +533,14 @@ foreach ($parallel['events'] as $sequence => $event) {
 
 fwrite(STDOUT, json_encode([
     'status' => 'passed',
+    'backend' => $backend,
     'tests' => count($parallel['tests']),
     'events' => count($parallel['events']),
     'observed_concurrency' => $parallel['observed_concurrency'],
     'failure_kinds' => array_values($expectedKinds),
+    'native_child_exit_checked' => $nativeChildExitChecked,
+    'semantic_hash' => hash(
+        'sha256',
+        json_encode(LifecycleExecutor::semanticProjection($parallel), JSON_THROW_ON_ERROR),
+    ),
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);

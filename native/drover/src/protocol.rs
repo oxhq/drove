@@ -1,12 +1,14 @@
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt::{Display, Formatter};
 use std::io;
 
-pub const PROTOCOL_NAME: &str = "drover.task";
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_FRAME_BYTES: usize = 1_048_576;
 pub const MAX_BUFFER_BYTES: usize = MAX_FRAME_BYTES * 2;
+pub const MAX_STREAM_BYTES: usize = 67_108_864;
 
 pub const ERR_NULL: i32 = -1;
 pub const ERR_JSON: i32 = -2;
@@ -21,39 +23,45 @@ pub const ERR_IO: i32 = -9;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Frame {
-    pub protocol: String,
-    pub version: u32,
+    pub protocol_version: u32,
     pub run_id: String,
     pub task_id: String,
+    pub task_kind: String,
+    pub scope_id: String,
+    pub ordinal: u32,
     pub sequence: u32,
     #[serde(rename = "type")]
     pub event_type: String,
-    pub monotonic_ns: u64,
     pub payload: Value,
 }
 
 impl Frame {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         run_id: String,
         task_id: String,
+        task_kind: String,
+        scope_id: String,
+        ordinal: u32,
         sequence: u32,
         event_type: String,
         payload: Value,
     ) -> Result<Self, ProtocolError> {
         if !payload.is_object() {
             return Err(ProtocolError::Payload(
-                "Drover frame payloads must be JSON objects.".into(),
+                "Drove frame payloads must be JSON objects.".into(),
             ));
         }
 
         Ok(Self {
-            protocol: PROTOCOL_NAME.into(),
-            version: PROTOCOL_VERSION,
+            protocol_version: PROTOCOL_VERSION,
             run_id,
             task_id,
+            task_kind,
+            scope_id,
+            ordinal,
             sequence,
             event_type,
-            monotonic_ns: monotonic_ns()?,
             payload,
         })
     }
@@ -95,18 +103,21 @@ impl Display for ProtocolError {
             | Self::Payload(message)
             | Self::Io(message) => formatter.write_str(message),
             Self::Version(version) => {
-                write!(formatter, "Unsupported Drover protocol version {version}.")
+                write!(
+                    formatter,
+                    "Unsupported Drove child protocol version {version}."
+                )
             }
             Self::Sequence { expected, actual } => {
                 write!(
                     formatter,
-                    "Drover expected frame sequence {expected}, received {actual}."
+                    "Drove expected frame sequence {expected}, received {actual}."
                 )
             }
             Self::FrameSize(size) => {
                 write!(
                     formatter,
-                    "Drover frame size {size} is outside the v1 limit."
+                    "Drove frame size {size} is outside the v1 limit."
                 )
             }
         }
@@ -117,45 +128,69 @@ impl Display for ProtocolError {
 pub struct Validator {
     run_id: String,
     task_id: String,
+    task_kind: String,
+    scope_id: String,
+    ordinal: u32,
     next_sequence: u32,
     finished: bool,
 }
 
 impl Validator {
-    pub fn new(run_id: String, task_id: String) -> Self {
+    pub fn new(
+        run_id: String,
+        task_id: String,
+        task_kind: String,
+        scope_id: String,
+        ordinal: u32,
+    ) -> Self {
         Self {
             run_id,
             task_id,
+            task_kind,
+            scope_id,
+            ordinal,
             next_sequence: 0,
             finished: false,
         }
     }
 
     pub fn accept(&mut self, frame: &Frame) -> Result<(), ProtocolError> {
-        validate_envelope(frame, &self.run_id, &self.task_id, self.next_sequence)?;
+        validate_envelope(
+            frame,
+            &self.run_id,
+            &self.task_id,
+            &self.task_kind,
+            &self.scope_id,
+            self.ordinal,
+            self.next_sequence,
+        )?;
 
         if self.finished {
             return Err(ProtocolError::Type(
-                "Drover received a frame after task.finished.".into(),
+                "Drove received a frame after task.finished.".into(),
             ));
         }
 
         if self.next_sequence == 0 {
             if frame.event_type != "task.started" {
                 return Err(ProtocolError::Type(
-                    "The first Drover frame must be task.started.".into(),
+                    "The first Drove frame must be task.started.".into(),
                 ));
             }
+
+            validate_started_payload(&frame.payload)?;
         } else {
             match frame.event_type.as_str() {
-                "task.event" | "task.output" => {}
+                "task.stdout" | "task.stderr" | "task.value" => {
+                    validate_data_payload(&frame.payload)?;
+                }
                 "task.finished" => {
                     validate_terminal_payload(&frame.payload)?;
                     self.finished = true;
                 }
                 event_type => {
                     return Err(ProtocolError::Type(format!(
-                        "Unsupported Drover event type {event_type}."
+                        "Unsupported Drove child event type {event_type}."
                     )));
                 }
             }
@@ -193,20 +228,29 @@ pub fn known_failure_kind(kind: &str) -> bool {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_envelope(
     frame: &Frame,
     run_id: &str,
     task_id: &str,
+    task_kind: &str,
+    scope_id: &str,
+    ordinal: u32,
     expected_sequence: u32,
 ) -> Result<(), ProtocolError> {
-    if frame.protocol != PROTOCOL_NAME || frame.run_id != run_id || frame.task_id != task_id {
+    if frame.run_id != run_id
+        || frame.task_id != task_id
+        || frame.task_kind != task_kind
+        || frame.scope_id != scope_id
+        || frame.ordinal != ordinal
+    {
         return Err(ProtocolError::Envelope(
-            "Drover received an inconsistent frame envelope.".into(),
+            "Drove received an inconsistent child frame envelope.".into(),
         ));
     }
 
-    if frame.version != PROTOCOL_VERSION {
-        return Err(ProtocolError::Version(frame.version));
+    if frame.protocol_version != PROTOCOL_VERSION {
+        return Err(ProtocolError::Version(frame.protocol_version));
     }
 
     if frame.sequence != expected_sequence {
@@ -218,31 +262,73 @@ pub fn validate_envelope(
 
     if !frame.payload.is_object() {
         return Err(ProtocolError::Payload(
-            "Drover frame payloads must be JSON objects.".into(),
+            "Drove frame payloads must be JSON objects.".into(),
         ));
     }
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_standalone(
     json: &str,
     run_id: &str,
     task_id: &str,
+    task_kind: &str,
+    scope_id: &str,
+    ordinal: u32,
     expected_sequence: u32,
 ) -> Result<(), ProtocolError> {
     let frame: Frame =
         serde_json::from_str(json).map_err(|error| ProtocolError::Json(error.to_string()))?;
-    validate_envelope(&frame, run_id, task_id, expected_sequence)?;
+    validate_envelope(
+        &frame,
+        run_id,
+        task_id,
+        task_kind,
+        scope_id,
+        ordinal,
+        expected_sequence,
+    )?;
 
     match frame.event_type.as_str() {
-        "task.started" if expected_sequence == 0 => Ok(()),
-        "task.event" | "task.output" if expected_sequence > 0 => Ok(()),
+        "task.started" if expected_sequence == 0 => validate_started_payload(&frame.payload),
+        "task.stdout" | "task.stderr" | "task.value" if expected_sequence > 0 => {
+            validate_data_payload(&frame.payload)
+        }
         "task.finished" if expected_sequence > 0 => validate_terminal_payload(&frame.payload),
         _ => Err(ProtocolError::Type(
-            "Drover received an event in an invalid protocol position.".into(),
+            "Drove received an event in an invalid protocol position.".into(),
         )),
     }
+}
+
+pub fn validate_started_payload(payload: &Value) -> Result<(), ProtocolError> {
+    if payload.get("started_ns").and_then(Value::as_u64).is_none() {
+        return Err(ProtocolError::Payload(
+            "A Drove start frame requires started_ns.".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn validate_data_payload(payload: &Value) -> Result<(), ProtocolError> {
+    if payload.get("encoding").and_then(Value::as_str) != Some("base64") {
+        return Err(ProtocolError::Payload(
+            "A Drove data frame requires base64 encoding.".into(),
+        ));
+    }
+
+    let data = payload
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ProtocolError::Payload("A Drove data frame requires data.".into()))?;
+
+    STANDARD
+        .decode(data)
+        .map(|_| ())
+        .map_err(|_| ProtocolError::Payload("Drove received invalid base64 child data.".into()))
 }
 
 pub fn validate_terminal_payload(payload: &Value) -> Result<(), ProtocolError> {
@@ -250,31 +336,58 @@ pub fn validate_terminal_payload(payload: &Value) -> Result<(), ProtocolError> {
         .get("status")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            ProtocolError::Payload("A terminal Drover frame requires a status.".into())
+            ProtocolError::Payload("A terminal Drove frame requires a status.".into())
         })?;
+    let failure = payload.get("failure").unwrap_or(&Value::Null);
 
     if !matches!(status, "passed" | "failed") {
         return Err(ProtocolError::Payload(format!(
-            "Unsupported Drover terminal status {status}."
+            "Unsupported Drove terminal status {status}."
         )));
     }
 
-    if status == "failed" {
-        let kind = payload
-            .get("failure_kind")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                ProtocolError::Payload("A failed Drover frame requires a failure_kind.".into())
-            })?;
+    if payload.get("finished_ns").and_then(Value::as_u64).is_none() {
+        return Err(ProtocolError::Payload(
+            "A terminal Drove frame requires finished_ns.".into(),
+        ));
+    }
 
-        if !known_failure_kind(kind) {
-            return Err(ProtocolError::Payload(format!(
-                "Unknown Drover failure kind {kind}."
-            )));
-        }
+    if payload
+        .get("memory_peak_bytes")
+        .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
+    {
+        return Err(ProtocolError::Payload(
+            "A terminal Drove frame has invalid memory telemetry.".into(),
+        ));
+    }
+
+    if status == "passed" && !failure.is_null() {
+        return Err(ProtocolError::Payload(
+            "A passing Drove frame cannot contain a failure.".into(),
+        ));
+    }
+
+    if status == "failed" && !valid_failure(failure) {
+        return Err(ProtocolError::Payload(
+            "A failed Drove frame requires a classified failure.".into(),
+        ));
     }
 
     Ok(())
+}
+
+fn valid_failure(failure: &Value) -> bool {
+    let Some(failure) = failure.as_object() else {
+        return false;
+    };
+
+    failure
+        .get("kind")
+        .and_then(Value::as_str)
+        .is_some_and(known_failure_kind)
+        && failure.get("message").and_then(Value::as_str).is_some()
+        && failure.get("phase").and_then(Value::as_str).is_some()
+        && failure.contains_key("hook_id")
 }
 
 pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, ProtocolError> {
@@ -373,15 +486,26 @@ mod tests {
     use super::*;
 
     const STARTED: &str = include_str!("../protocol/v1/started.json");
-    const EVENT: &str = include_str!("../protocol/v1/event.json");
+    const STDOUT: &str = include_str!("../protocol/v1/event.json");
+    const VALUE: &str = include_str!("../protocol/v1/value.json");
     const FINISHED: &str = include_str!("../protocol/v1/finished.json");
     const INVALID_VERSION: &str = include_str!("../protocol/v1/invalid-version.json");
 
+    fn validator() -> Validator {
+        Validator::new(
+            "golden-run".into(),
+            "task:golden".into(),
+            "test".into(),
+            "scope:golden".into(),
+            7,
+        )
+    }
+
     #[test]
     fn golden_frames_are_exact_and_form_a_valid_sequence() {
-        let mut validator = Validator::new("golden-run".into(), "task:golden".into());
+        let mut validator = validator();
 
-        for json in [STARTED, EVENT, FINISHED] {
+        for json in [STARTED, STDOUT, VALUE, FINISHED] {
             let frame: Frame = serde_json::from_str(json.trim()).unwrap();
             assert_eq!(serde_json::to_string(&frame).unwrap(), json.trim());
             validator.accept(&frame).unwrap();
@@ -392,8 +516,16 @@ mod tests {
 
     #[test]
     fn rejects_an_unknown_protocol_version() {
-        let error =
-            validate_standalone(INVALID_VERSION, "golden-run", "task:golden", 2).unwrap_err();
+        let error = validate_standalone(
+            INVALID_VERSION,
+            "golden-run",
+            "task:golden",
+            "test",
+            "scope:golden",
+            7,
+            3,
+        )
+        .unwrap_err();
 
         assert_eq!(error, ProtocolError::Version(2));
         assert_eq!(error.code(), ERR_VERSION);
@@ -404,7 +536,7 @@ mod tests {
         let frame: Frame = serde_json::from_str(STARTED.trim()).unwrap();
         let encoded = encode_frame(&frame).unwrap();
         let mut buffer = encoded[..3].to_vec();
-        let mut validator = Validator::new("golden-run".into(), "task:golden".into());
+        let mut validator = validator();
 
         assert!(decode_available(&mut buffer, &mut validator)
             .unwrap()
@@ -421,7 +553,7 @@ mod tests {
     #[test]
     fn rejects_an_oversized_frame_from_its_header() {
         let mut buffer = ((MAX_FRAME_BYTES + 1) as u32).to_be_bytes().to_vec();
-        let mut validator = Validator::new("golden-run".into(), "task:golden".into());
+        let mut validator = validator();
 
         assert_eq!(
             decode_available(&mut buffer, &mut validator).unwrap_err(),
@@ -431,19 +563,19 @@ mod tests {
 
     #[test]
     fn rejects_frames_after_the_terminal_result() {
-        let mut validator = Validator::new("golden-run".into(), "task:golden".into());
+        let mut validator = validator();
 
-        for json in [STARTED, EVENT, FINISHED] {
+        for json in [STARTED, STDOUT, VALUE, FINISHED] {
             let frame: Frame = serde_json::from_str(json.trim()).unwrap();
             validator.accept(&frame).unwrap();
         }
 
-        let mut late: Frame = serde_json::from_str(EVENT.trim()).unwrap();
-        late.sequence = 3;
+        let mut late: Frame = serde_json::from_str(STDOUT.trim()).unwrap();
+        late.sequence = 4;
 
         assert_eq!(
             validator.accept(&late).unwrap_err(),
-            ProtocolError::Type("Drover received a frame after task.finished.".into())
+            ProtocolError::Type("Drove received a frame after task.finished.".into())
         );
     }
 }

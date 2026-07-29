@@ -1,9 +1,10 @@
 {
     "name": "pestphp/pest",
-    "description": "The elegant PHP Testing Framework.",
+    "description": "Experimental Pest fork for prepared-state parallel test execution.",
     "keywords": [
         "php",
-        "framework",
+        "drove",
+        "parallel",
         "pest",
         "unit",
         "test",
