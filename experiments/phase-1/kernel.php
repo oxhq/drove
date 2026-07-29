@@ -234,7 +234,7 @@ foreach ($expectedKinds as $name => $kind) {
 }
 
 $large = $test('frames large output');
-$assert($large['status'] === 'passed' && strlen($large['stdout']) === 200_000, 'Large framed output was truncated.');
+$assert($large['status'] === 'passed' && strlen($large['stdout']) === 1_200_000, 'Large framed output was truncated.');
 $assert($test('runs sentinel after failures')['stdout'] === 'sentinel passed', 'The root did not survive child failures.');
 
 foreach ([$sequential, $parallel] as $run) {

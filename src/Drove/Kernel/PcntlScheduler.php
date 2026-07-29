@@ -12,12 +12,21 @@ use Throwable;
 /**
  * @internal
  */
-final class PcntlScheduler
+final class PcntlScheduler implements Scheduler
 {
-    private const int FRAME_LIMIT = 1_048_576;
-
     /** @var array<string, array{read: resource, write: resource}> */
     private array $pools;
+
+    private ChildProtocol $protocol;
+
+    /** @var array<int, true> */
+    private array $activeChildGroups = [];
+
+    /** @var list<resource> */
+    private array $ancestorSockets = [];
+
+    /** @var array<string, int> */
+    private array $heldPermits = [];
 
     /**
      * @param  array<string, int>  $scopeConcurrency
@@ -45,6 +54,7 @@ final class PcntlScheduler
             throw new InvalidArgumentException('Drove received invalid scheduler configuration.');
         }
 
+        $this->protocol = new ChildProtocol($runId);
         $this->pools['@global'] = $this->createPool($concurrency);
 
         foreach ($scopeConcurrency as $scopeId => $limit) {
@@ -62,20 +72,41 @@ final class PcntlScheduler
     }
 
     /**
-     * @param  list<array{id: string, scope_id: string, scopes: list<string>, timeout_ms?: int, permit?: bool}>  $tasks
+     * @param  list<array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms?: int, permit?: bool}>  $tasks
      * @return array{results: list<array<string, mixed>>, completion_order: list<string>}
      */
     public function map(array $tasks, Closure $execute): array
     {
+        $pending = [];
         $children = [];
         $results = [];
         $completionOrder = [];
 
         foreach ($tasks as $ordinal => $task) {
-            $task = $this->normalizeTask($task, $ordinal);
+            $pending[$ordinal] = $this->normalizeTask($task, $ordinal);
+        }
+
+        // ponytail: the PHP backend polls a shared pipe; native Drover owns the
+        // production queue and fairness policy.
+        while ($pending !== [] || $children !== []) {
+            foreach (array_keys($pending) as $ordinal) {
+                $task = $pending[$ordinal];
+                $permitNames = $task['permit'] ? $this->poolNames($task['scopes']) : [];
+
+                if ($permitNames !== [] && ! $this->tryAcquire($permitNames)) {
+                    continue;
+                }
+
+                $this->rememberPermits($permitNames);
+                unset($pending[$ordinal]);
             $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
 
             if ($sockets === false) {
+                    if ($permitNames !== []) {
+                        $this->forgetPermits($permitNames);
+                        $this->release($permitNames);
+                    }
+
                 $results[$ordinal] = $this->parentFailure(
                     $task,
                     FailureKind::ForkFailure,
@@ -91,6 +122,12 @@ final class PcntlScheduler
             if ($pid === -1) {
                 fclose($parentSocket);
                 fclose($childSocket);
+
+                    if ($permitNames !== []) {
+                        $this->forgetPermits($permitNames);
+                        $this->release($permitNames);
+                    }
+
                 $results[$ordinal] = $this->parentFailure(
                     $task,
                     FailureKind::ForkFailure,
@@ -107,12 +144,20 @@ final class PcntlScheduler
                     fclose($sibling['socket']);
                 }
 
-                $this->runChild($task, $childSocket, $execute);
+                    foreach ($this->ancestorSockets as $ancestorSocket) {
+                        if (is_resource($ancestorSocket)) {
+                            fclose($ancestorSocket);
+                        }
+                    }
+
+                    $this->ancestorSockets = [];
+                    $this->runChild($task, $childSocket, $execute);
             }
 
             fclose($childSocket);
             stream_set_blocking($parentSocket, false);
             @posix_setpgid($pid, $pid);
+                $this->activeChildGroups[$pid] = true;
 
             $children[$pid] = [
                 'pid' => $pid,
@@ -120,10 +165,14 @@ final class PcntlScheduler
                 'socket' => $parentSocket,
                 'buffer' => '',
                 'frames' => [],
+                'stdout' => '',
+                'stderr' => '',
+                'value_buffer' => '',
                 'protocol_error' => null,
                 'started_ns' => null,
                 'deadline_ns' => null,
                 'finished_ns' => null,
+                    'terminal_received_ns' => null,
                 'finished' => null,
                 'reaped' => false,
                 'wait_status' => null,
@@ -131,19 +180,19 @@ final class PcntlScheduler
                 'timed_out' => false,
                 'term_ns' => null,
                 'kill_sent' => false,
+                    'kill_ns' => null,
                 'cleanup_term_ns' => null,
+                    'cleanup_failed' => false,
+                    'permit_names' => $permitNames,
                 'released' => false,
             ];
-        }
+            }
 
-        // ponytail: a 1 ms nonblocking poll is enough for the Phase 1 C=8 ceiling;
-        // replace it with pidfd/epoll in the native backend.
-        while ($children !== []) {
             $now = hrtime(true);
 
             foreach (array_keys($children) as $pid) {
                 $child = &$children[$pid];
-                $this->drain($child);
+                $this->protocol->drain($child);
 
                 if (! $child['reaped']) {
                     $waitStatus = 0;
@@ -164,11 +213,15 @@ final class PcntlScheduler
                 }
 
                 if ($child['started_ns'] !== null
-                    && $child['finished'] === null
                     && ! $child['reaped']
                     && $child['task']['timeout_ms'] > 0
                     && ! $child['timed_out']
-                    && $now >= $child['deadline_ns']) {
+                    && $now >= max(
+                        $child['deadline_ns'],
+                        $child['terminal_received_ns'] === null
+                            ? 0
+                            : $child['terminal_received_ns'] + $this->termGraceMs * 1_000_000,
+                    )) {
                     @posix_kill(-$pid, SIGTERM);
                     $child['timed_out'] = true;
                     $child['term_ns'] = $now;
@@ -179,6 +232,7 @@ final class PcntlScheduler
                     && $now - $child['term_ns'] >= $this->termGraceMs * 1_000_000) {
                     @posix_kill(-$pid, SIGKILL);
                     $child['kill_sent'] = true;
+                    $child['kill_ns'] = $now;
                 }
 
                 if ($child['reaped'] && ! $child['eof'] && ! $child['timed_out']) {
@@ -189,26 +243,38 @@ final class PcntlScheduler
                         && $now - $child['cleanup_term_ns'] >= $this->termGraceMs * 1_000_000) {
                         @posix_kill(-$pid, SIGKILL);
                         $child['kill_sent'] = true;
+                        $child['kill_ns'] = $now;
                     }
                 }
 
-                $this->drain($child);
+                $this->protocol->drain($child);
+
+                if ($child['reaped']
+                    && ! $child['eof']
+                    && $child['kill_sent']
+                    && $child['kill_ns'] !== null
+                    && $now - $child['kill_ns'] >= $this->termGraceMs * 1_000_000) {
+                    $child['cleanup_failed'] = true;
+                    $child['eof'] = true;
+                }
 
                 if ($child['reaped'] && $child['eof']) {
-                    if ($child['started_ns'] !== null && $child['task']['permit'] && ! $child['released']) {
-                        $this->release($this->poolNames($child['task']['scopes']));
+                    if ($child['permit_names'] !== [] && ! $child['released']) {
+                        $this->forgetPermits($child['permit_names']);
+                        $this->release($child['permit_names']);
                         $child['released'] = true;
                     }
 
                     $results[$child['task']['ordinal']] = $this->finish($child);
                     fclose($child['socket']);
+                    unset($this->activeChildGroups[$pid]);
                     unset($children[$pid]);
                 }
 
                 unset($child);
             }
 
-            if ($children !== []) {
+            if ($pending !== [] || $children !== []) {
                 usleep(1_000);
             }
         }
@@ -228,29 +294,31 @@ final class PcntlScheduler
     {
         $names = $this->poolNames($scopes);
         $this->acquire($names);
+        $this->rememberPermits($names);
 
         try {
             return $work();
         } finally {
-            // ponytail: PHP scope hooks rely on finally; the native broker will
-            // reclaim leases after uncatchable host failure.
+            $this->forgetPermits($names);
             $this->release($names);
         }
     }
 
     /**
      * @param  array<string, mixed>  $task
-     * @return array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}
+     * @return array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}
      */
     private function normalizeTask(array $task, int $ordinal): array
     {
         $id = $task['id'] ?? null;
+        $kind = $task['kind'] ?? null;
         $scopeId = $task['scope_id'] ?? null;
         $scopes = $task['scopes'] ?? null;
         $timeoutMs = $task['timeout_ms'] ?? $this->defaultTimeoutMs;
         $permit = $task['permit'] ?? true;
 
         if (! is_string($id) || $id === ''
+            || ! in_array($kind, ['scope', 'test'], true)
             || ! is_string($scopeId) || $scopeId === ''
             || ! is_array($scopes) || ! array_is_list($scopes)
             || array_any($scopes, static fn (mixed $scope): bool => ! is_string($scope) || $scope === '')
@@ -262,6 +330,7 @@ final class PcntlScheduler
 
         return [
             'id' => $id,
+            'kind' => $kind,
             'scope_id' => $scopeId,
             'scopes' => $scopes,
             'timeout_ms' => $timeoutMs,
@@ -271,18 +340,35 @@ final class PcntlScheduler
     }
 
     /**
-     * @param  array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
+     * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
      * @param  resource  $socket
      */
     private function runChild(array $task, mixed $socket, Closure $execute): never
     {
+        $this->activeChildGroups = [];
+        $this->heldPermits = [];
+        $this->ancestorSockets[] = $socket;
+        pcntl_async_signals(true);
+        pcntl_signal(SIGTERM, SIG_DFL);
+        pcntl_signal(SIGINT, SIG_DFL);
+
+        if ($task['kind'] === 'scope') {
+            pcntl_signal(SIGTERM, function (): never {
+                $this->terminateActiveChildren();
+                $this->releaseHeldPermits();
+
+                exit(128 + SIGTERM);
+            });
+        }
+
         if (! @posix_setpgid(0, 0)) {
-            $this->writeFrame($socket, $this->frame($task, 0, 'task.started', [
-                'started_ns' => hrtime(true),
-            ]));
-            $this->writeFrame($socket, $this->frame($task, 1, 'task.finished', [
-                'status' => 'failed',
-                'failure' => [
+            $this->protocol->writeStarted($socket, $task, hrtime(true));
+            $this->protocol->writeFinished(
+                $socket,
+                $task,
+                'failed',
+                null,
+                [
                     'kind' => FailureKind::ForkFailure->value,
                     'message' => 'The Drove child could not create its process group.',
                     'class' => null,
@@ -291,24 +377,18 @@ final class PcntlScheduler
                     'phase' => 'process_group',
                     'hook_id' => null,
                 ],
-                'finished_ns' => hrtime(true),
-                'stdout' => '',
-            ]));
+                hrtime(true),
+                memory_get_peak_usage(true),
+                '',
+                '',
+            );
             fclose($socket);
 
             exit(1);
         }
 
-        $names = $task['permit'] ? $this->poolNames($task['scopes']) : [];
-
-        if ($names !== []) {
-            $this->acquire($names);
-        }
-
         $startedNs = hrtime(true);
-        $this->writeFrame($socket, $this->frame($task, 0, 'task.started', [
-            'started_ns' => $startedNs,
-        ]));
+        $this->protocol->writeStarted($socket, $task, $startedNs);
 
         $report = new class
         {
@@ -320,6 +400,8 @@ final class PcntlScheduler
                 return;
             }
 
+            $this->terminateActiveChildren();
+            $this->releaseHeldPermits();
             $error = error_get_last();
 
             if (! is_array($error) || ! in_array($error['type'], [
@@ -333,9 +415,13 @@ final class PcntlScheduler
             }
 
             try {
-                $this->writeFrame($socket, $this->frame($task, 1, 'task.finished', [
-                    'status' => 'failed',
-                    'failure' => [
+                $stdout = ob_get_contents();
+                $this->protocol->writeFinished(
+                    $socket,
+                    $task,
+                    'failed',
+                    null,
+                    [
                         'kind' => FailureKind::PhpFatalError->value,
                         'message' => $error['message'],
                         'class' => null,
@@ -344,9 +430,11 @@ final class PcntlScheduler
                         'phase' => 'executor',
                         'hook_id' => null,
                     ],
-                    'finished_ns' => hrtime(true),
-                    'stdout' => '',
-                ]));
+                    hrtime(true),
+                    memory_get_peak_usage(true),
+                    is_string($stdout) ? $stdout : '',
+                    '',
+                );
             } catch (Throwable) {
                 //
             }
@@ -384,170 +472,46 @@ final class PcntlScheduler
             $stdout = ob_get_clean().$stdout;
         }
 
-        $payload = [
-            'status' => $status,
-            'value' => $value,
-            'finished_ns' => hrtime(true),
-            'memory_peak_bytes' => memory_get_peak_usage(true),
-            'stdout' => $stdout,
-        ];
-
-        if ($failure !== null) {
-            $payload['failure'] = $failure;
+        try {
+            $this->protocol->writeFinished(
+                $socket,
+                $task,
+                $status,
+                $value,
+                $failure,
+                hrtime(true),
+                memory_get_peak_usage(true),
+                $stdout,
+                '',
+            );
+        } catch (\JsonException $exception) {
+            $status = 'failed';
+            $this->protocol->writeFinished(
+                $socket,
+                $task,
+                $status,
+                null,
+                [
+                    'kind' => FailureKind::ChildProtocolFailure->value,
+                    'message' => $exception->getMessage(),
+                    'class' => $exception::class,
+                    'file' => $exception->getFile(),
+                    'line' => $exception->getLine(),
+                    'phase' => 'serialization',
+                    'hook_id' => null,
+                ],
+                hrtime(true),
+                memory_get_peak_usage(true),
+                $stdout,
+                '',
+            );
         }
 
-        $this->writeFrame($socket, $this->frame($task, 1, 'task.finished', $payload));
         $report->finished = true;
+        $this->releaseHeldPermits();
         fclose($socket);
 
         exit($status === 'passed' ? 0 : 1);
-    }
-
-    /**
-     * @param  array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
-     */
-    private function frame(array $task, int $sequence, string $type, array $payload): array
-    {
-        return [
-            'schema' => 1,
-            'run_id' => $this->runId,
-            'task_id' => $task['id'],
-            'scope_id' => $task['scope_id'],
-            'ordinal' => $task['ordinal'],
-            'sequence' => $sequence,
-            'type' => $type,
-            'payload' => $payload,
-        ];
-    }
-
-    /**
-     * @param  resource  $socket
-     * @param  array<string, mixed>  $frame
-     */
-    private function writeFrame(mixed $socket, array $frame): void
-    {
-        $json = json_encode($frame, JSON_THROW_ON_ERROR);
-
-        if (strlen($json) > self::FRAME_LIMIT) {
-            throw new RuntimeException('A Drove child frame exceeded 1 MiB.');
-        }
-
-        $payload = pack('N', strlen($json)).$json;
-        $written = 0;
-
-        while ($written < strlen($payload)) {
-            $bytes = @fwrite($socket, substr($payload, $written));
-
-            if ($bytes === false || $bytes === 0) {
-                throw new RuntimeException('Unable to write a Drove child frame.');
-            }
-
-            $written += $bytes;
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $child
-     */
-    private function drain(array &$child): void
-    {
-        while (true) {
-            $chunk = @fread($child['socket'], 65_536);
-
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-
-            $child['buffer'] .= $chunk;
-        }
-
-        $child['eof'] = feof($child['socket']);
-
-        if ($child['protocol_error'] !== null) {
-            return;
-        }
-
-        try {
-            while (strlen($child['buffer']) >= 4) {
-                $header = unpack('Nlength', substr($child['buffer'], 0, 4));
-
-                if ($header === false) {
-                    throw new RuntimeException('Drove could not decode a child frame length.');
-                }
-
-                $length = $header['length'];
-
-                if ($length < 2 || $length > self::FRAME_LIMIT) {
-                    throw new RuntimeException('Drove received an invalid child frame length.');
-                }
-
-                if (strlen($child['buffer']) < 4 + $length) {
-                    break;
-                }
-
-                $json = substr($child['buffer'], 4, $length);
-                $child['buffer'] = substr($child['buffer'], 4 + $length);
-                $frame = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
-                $this->acceptFrame($child, $frame);
-            }
-
-            if ($child['eof'] && $child['buffer'] !== '') {
-                throw new RuntimeException('Drove received a truncated child frame.');
-            }
-        } catch (Throwable $throwable) {
-            $child['protocol_error'] = $throwable->getMessage();
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $child
-     */
-    private function acceptFrame(array &$child, mixed $frame): void
-    {
-        $task = $child['task'];
-        $sequence = count($child['frames']);
-
-        if (! is_array($frame)
-            || ($frame['schema'] ?? null) !== 1
-            || ($frame['run_id'] ?? null) !== $this->runId
-            || ($frame['task_id'] ?? null) !== $task['id']
-            || ($frame['scope_id'] ?? null) !== $task['scope_id']
-            || ($frame['ordinal'] ?? null) !== $task['ordinal']
-            || ($frame['sequence'] ?? null) !== $sequence
-            || ! is_array($frame['payload'] ?? null)) {
-            throw new RuntimeException('Drove received an inconsistent child frame.');
-        }
-
-        $expectedType = $sequence === 0 ? 'task.started' : 'task.finished';
-
-        if (($frame['type'] ?? null) !== $expectedType || $sequence > 1) {
-            throw new RuntimeException('Drove received an invalid child event sequence.');
-        }
-
-        if ($sequence === 0) {
-            $startedNs = $frame['payload']['started_ns'] ?? null;
-
-            if (! is_int($startedNs)) {
-                throw new RuntimeException('Drove received a child start without a monotonic timestamp.');
-            }
-
-            $child['started_ns'] = $startedNs;
-            $child['deadline_ns'] = $startedNs + $task['timeout_ms'] * 1_000_000;
-        } else {
-            $status = $frame['payload']['status'] ?? null;
-            $finishedNs = $frame['payload']['finished_ns'] ?? null;
-
-            if (! in_array($status, ['passed', 'failed'], true) || ! is_int($finishedNs)) {
-                throw new RuntimeException('Drove received an invalid terminal child event.');
-            }
-
-            $child['finished'] = $frame;
-            $child['finished_ns'] = $finishedNs;
-        }
-
-        $child['frames'][] = $frame;
     }
 
     /**
@@ -587,6 +551,16 @@ final class PcntlScheduler
             );
         }
 
+        if ($child['cleanup_failed']) {
+            return $this->failedResult(
+                $task,
+                FailureKind::BlockedDescendant,
+                'A Drove descendant kept the task channel open after forced cleanup.',
+                $telemetry,
+                $child['frames'],
+            );
+        }
+
         if ($signal !== null) {
             return $this->failedResult(
                 $task,
@@ -621,14 +595,28 @@ final class PcntlScheduler
                 );
             }
 
+            try {
+                $value = $this->protocol->value($child);
+            } catch (Throwable $throwable) {
+                return $this->failedResult(
+                    $task,
+                    FailureKind::ChildProtocolFailure,
+                    $throwable->getMessage(),
+                    $telemetry,
+                    $child['frames'],
+                );
+            }
+
             return [
                 'id' => $task['id'],
+                'kind' => $task['kind'],
                 'scope_id' => $task['scope_id'],
                 'ordinal' => $task['ordinal'],
                 'status' => $payload['status'],
                 'failure' => $payload['failure'] ?? null,
-                'value' => $payload['value'] ?? null,
-                'stdout' => $payload['stdout'] ?? '',
+                'value' => $value,
+                'stdout' => $child['stdout'],
+                'stderr' => $child['stderr'],
                 'memory_peak_bytes' => $payload['memory_peak_bytes'] ?? null,
                 'events' => $child['frames'],
                 'telemetry' => $telemetry,
@@ -645,7 +633,7 @@ final class PcntlScheduler
     }
 
     /**
-     * @param  array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
+     * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
      * @param  array<string, mixed>  $telemetry
      * @param  list<array<string, mixed>>  $events
      * @return array<string, mixed>
@@ -659,6 +647,7 @@ final class PcntlScheduler
     ): array {
         return [
             'id' => $task['id'],
+            'kind' => $task['kind'],
             'scope_id' => $task['scope_id'],
             'ordinal' => $task['ordinal'],
             'status' => 'failed',
@@ -673,6 +662,7 @@ final class PcntlScheduler
             ],
             'value' => null,
             'stdout' => '',
+            'stderr' => '',
             'memory_peak_bytes' => null,
             'events' => $events,
             'telemetry' => $telemetry,
@@ -680,7 +670,7 @@ final class PcntlScheduler
     }
 
     /**
-     * @param  array{id: string, scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
+     * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
      * @return array<string, mixed>
      */
     private function parentFailure(array $task, FailureKind $kind, string $message): array
@@ -732,6 +722,28 @@ final class PcntlScheduler
     /**
      * @param  list<string>  $names
      */
+    private function tryAcquire(array $names): bool
+    {
+        $acquired = [];
+
+        foreach ($names as $name) {
+            $token = @fread($this->pools[$name]['read'], 1);
+
+            if ($token !== '.') {
+                $this->release($acquired);
+
+                return false;
+            }
+
+            $acquired[] = $name;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  list<string>  $names
+     */
     private function release(array $names): void
     {
         foreach (array_reverse($names) as $name) {
@@ -739,6 +751,48 @@ final class PcntlScheduler
                 throw new RuntimeException('Unable to release a Drove concurrency permit.');
             }
         }
+    }
+
+    /**
+     * @param  list<string>  $names
+     */
+    private function rememberPermits(array $names): void
+    {
+        foreach ($names as $name) {
+            $this->heldPermits[$name] = ($this->heldPermits[$name] ?? 0) + 1;
+        }
+    }
+
+    /**
+     * @param  list<string>  $names
+     */
+    private function forgetPermits(array $names): void
+    {
+        foreach ($names as $name) {
+            $this->heldPermits[$name]--;
+
+            if ($this->heldPermits[$name] === 0) {
+                unset($this->heldPermits[$name]);
+            }
+        }
+    }
+
+    private function releaseHeldPermits(): void
+    {
+        foreach ($this->heldPermits as $name => $count) {
+            $this->release(array_fill(0, $count, $name));
+        }
+
+        $this->heldPermits = [];
+    }
+
+    private function terminateActiveChildren(): void
+    {
+        foreach (array_keys($this->activeChildGroups) as $pid) {
+            @posix_kill(-$pid, SIGKILL);
+        }
+
+        $this->activeChildGroups = [];
     }
 
     /**
@@ -753,6 +807,7 @@ final class PcntlScheduler
         }
 
         [$read, $write] = $sockets;
+        stream_set_blocking($read, false);
         stream_set_read_buffer($read, 0);
         stream_set_write_buffer($write, 0);
 

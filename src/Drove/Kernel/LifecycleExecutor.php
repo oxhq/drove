@@ -16,7 +16,7 @@ use Throwable;
 final readonly class LifecycleExecutor
 {
     public function __construct(
-        private PcntlScheduler $scheduler,
+        private Scheduler $scheduler,
         private Closure $hookResolver,
         private Closure $testResolver,
     ) {
@@ -233,6 +233,7 @@ final readonly class LifecycleExecutor
             $jobs[$id] = ['kind' => 'test', 'node' => $test];
             $tasks[] = [
                 'id' => $id,
+                'kind' => 'test',
                 'scope_id' => $scopeId,
                 'scopes' => $scopeIds,
                 'timeout_ms' => $test['timeout_ms'] ?? 1_000,
@@ -249,6 +250,7 @@ final readonly class LifecycleExecutor
             $jobs[$id] = ['kind' => 'scope', 'node' => $child];
             $tasks[] = [
                 'id' => $id,
+                'kind' => 'scope',
                 'scope_id' => $id,
                 'scopes' => [...$scopeIds, $id],
                 'timeout_ms' => $child['timeout_ms'] ?? 30_000,
@@ -294,6 +296,7 @@ final readonly class LifecycleExecutor
                     : $this->transportTestFailure($job['node'], $scopeIds, $transport);
                 $test['telemetry'] = $transport['telemetry'];
                 $test['stdout'] = ($test['stdout'] ?? '').($transport['stdout'] ?? '');
+                $test['stderr'] = ($test['stderr'] ?? '').($transport['stderr'] ?? '');
                 $tests[] = $test;
                 array_push($events, ...$test['events']);
             } else {
@@ -541,6 +544,7 @@ final readonly class LifecycleExecutor
             'teardown_failures' => $teardownFailures,
             'value' => null,
             'stdout' => $stdout,
+            'stderr' => '',
             'events' => $events,
         ];
     }
@@ -577,6 +581,7 @@ final readonly class LifecycleExecutor
                 'teardown_failures' => [],
                 'value' => null,
                 'stdout' => '',
+                'stderr' => '',
                 'events' => [],
                 'telemetry' => null,
             ];
@@ -690,6 +695,7 @@ final readonly class LifecycleExecutor
             'teardown_failures' => [],
             'value' => null,
             'stdout' => $transport['stdout'] ?? '',
+            'stderr' => $transport['stderr'] ?? '',
             'events' => [],
         ];
     }
@@ -730,7 +736,7 @@ final readonly class LifecycleExecutor
         return [
             'type' => $type,
             'scope_id' => $transport['scope_id'],
-            'test_id' => str_starts_with($transport['id'], 'test:') ? $transport['id'] : null,
+            'test_id' => $transport['kind'] === 'test' ? $transport['id'] : null,
             'hook_id' => null,
             'phase' => 'scheduler',
             'status' => $type === 'task.started' ? 'running' : $transport['status'],

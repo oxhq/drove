@@ -200,7 +200,7 @@ describe('process failures', function (): void {
     });
 
     test('frames large output', function (): void {
-        echo str_repeat('x', 200_000);
+        echo str_repeat('x', 1_200_000);
     });
 
     test('runs sentinel after failures', function (): void {
