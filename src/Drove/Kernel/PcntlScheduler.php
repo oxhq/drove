@@ -17,7 +17,7 @@ final class PcntlScheduler implements Scheduler
     /** @var array<string, array{read: resource, write: resource}> */
     private array $pools;
 
-    private ChildProtocol $protocol;
+    private readonly ChildProtocol $protocol;
 
     /** @var array<int, true> */
     private array $activeChildGroups = [];
@@ -102,264 +102,264 @@ final class PcntlScheduler implements Scheduler
         // ponytail: the PHP backend polls a shared pipe; native Drover owns the
         // production queue and fairness policy.
         try {
-        while ($pending !== [] || $children !== []) {
-            foreach (array_keys($pending) as $ordinal) {
-                if ($interruptedSignal !== null) {
-                    break;
-                }
-
-                $task = $pending[$ordinal];
-                $permitNames = $task['permit'] ? $this->poolNames($task['scopes']) : [];
-
-                if ($permitNames !== [] && ! $this->tryAcquire($permitNames)) {
-                    continue;
-                }
-
-                if ($interruptedSignal !== null) {
-                    $this->release($permitNames);
-
-                    break;
-                }
-
-                $this->rememberPermits($permitNames);
-                unset($pending[$ordinal]);
-            $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-
-            if ($sockets === false) {
-                    if ($permitNames !== []) {
-                        $this->forgetPermits($permitNames);
-                        $this->release($permitNames);
+            while ($pending !== [] || $children !== []) {
+                foreach (array_keys($pending) as $ordinal) {
+                    if ($interruptedSignal !== null) {
+                        break;
                     }
 
-                $results[$ordinal] = $this->parentFailure(
-                    $task,
-                    FailureKind::ForkFailure,
-                    'Unable to create a Drove child channel.',
-                );
+                    $task = $pending[$ordinal];
+                    $permitNames = $task['permit'] ? $this->poolNames($task['scopes']) : [];
 
-                continue;
-            }
+                    if ($permitNames !== [] && ! $this->tryAcquire($permitNames)) {
+                        continue;
+                    }
 
-            [$parentSocket, $childSocket] = $sockets;
+                    if ($interruptedSignal !== null) {
+                        $this->release($permitNames);
 
-                if ($interruptedSignal !== null) {
-                    fclose($parentSocket);
+                        break;
+                    }
+
+                    $this->rememberPermits($permitNames);
+                    unset($pending[$ordinal]);
+                    $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+
+                    if ($sockets === false) {
+                        if ($permitNames !== []) {
+                            $this->forgetPermits($permitNames);
+                            $this->release($permitNames);
+                        }
+
+                        $results[$ordinal] = $this->parentFailure(
+                            $task,
+                            FailureKind::ForkFailure,
+                            'Unable to create a Drove child channel.',
+                        );
+
+                        continue;
+                    }
+
+                    [$parentSocket, $childSocket] = $sockets;
+
+                    if ($interruptedSignal !== null) {
+                        fclose($parentSocket);
+                        fclose($childSocket);
+                        $this->forgetPermits($permitNames);
+                        $this->release($permitNames);
+                        $results[$ordinal] = $this->parentFailure(
+                            $task,
+                            FailureKind::UserInterruption,
+                            sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                        );
+
+                        break;
+                    }
+
+                    $pid = pcntl_fork();
+
+                    if ($pid === -1) {
+                        fclose($parentSocket);
+                        fclose($childSocket);
+
+                        if ($permitNames !== []) {
+                            $this->forgetPermits($permitNames);
+                            $this->release($permitNames);
+                        }
+
+                        $results[$ordinal] = $this->parentFailure(
+                            $task,
+                            FailureKind::ForkFailure,
+                            'Unable to fork a Drove task.',
+                        );
+
+                        continue;
+                    }
+
+                    if ($pid === 0) {
+                        fclose($parentSocket);
+
+                        foreach ($children as $sibling) {
+                            fclose($sibling['socket']);
+                        }
+
+                        foreach ($this->ancestorSockets as $ancestorSocket) {
+                            if (is_resource($ancestorSocket)) {
+                                fclose($ancestorSocket);
+                            }
+                        }
+
+                        $this->ancestorSockets = [];
+                        $this->runChild($task, $childSocket, $execute);
+                    }
+
                     fclose($childSocket);
-                    $this->forgetPermits($permitNames);
-                    $this->release($permitNames);
-                    $results[$ordinal] = $this->parentFailure(
-                        $task,
-                        FailureKind::UserInterruption,
-                        sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
-                    );
+                    stream_set_blocking($parentSocket, false);
+                    @posix_setpgid($pid, $pid);
+                    $this->activeChildGroups[$pid] = true;
 
-                    break;
+                    $children[$pid] = [
+                        'pid' => $pid,
+                        'task' => $task,
+                        'socket' => $parentSocket,
+                        'buffer' => '',
+                        'frames' => [],
+                        'stdout' => '',
+                        'stderr' => '',
+                        'value_buffer' => '',
+                        'protocol_error' => null,
+                        'started_ns' => null,
+                        'deadline_ns' => null,
+                        'finished_ns' => null,
+                        'terminal_received_ns' => null,
+                        'finished' => null,
+                        'reaped' => false,
+                        'wait_status' => null,
+                        'eof' => false,
+                        'timed_out' => false,
+                        'term_ns' => null,
+                        'interrupted_signal' => null,
+                        'interruption_term_ns' => null,
+                        'kill_sent' => false,
+                        'kill_ns' => null,
+                        'cleanup_term_ns' => null,
+                        'cleanup_failed' => false,
+                        'permit_names' => $permitNames,
+                        'released' => false,
+                    ];
                 }
 
-            $pid = pcntl_fork();
+                $now = hrtime(true);
 
-            if ($pid === -1) {
-                fclose($parentSocket);
-                fclose($childSocket);
-
-                    if ($permitNames !== []) {
-                        $this->forgetPermits($permitNames);
-                        $this->release($permitNames);
+                if ($interruptedSignal !== null) {
+                    foreach ($pending as $ordinal => $task) {
+                        $results[$ordinal] = $this->parentFailure(
+                            $task,
+                            FailureKind::UserInterruption,
+                            sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
+                        );
                     }
 
-                $results[$ordinal] = $this->parentFailure(
-                    $task,
-                    FailureKind::ForkFailure,
-                    'Unable to fork a Drove task.',
-                );
+                    $pending = [];
 
-                continue;
-            }
-
-            if ($pid === 0) {
-                fclose($parentSocket);
-
-                foreach ($children as $sibling) {
-                    fclose($sibling['socket']);
-                }
-
-                    foreach ($this->ancestorSockets as $ancestorSocket) {
-                        if (is_resource($ancestorSocket)) {
-                            fclose($ancestorSocket);
+                    foreach ($children as $pid => &$child) {
+                        if ($child['interrupted_signal'] === null) {
+                            $child['interrupted_signal'] = $interruptedSignal;
+                            $child['interruption_term_ns'] = $now;
+                            @posix_kill(-$pid, SIGTERM);
                         }
                     }
 
-                    $this->ancestorSockets = [];
-                    $this->runChild($task, $childSocket, $execute);
-            }
-
-            fclose($childSocket);
-            stream_set_blocking($parentSocket, false);
-            @posix_setpgid($pid, $pid);
-                $this->activeChildGroups[$pid] = true;
-
-            $children[$pid] = [
-                'pid' => $pid,
-                'task' => $task,
-                'socket' => $parentSocket,
-                'buffer' => '',
-                'frames' => [],
-                'stdout' => '',
-                'stderr' => '',
-                'value_buffer' => '',
-                'protocol_error' => null,
-                'started_ns' => null,
-                'deadline_ns' => null,
-                'finished_ns' => null,
-                    'terminal_received_ns' => null,
-                'finished' => null,
-                'reaped' => false,
-                'wait_status' => null,
-                'eof' => false,
-                'timed_out' => false,
-                'term_ns' => null,
-                    'interrupted_signal' => null,
-                    'interruption_term_ns' => null,
-                'kill_sent' => false,
-                    'kill_ns' => null,
-                'cleanup_term_ns' => null,
-                    'cleanup_failed' => false,
-                    'permit_names' => $permitNames,
-                'released' => false,
-            ];
-            }
-
-            $now = hrtime(true);
-
-            if ($interruptedSignal !== null) {
-                foreach ($pending as $ordinal => $task) {
-                    $results[$ordinal] = $this->parentFailure(
-                        $task,
-                        FailureKind::UserInterruption,
-                        sprintf('The Drove run was interrupted by signal %d.', $interruptedSignal),
-                    );
+                    unset($child);
                 }
 
-                $pending = [];
+                foreach (array_keys($children) as $pid) {
+                    $child = &$children[$pid];
+                    $this->protocol->drain($child);
 
-                foreach ($children as $pid => &$child) {
-                    if ($child['interrupted_signal'] === null) {
-                        $child['interrupted_signal'] = $interruptedSignal;
-                        $child['interruption_term_ns'] = $now;
-                        @posix_kill(-$pid, SIGTERM);
+                    if (! $child['reaped']) {
+                        $waitStatus = 0;
+                        $waited = pcntl_waitpid($pid, $waitStatus, WNOHANG);
+
+                        if ($waited === $pid) {
+                            $child['reaped'] = true;
+                            $child['wait_status'] = $waitStatus;
+                            $child['finished_ns'] ??= hrtime(true);
+                            $completionOrder[] = $child['task']['id'];
+                        } elseif ($waited === -1 && pcntl_get_last_error() !== PCNTL_EINTR) {
+                            $child['reaped'] = true;
+                            $child['wait_status'] = null;
+                            $child['finished_ns'] ??= hrtime(true);
+                            $child['protocol_error'] ??= 'waitpid() lost the Drove child.';
+                            $completionOrder[] = $child['task']['id'];
+                        }
                     }
-                }
 
-                unset($child);
-            }
-
-            foreach (array_keys($children) as $pid) {
-                $child = &$children[$pid];
-                $this->protocol->drain($child);
-
-                if (! $child['reaped']) {
-                    $waitStatus = 0;
-                    $waited = pcntl_waitpid($pid, $waitStatus, WNOHANG);
-
-                    if ($waited === $pid) {
-                        $child['reaped'] = true;
-                        $child['wait_status'] = $waitStatus;
-                        $child['finished_ns'] ??= hrtime(true);
-                        $completionOrder[] = $child['task']['id'];
-                    } elseif ($waited === -1 && pcntl_get_last_error() !== PCNTL_EINTR) {
-                        $child['reaped'] = true;
-                        $child['wait_status'] = null;
-                        $child['finished_ns'] ??= hrtime(true);
-                        $child['protocol_error'] ??= 'waitpid() lost the Drove child.';
-                        $completionOrder[] = $child['task']['id'];
-                    }
-                }
-
-                if ($child['started_ns'] !== null
-                    && ! $child['reaped']
-                    && $child['task']['timeout_ms'] > 0
-                    && $child['interrupted_signal'] === null
-                    && ! $child['timed_out']
-                    && $now >= max(
-                        $child['deadline_ns'],
-                        $child['terminal_received_ns'] === null
-                            ? 0
-                            : $child['terminal_received_ns'] + $this->termGraceMs * 1_000_000,
-                    )) {
-                    @posix_kill(-$pid, SIGTERM);
-                    $child['timed_out'] = true;
-                    $child['term_ns'] = $now;
-                }
-
-                if ($child['timed_out']
-                    && ! $child['kill_sent']
-                    && $now - $child['term_ns'] >= $this->termGraceMs * 1_000_000) {
-                    @posix_kill(-$pid, SIGKILL);
-                    $child['kill_sent'] = true;
-                    $child['kill_ns'] = $now;
-                }
-
-                if ($child['interrupted_signal'] !== null
-                    && ! $child['kill_sent']
-                    && $now - $child['interruption_term_ns'] >= $this->termGraceMs * 1_000_000) {
-                    @posix_kill(-$pid, SIGKILL);
-                    $child['kill_sent'] = true;
-                    $child['kill_ns'] = $now;
-                }
-
-                if ($child['reaped']
-                    && ! $child['eof']
-                    && ! $child['timed_out']
-                    && $child['interrupted_signal'] === null) {
-                    if ($child['cleanup_term_ns'] === null) {
+                    if ($child['started_ns'] !== null
+                        && ! $child['reaped']
+                        && $child['task']['timeout_ms'] > 0
+                        && $child['interrupted_signal'] === null
+                        && ! $child['timed_out']
+                        && $now >= max(
+                            $child['deadline_ns'],
+                            $child['terminal_received_ns'] === null
+                                ? 0
+                                : $child['terminal_received_ns'] + $this->termGraceMs * 1_000_000,
+                        )) {
                         @posix_kill(-$pid, SIGTERM);
-                        $child['cleanup_term_ns'] = $now;
-                    } elseif (! $child['kill_sent']
-                        && $now - $child['cleanup_term_ns'] >= $this->termGraceMs * 1_000_000) {
+                        $child['timed_out'] = true;
+                        $child['term_ns'] = $now;
+                    }
+
+                    if ($child['timed_out']
+                        && ! $child['kill_sent']
+                        && $now - $child['term_ns'] >= $this->termGraceMs * 1_000_000) {
                         @posix_kill(-$pid, SIGKILL);
                         $child['kill_sent'] = true;
                         $child['kill_ns'] = $now;
                     }
-                }
 
-                $this->protocol->drain($child);
-
-                if ($child['reaped']
-                    && ! $child['eof']
-                    && $child['kill_sent']
-                    && $child['kill_ns'] !== null
-                    && $now - $child['kill_ns'] >= $this->termGraceMs * 1_000_000) {
-                    $child['cleanup_failed'] = true;
-                    $child['eof'] = true;
-                }
-
-                if ($child['reaped'] && $child['eof']) {
-                    if ($child['permit_names'] !== [] && ! $child['released']) {
-                        $this->forgetPermits($child['permit_names']);
-                        $this->release($child['permit_names']);
-                        $child['released'] = true;
+                    if ($child['interrupted_signal'] !== null
+                        && ! $child['kill_sent']
+                        && $now - $child['interruption_term_ns'] >= $this->termGraceMs * 1_000_000) {
+                        @posix_kill(-$pid, SIGKILL);
+                        $child['kill_sent'] = true;
+                        $child['kill_ns'] = $now;
                     }
 
-                    $results[$child['task']['ordinal']] = $this->finish($child);
-                    fclose($child['socket']);
-                    unset($this->activeChildGroups[$pid]);
-                    unset($children[$pid]);
+                    if ($child['reaped']
+                        && ! $child['eof']
+                        && ! $child['timed_out']
+                        && $child['interrupted_signal'] === null) {
+                        if ($child['cleanup_term_ns'] === null) {
+                            @posix_kill(-$pid, SIGTERM);
+                            $child['cleanup_term_ns'] = $now;
+                        } elseif (! $child['kill_sent']
+                            && $now - $child['cleanup_term_ns'] >= $this->termGraceMs * 1_000_000) {
+                            @posix_kill(-$pid, SIGKILL);
+                            $child['kill_sent'] = true;
+                            $child['kill_ns'] = $now;
+                        }
+                    }
+
+                    $this->protocol->drain($child);
+
+                    if ($child['reaped']
+                        && ! $child['eof']
+                        && $child['kill_sent']
+                        && $child['kill_ns'] !== null
+                        && $now - $child['kill_ns'] >= $this->termGraceMs * 1_000_000) {
+                        $child['cleanup_failed'] = true;
+                        $child['eof'] = true;
+                    }
+
+                    if ($child['reaped'] && $child['eof']) {
+                        if ($child['permit_names'] !== [] && ! $child['released']) {
+                            $this->forgetPermits($child['permit_names']);
+                            $this->release($child['permit_names']);
+                            $child['released'] = true;
+                        }
+
+                        $results[$child['task']['ordinal']] = $this->finish($child);
+                        fclose($child['socket']);
+                        unset($this->activeChildGroups[$pid]);
+                        unset($children[$pid]);
+                    }
+
+                    unset($child);
                 }
 
-                unset($child);
+                if ($pending !== [] || $children !== []) {
+                    usleep(1_000);
+                }
             }
 
-            if ($pending !== [] || $children !== []) {
-                usleep(1_000);
-            }
-        }
+            ksort($results);
 
-        ksort($results);
-
-        return [
-            'results' => array_values($results),
-            'completion_order' => $completionOrder,
-        ];
+            return [
+                'results' => array_values($results),
+                'completion_order' => $completionOrder,
+            ];
         } finally {
             pcntl_async_signals(false);
 
