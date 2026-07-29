@@ -21,6 +21,7 @@ afterAll(function (): void {
 });
 
 test('runs a named dataset', function (string $label, int $value): void {
+    droveCompatibilityMarker('body_named');
     echo $label.':'.$value;
 
     expect($this)->toBeInstanceOf(DroveCompatibilityTestCase::class)
@@ -30,6 +31,7 @@ test('runs a named dataset', function (string $label, int $value): void {
 })->with('drove named rows');
 
 test('runs a positional dataset', function (string $label, int $value): void {
+    droveCompatibilityMarker('body_positional');
     echo $label.':'.$value;
 
     expect($this)->toBeInstanceOf(DroveCompatibilityTestCase::class)
@@ -64,6 +66,8 @@ describe('an installed describe', function (): void {
     });
 
     test('runs a nested describe case', function (): void {
+        droveCompatibilityMarker('body_nested');
+
         expect($this)->toBeInstanceOf(DroveCompatibilityTestCase::class)
             ->and($this->bindingMarker())->toBe('custom-test-case');
     });

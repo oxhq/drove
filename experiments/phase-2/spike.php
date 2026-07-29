@@ -52,7 +52,7 @@ if ($fixture === false) {
     throw new RuntimeException('The Phase 2 fixture does not exist.');
 }
 
-$compiler = ScopeCompiler::activate(__DIR__, ownsHooks: true);
+$compiler = ScopeCompiler::activate(__DIR__, ownsScopeHooks: true);
 $suite = PHPUnitTestSuite::empty('drove-phase-two');
 $suite->addTestFile($fixture);
 (new TestSuiteFilterProcessor)->process(PHPUnitConfiguration::get(), $suite);
@@ -129,10 +129,6 @@ foreach ($tests as $test) {
     $id = $test['id'];
     $resolver = $resolvers[$id];
 
-    foreach ($test['before_each'] as $hookId) {
-        $compiler->hook($hookId)->call($resolver['runtime']);
-    }
-
     $outputLevel = ob_get_level();
     ob_start();
 
@@ -154,10 +150,6 @@ foreach ($tests as $test) {
 
         while (ob_get_level() > $outputLevel) {
             $emitted[$id] = ob_get_clean().$emitted[$id];
-        }
-
-        foreach (array_reverse($test['after_each']) as $hookId) {
-            $compiler->hook($hookId)->call($resolver['runtime']);
         }
     }
 }

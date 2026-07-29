@@ -129,7 +129,7 @@ final class Runner
                 new ArgvInput($phpunitArguments),
                 new BufferedOutput,
             );
-            $compiler = ScopeCompiler::activate($rootPath, ownsHooks: true);
+            $compiler = ScopeCompiler::activate($rootPath, ownsScopeHooks: true);
             $configuration = (new Builder)->build($phpunitArguments);
 
             if ($configuration->processIsolation()) {

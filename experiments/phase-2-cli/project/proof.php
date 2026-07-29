@@ -34,6 +34,15 @@ $expect = static function (bool $condition, string $message): void {
 $markerPath = sys_get_temp_dir().'/drove-phase-two-compatibility-'.getmypid();
 @unlink($markerPath);
 putenv('DROVE_COMPATIBILITY_MARKER='.$markerPath);
+$compatibilityC1 = $run('--parallel', '--processes=1', 'tests/CompatibilityTest.php');
+$markers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
+$namedLifecycle = $run('tests/CompatibilityTest.php', '--filter=runs a named dataset');
+$namedMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
+$nestedLifecycle = $run('tests/CompatibilityTest.php', '--filter=runs a nested describe case');
+$nestedMarkers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+file_put_contents($markerPath, '');
 $cases = [
     'path' => $run('tests/OtherTest.php'),
     'filter' => $run('tests/FastTest.php', '--filter=alpha'),
@@ -41,7 +50,7 @@ $cases = [
     'exclude_group' => $run('tests/FastTest.php', '--exclude-group=slow'),
     'testsuite' => $run('--testsuite=Other'),
     'parallel' => $run('--parallel', '--processes=2', 'tests/FastTest.php'),
-    'compatibility_c1' => $run('--parallel', '--processes=1', 'tests/CompatibilityTest.php'),
+    'compatibility_c1' => $compatibilityC1,
     'compatibility_c8' => $run('--parallel', '--processes=8', 'tests/CompatibilityTest.php'),
     'slow' => $run('tests/SlowTest.php'),
     'failure' => $run('tests/FailingTest.php'),
@@ -55,7 +64,6 @@ $cases = [
     'xml_process_isolation' => $run('--configuration=unsupported/process-isolation.xml'),
     'xml_enforce_time_limit' => $run('--configuration=unsupported/enforce-time-limit.xml'),
 ];
-$markers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 @unlink($markerPath);
 putenv('DROVE_COMPATIBILITY_MARKER');
 
@@ -132,16 +140,16 @@ $expect(
     'The installed Drover run changed semantics between concurrency one and eight.',
 );
 $expectedMarkers = [
-    'before_all' => 2,
-    'nested_before_all' => 2,
-    'before_each' => 10,
-    'nested_before_each' => 2,
-    'set_up' => 10,
-    'tear_down' => 10,
-    'nested_after_each' => 2,
-    'after_each' => 10,
-    'nested_after_all' => 2,
-    'after_all' => 2,
+    'before_all' => 1,
+    'nested_before_all' => 1,
+    'before_each' => 5,
+    'nested_before_each' => 1,
+    'set_up' => 5,
+    'tear_down' => 5,
+    'nested_after_each' => 1,
+    'after_each' => 5,
+    'nested_after_all' => 1,
+    'after_all' => 1,
 ];
 
 $expect(is_array($markers), 'The installed compatibility marker is unreadable.');
@@ -154,10 +162,28 @@ foreach ($expectedMarkers as $marker => $count) {
 }
 
 $expect(
-    $markers[0] === 'before_all'
-        && $markers[array_key_last($markers)] === 'after_all',
-    'The installed Drove scope lifecycle order drifted.',
+    $namedLifecycle['exit'] === 0
+        && $namedMarkers === [
+            'before_all',
+            'set_up', 'before_each', 'body_named', 'after_each', 'tear_down',
+            'after_all',
+        ],
+    'The installed file-level Pest and TestCase lifecycle order drifted.',
 );
+$expect(
+    $nestedLifecycle['exit'] === 0
+        && $nestedMarkers === [
+            'before_all',
+            'nested_before_all',
+            'set_up', 'before_each', 'nested_before_each', 'body_nested',
+            'after_each', 'nested_after_each', 'tear_down',
+            'nested_after_all',
+            'after_all',
+        ],
+    'The installed nested Pest and TestCase lifecycle order drifted.',
+);
+$expect($markers[0] === 'before_all'
+    && $markers[array_key_last($markers)] === 'after_all', 'The installed Drove scope lifecycle order drifted.');
 $expect(
     str_contains($cases['slow']['stdout'], 'passes after one second'),
     'A passing test inherited an implicit one-second timeout.',

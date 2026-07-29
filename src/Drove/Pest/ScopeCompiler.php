@@ -63,12 +63,12 @@ final class ScopeCompiler
 
     private function __construct(
         private readonly string $rootPath,
-        private readonly bool $ownsHooks,
+        private readonly bool $ownsScopeHooks,
     ) {
         //
     }
 
-    public static function activate(string $rootPath, bool $ownsHooks = false): self
+    public static function activate(string $rootPath, bool $ownsScopeHooks = false): self
     {
         $rootPath = realpath($rootPath);
 
@@ -76,12 +76,12 @@ final class ScopeCompiler
             throw new InvalidArgumentException('The Drove root path does not exist.');
         }
 
-        return self::$active = new self(str_replace('\\', '/', $rootPath), $ownsHooks);
+        return self::$active = new self(str_replace('\\', '/', $rootPath), $ownsScopeHooks);
     }
 
-    public static function ownsHooks(): bool
+    public static function ownsScopeHooks(): bool
     {
-        return self::$active instanceof self && self::$active->ownsHooks;
+        return self::$active instanceof self && self::$active->ownsScopeHooks;
     }
 
     public static function capture(?TestCaseFactory $factory): void
@@ -610,6 +610,10 @@ final class ScopeCompiler
         $node['state_policy'] = 'inherit';
         $node['concurrency'] = $configuration['scope_concurrency'][$id] ?? null;
         $node['timeout_ms'] = 0;
+        if ($this->ownsScopeHooks) {
+            $node['hooks']['before_each'] = [];
+            $node['hooks']['after_each'] = [];
+        }
         $node['tests'] = $runtimeTests;
         $node['children'] = array_map(
             fn (array $child): array => $this->runtimeNode($child, $tests, $configuration),

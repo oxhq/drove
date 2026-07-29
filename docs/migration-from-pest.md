@@ -1,7 +1,7 @@
 # Migrating from Pest to the Drove compatibility alpha
 
 Drove Phase 2 is a source-only Linux alpha. It keeps a deliberately small Pest
-surface while Drove owns scope planning, lifecycle order, native scheduling,
+surface while Drove owns scope planning, scope lifecycle, native scheduling,
 result aggregation, and rendering.
 
 ## Build and run from source
@@ -36,7 +36,7 @@ compatibility bug.
 | Surface | Level | Notes |
 | --- | --- | --- |
 | `test()`, `it()`, `describe()`, expectations | Native | Compiled into Drove Scope IR. |
-| `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns ordering, blocking, and partial unwind. |
+| `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns scope hooks; generated Pest cases preserve per-test hook order. |
 | Named and positional datasets | Compatible | Every selected row receives a stable case ID. |
 | Custom `TestCase`, `uses()`, `setUp()`, `tearDown()` | Compatible | Instance lifecycle runs in the test child. |
 | Skips and todos | Compatible | Status and reason are preserved. |
@@ -59,6 +59,8 @@ exhaustive, so the dual-run comparison remains required.
 - `beforeAll` prepares a copy-on-write scope snapshot. Mutations made by one
   test child do not return to its parent or siblings.
 - Nested `beforeAll` and `afterAll` are Drove scope hooks.
+- Pest runs `beforeEach` after custom `setUp()` and `afterEach` before custom
+  `tearDown()`, matching the generated Pest `TestCase` lifecycle.
 - A failed `beforeAll` blocks only its subtree. Initialized ancestors still
   unwind and siblings continue.
 - Drove preserves a body failure as primary and reports teardown failures

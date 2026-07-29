@@ -6,7 +6,7 @@ PHPUnit cases. It proves:
 - filtered PHPUnit discovery before scheduling;
 - stable per-dataset IDs and scalar Scope IR;
 - custom `TestCase` and `uses()` binding;
-- Drove-owned hooks running exactly once;
+- Drove scope hooks and Pest per-test hooks running exactly once;
 - passed, failed, skipped, and todo outcomes;
 - original PHPUnit failure transport and output-once rendering;
 - pruning of fully filtered files and scope subtrees;
