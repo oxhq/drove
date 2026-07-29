@@ -1,0 +1,42 @@
+{
+    "name": "oxhq/drove-phase-one",
+    "description": "Drove Pest discovery and prepared execution spike",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "/pest",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "pestphp/pest": "5.x-dev"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-pcntl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_sqlite": "*",
+        "laravel/framework": "^13.0",
+        "pestphp/pest": "^5.0@dev"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "scripts": {
+        "spike": "php spike.php"
+    }
+}

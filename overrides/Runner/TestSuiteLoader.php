@@ -36,6 +36,7 @@ declare(strict_types=1);
 
 namespace PHPUnit\Runner;
 
+use Drove\Pest\ScopeCompiler;
 use Exception;
 use Pest\Contracts\HasPrintableTestCaseName;
 use Pest\Panic;
@@ -94,6 +95,7 @@ final class TestSuiteLoader
                 Panic::with($e);
             }
 
+            ScopeCompiler::capture(TestSuite::getInstance()->tests->get($suiteClassFile));
             TestSuite::getInstance()->tests->makeIfNeeded($suiteClassFile);
         })();
 

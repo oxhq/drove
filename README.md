@@ -1,40 +1,51 @@
-<p align="center">
-    <img src="https://raw.githubusercontent.com/pestphp/art/master/v5/social.png" width="600" alt="PEST">
-    <p align="center">
-        <a href="https://github.com/pestphp/pest/actions"><img alt="GitHub Workflow Status (5.x)" src="https://img.shields.io/github/actions/workflow/status/pestphp/pest/tests.yml?branch=5.x&label=Tests%205.x"></a>
-        <a href="https://packagist.org/packages/pestphp/pest"><img alt="Total Downloads" src="https://img.shields.io/packagist/dt/pestphp/pest"></a>
-        <a href="https://packagist.org/packages/pestphp/pest"><img alt="Latest Version" src="https://img.shields.io/packagist/v/pestphp/pest"></a>
-        <a href="https://packagist.org/packages/pestphp/pest"><img alt="License" src="https://img.shields.io/packagist/l/pestphp/pest"></a>
-        <a href="https://whyphp.dev"><img src="https://img.shields.io/badge/Why_PHP-in_2026-7A86E8?style=flat-square&labelColor=18181b" alt="Why PHP in 2026"></a>
-        <a href="https://youtube.com/@nunomaduro?sub_confirmation=1"><img alt="YouTube Channel Subscribers" src="https://img.shields.io/youtube/channel/subscribers/UCO_hYZF2gb_CyG5sA7ArlGg?style=flat&label=youtube&color=brightgreen"></a>
-    </p>
-</p>
+# Drove
 
-------
+Drove is an experimental fork of Pest exploring hierarchical prepared-state
+snapshots and native parallel execution.
 
-> Pest v5 Now Available: **[Read the announcement »](https://pestphp.com/docs/pest5-now-available)**.
+The current `refactor/phase-1` branch is a source-built Linux kernel proof. It
+defines a framework-independent Scope IR, deterministic lifecycle semantics,
+structured child events and failures, bounded global and scope concurrency,
+and two conforming schedulers:
 
-**Pest** is an elegant testing framework for PHP developers and AI agents.
+- `PcntlScheduler`, the PHP reference backend;
+- `DroverScheduler`, backed by the Rust engine in `native/drover`.
 
-- Explore our docs at **[pestphp.com »](https://pestphp.com)**
-- Follow the creator Nuno Maduro:
-    - YouTube: **[youtube.com/@nunomaduro](https://youtube.com/@nunomaduro)** — Videos every week
-    - Twitch: **[twitch.tv/nunomaduro](https://twitch.tv/nunomaduro)** — Live coding on Mondays, Wednesdays, and Fridays at 9PM UTC
-    - Twitter / X: **[x.com/enunomaduro](https://x.com/enunomaduro)**
-    - LinkedIn: **[linkedin.com/in/nunomaduro](https://www.linkedin.com/in/nunomaduro)**
-    - Instagram: **[instagram.com/enunomaduro](https://www.instagram.com/enunomaduro)**
-    - Tiktok: **[tiktok.com/@enunomaduro](https://www.tiktok.com/@enunomaduro)**
+The same lifecycle fixture runs at concurrency 1 and 8 through both backends
+and must produce the same semantic projection. Drover owns process creation,
+permit acquisition, polling, timeouts, process-group cleanup, protocol frame
+collection, and canonical result delivery.
 
-## Sponsors
+## Run the Phase 1 gate
 
-We cannot thank our sponsors enough for their incredible support in funding Pest's development. Their contributions have been instrumental in making Pest the best it can be. For those who are interested in becoming a sponsor, please visit Nuno Maduro's Sponsor page at **[github.com/sponsors/nunomaduro](https://github.com/sponsors/nunomaduro)**.
+Docker is the supported reproducible path:
 
-- **[CMS Max](https://cmsmax.com/?ref=pestphp)**
-- **[PhpStorm](https://jb.gg/nuno)**
-- **[CodeRabbit](https://coderabbit.link/nunomaduro)**
-- **[SerpApi](https://serpapi.com/?ref=nunomaduro)**
-- **[Typesense](https://typesense.org/?ref=nunomaduro)**
-- **[Bento](https://bentonow.com/?ref=nunomaduro)**
-- **[Redberry](https://redberry.international/laravel-development/)**
+```bash
+docker build --file experiments/phase-1/Dockerfile --tag drove-phase-one .
+docker run --rm drove-phase-one
+docker run --rm drove-phase-one php inactive.php
+docker run --rm drove-phase-one php kernel.php
+docker run --rm drove-phase-one timeout 15 php scheduler.php
+docker run --rm drove-phase-one timeout 15 php interruption.php
+docker run --rm drove-phase-one php -d ffi.enable=true /pest/native/drover/proof.php
+```
 
-Pest is an open-sourced software licensed under the **[MIT license](https://opensource.org/licenses/MIT)**.
+The image build also runs the locked Rust tests, warning-clean Clippy, and a
+release build. See
+[`experiments/phase-1/README.md`](experiments/phase-1/README.md) and
+[`native/drover/README.md`](native/drover/README.md) for the proof contracts.
+
+## Current boundary
+
+This branch is not a released package or a drop-in Pest runner. It is Linux
+only, uses FFI as the native bridge, and does not provide coverage merging,
+plugin parity, native extension packaging, or a stable public API. The Pest
+compatibility runner belongs to Phase 2.
+
+## Attribution
+
+Drove began as a hard fork of [Pest](https://github.com/pestphp/pest). The Pest
+DSL, expectations, PHPUnit integration, and other upstream-derived code retain
+their original copyright and the repository's [MIT license](LICENSE.md).
+`src/Drove` contains the independent kernel and compatibility work;
+`native/drover` contains the original Rust execution engine.

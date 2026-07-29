@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Drove\Pest\ScopeCompiler;
 use Pest\Browser\Api\ArrayablePendingAwaitablePage;
 use Pest\Browser\Api\PendingAwaitablePage;
 use Pest\Configuration;
@@ -46,10 +47,17 @@ if (! function_exists('beforeAll')) {
      */
     function beforeAll(Closure $closure): void
     {
-        if (DescribeCall::describing() !== []) {
-            $filename = Backtrace::testFile();
+        $filename = Backtrace::testFile();
+        $describing = array_values(DescribeCall::describing());
 
-            throw new BeforeAllWithinDescribe($filename);
+        $captured = ScopeCompiler::captureHook('before_all', $filename, $closure, $describing);
+
+        if ($describing !== []) {
+            if (! $captured) {
+                throw new BeforeAllWithinDescribe($filename);
+            }
+
+            return;
         }
 
         TestSuite::getInstance()->beforeAll->set($closure);
@@ -65,6 +73,10 @@ if (! function_exists('beforeEach')) {
     function beforeEach(?Closure $closure = null): BeforeEachCall
     {
         $filename = Backtrace::testFile();
+
+        if ($closure instanceof Closure) {
+            ScopeCompiler::captureHook('before_each', $filename, $closure, array_values(DescribeCall::describing()));
+        }
 
         return new BeforeEachCall(TestSuite::getInstance(), $filename, $closure);
     }
@@ -93,8 +105,11 @@ if (! function_exists('describe')) {
     function describe(string $description, Closure $tests): DescribeCall
     {
         $filename = Backtrace::testFile();
+        $description = new Description($description);
 
-        return new DescribeCall(TestSuite::getInstance(), $filename, new Description($description), $tests);
+        ScopeCompiler::captureScope($filename, $description, array_values(DescribeCall::describing()));
+
+        return new DescribeCall(TestSuite::getInstance(), $filename, $description, $tests);
     }
 }
 
@@ -181,6 +196,10 @@ if (! function_exists('afterEach')) {
     {
         $filename = Backtrace::testFile();
 
+        if ($closure instanceof Closure) {
+            ScopeCompiler::captureHook('after_each', $filename, $closure, array_values(DescribeCall::describing()));
+        }
+
         return new AfterEachCall(TestSuite::getInstance(), $filename, $closure);
     }
 }
@@ -191,10 +210,17 @@ if (! function_exists('afterAll')) {
      */
     function afterAll(Closure $closure): void
     {
-        if (DescribeCall::describing() !== []) {
-            $filename = Backtrace::testFile();
+        $filename = Backtrace::testFile();
+        $describing = array_values(DescribeCall::describing());
 
-            throw new AfterAllWithinDescribe($filename);
+        $captured = ScopeCompiler::captureHook('after_all', $filename, $closure, $describing);
+
+        if ($describing !== []) {
+            if (! $captured) {
+                throw new AfterAllWithinDescribe($filename);
+            }
+
+            return;
         }
 
         TestSuite::getInstance()->afterAll->set($closure);

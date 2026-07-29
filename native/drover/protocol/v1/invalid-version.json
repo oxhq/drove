@@ -1,0 +1,1 @@
+{"protocol_version":2,"run_id":"golden-run","task_id":"task:golden","task_kind":"test","scope_id":"scope:golden","ordinal":7,"sequence":3,"type":"task.finished","payload":{"status":"passed","failure":null,"finished_ns":300,"memory_peak_bytes":4096}}

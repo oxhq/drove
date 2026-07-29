@@ -148,7 +148,13 @@ final class Preset
     private function baseNamespaces(): array
     {
         if (self::$baseNamespaces === null) {
-            self::$baseNamespaces = Composer::userNamespaces();
+            $namespaces = Composer::userNamespaces();
+
+            if ($GLOBALS['__PEST_INTERNAL_TEST_SUITE'] ?? false) {
+                $namespaces = array_values(array_diff($namespaces, ['Drove']));
+            }
+
+            self::$baseNamespaces = $namespaces;
         }
 
         return self::$baseNamespaces;
