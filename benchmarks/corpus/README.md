@@ -57,6 +57,10 @@ rejects:
 Passing local scripts is local proof. The workflow is only hosted proof after
 GitHub Actions completes successfully.
 
+Selected hosted reports are promoted permanently under
+[`benchmarks/results/`](../results/); each snapshot links its source workflow,
+artifact, revision, and report hash.
+
 ## Pinned dependencies
 
 Each external checkout is fixed to the commit in `manifest.json`. Its
