@@ -132,7 +132,10 @@ $assert(
 );
 
 $runId = 'native-abi-smoke';
-$escapedPath = '/tmp/drover-timeout-descendant';
+$timeoutProbe = '/tmp/drover-timeout-descendant-'.getmypid();
+$readyPath = $timeoutProbe.'.ready';
+$escapedPath = $timeoutProbe.'.escaped';
+@unlink($readyPath);
 @unlink($escapedPath);
 $prepared = ['items' => ['root']];
 $tasks = [
@@ -179,10 +182,30 @@ $tasks = [
         'kind' => 'test',
         'scope_id' => 'scope:serial',
         'scopes' => ['scope:root', 'scope:serial'],
-        'timeout_ms' => 120,
-        'callback' => static function () use ($escapedPath): never {
-            $script = 'trap "" TERM; sleep 1; printf escaped > '.escapeshellarg($escapedPath);
-            exec('sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &');
+        'timeout_ms' => 500,
+        'callback' => static function () use ($escapedPath, $readyPath): never {
+            $script = sprintf(
+                'if (! pcntl_signal(SIGTERM, SIG_IGN)) { exit(70); } '
+                    .'file_put_contents(%s, "ready"); '
+                    .'usleep(1_000_000); '
+                    .'file_put_contents(%s, "escaped");',
+                var_export($readyPath, true),
+                var_export($escapedPath, true),
+            );
+            $process = proc_open(
+                [PHP_BINARY, '-r', $script],
+                [
+                    0 => ['file', '/dev/null', 'r'],
+                    1 => ['file', '/dev/null', 'a'],
+                    2 => ['file', '/dev/null', 'a'],
+                ],
+                $pipes,
+            );
+
+            if (! is_resource($process)) {
+                throw new RuntimeException('The timeout descendant could not start.');
+            }
+
             usleep(2_000_000);
             throw new RuntimeException('The timed-out callback resumed.');
         },
@@ -318,6 +341,7 @@ $assert($prepared['items'] === ['root'], 'A child mutation escaped into the prep
 $assert($results['task:slow-a']['value']['after'] === ['root', 'slow-a'], 'Prepared state was not inherited.');
 $assert($results['task:php-exception']['failure']['kind'] === 'php_exception', 'PHP failure drifted.');
 $assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout failure drifted.');
+$assert(file_exists($readyPath), 'The timeout descendant did not start before cleanup.');
 usleep(1_200_000);
 $assert(! file_exists($escapedPath), 'A timed-out descendant escaped its process group.');
 

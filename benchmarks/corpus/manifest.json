@@ -156,7 +156,22 @@
                 "selector": "sh benchmarks/corpus/select.sh livewire /checkout",
                 "rule": "the lexicographically first 20 src/**/*UnitTest.php files",
                 "files": 20,
-                "cases": 288
+                "cases": 288,
+                "parallel": {
+                    "selector": "sh benchmarks/corpus/select.sh livewire-parallel /checkout",
+                    "rule": "seven explicit Testbench files whose test bodies do not render Blade views, launch Dusk, or generate application files",
+                    "files": 7,
+                    "cases": 36,
+                    "source_files": [
+                        "src/Features/SupportEntangle/UnitTest.php",
+                        "src/Mechanisms/FrontendAssets/EndpointResolverIntegrationUnitTest.php",
+                        "src/Mechanisms/HandleComponents/SecurityPolicyUnitTest.php",
+                        "src/Mechanisms/HandleRequests/EndpointResolverUnitTest.php",
+                        "src/Mechanisms/HandleRequests/EnforceWebMiddlewareUnitTest.php",
+                        "src/Tests/InvadeHelperUnitTest.php",
+                        "src/Tests/LivewireRouteCachingUnitTest.php"
+                    ]
+                }
             },
             "dependency_uplift": {
                 "drove": "0.4.0-alpha.1",
@@ -173,19 +188,48 @@
                 "failed": 0,
                 "assertions": 1034,
                 "incomplete": 3,
-                "exit": 0
+                "exit": 0,
+                "parallel": {
+                    "runner": "PHPUnit 13 with the filesystem-neutral selector output as explicit paths",
+                    "passed": 36,
+                    "failed": 0,
+                    "assertions": 68,
+                    "exit": 0
+                }
             },
             "drove": {
-                "runner": "php vendor/bin/drove --parallel --processes=1 with the same explicit paths",
+                "runner": "php vendor/bin/drove --parallel --processes=1 with the full selector output as explicit paths",
                 "tests": 288,
                 "passed": 285,
                 "failed": 0,
                 "assertions": 1034,
                 "incomplete": 3,
-                "exit": 0
+                "exit": 0,
+                "parallel": {
+                    "runner": "php vendor/bin/drove --parallel at 1, 2, 4, and 8 processes with the filesystem-neutral selector output",
+                    "passed": 36,
+                    "failed": 0,
+                    "assertions": 68,
+                    "exit": 0,
+                    "observed_concurrency": [
+                        1,
+                        2,
+                        4,
+                        8
+                    ]
+                }
             },
             "hosted_gate_matrix": {
                 "full": {
+                    "state": "sqlite-memory",
+                    "baseline": [
+                        1
+                    ],
+                    "drove": [
+                        1
+                    ]
+                },
+                "parallel": {
                     "state": "sqlite-memory",
                     "baseline": [
                         1
@@ -202,6 +246,9 @@
                 "The selected files are ordinary PHPUnit cases running on Orchestra Testbench, not Pest cases.",
                 "All 20 selected source files and the Testbench bootstrap are unchanged from the pinned Livewire commit.",
                 "DUSK_DRIVER_URL disables Livewire's local Chromedriver launcher; this unit-only selection never contacts the driver.",
+                "The complete 288-case selection runs serially because its TestCase clean slate and command tests mutate shared Testbench filesystem paths.",
+                "The 36-case parallel cohort keeps real Testbench application and sqlite-memory lifecycle while excluding test bodies that use those unmanaged filesystem paths; replay metadata must observe the requested 1, 2, 4, and 8 concurrency.",
+                "Pinned Livewire uses RefreshDatabase only in browser tests, so this unit cohort proves inherited-PDO identity guards but does not claim external RefreshDatabase trait coverage.",
                 "The non-symlinked Composer overlay records the proven Drove revision.",
                 "The result is correctness evidence only, not a speed comparison."
             ]

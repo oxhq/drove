@@ -68,7 +68,9 @@ foreach (array_slice($argv, 1) as $path) {
         continue;
     }
 
-    $expectedFiles = $corpus['selection']['files'] ?? null;
+    $expectedFiles = $cohort === 'full'
+        ? ($corpus['selection']['files'] ?? null)
+        : ($corpus['selection'][$cohort]['files'] ?? null);
 
     if (($result['selected_files'] ?? null) !== $expectedFiles) {
         $errors[] = "$path selected_files mismatch";
