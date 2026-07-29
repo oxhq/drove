@@ -1,5 +1,5 @@
 {
-    "name": "pestphp/pest",
+    "name": "oxhq/drove",
     "description": "Experimental Pest fork for prepared-state parallel test execution.",
     "keywords": [
         "php",
@@ -34,6 +34,9 @@
         "phpunit/phpunit": ">13.2.4",
         "sebastian/exporter": "<7.0.0",
         "webmozart/assert": "<1.11.0"
+    },
+    "replace": {
+        "pestphp/pest": "5.0.1"
     },
     "autoload": {
         "psr-4": {

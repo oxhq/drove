@@ -6,6 +6,7 @@ use Drove\Kernel\FailureKind;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\Scheduler;
 use Drove\Kernel\ScopeContext;
+use Drove\Kernel\StateAdapterException;
 use Drove\Kernel\TestOutcome;
 
 require __DIR__.'/vendor/autoload.php';
@@ -91,6 +92,7 @@ $runtimes = [
 ];
 $scopeBindings = [];
 $rawContext = null;
+$dispatchTrace = [];
 $hooks = [
     'hook:before-all' => function (ScopeContext $context) use (&$scopeBindings): void {
         $scopeBindings[] = $this === $context;
@@ -143,7 +145,8 @@ $bodies = [
 
         return TestOutcome::passed(['answer' => 42]);
     },
-    $ids[4] => function (ScopeContext $context): never {
+    $ids[4] => function (ScopeContext $context) use (&$dispatchTrace): never {
+        $dispatchTrace[] = 'body:'.$context->metadata()['test_id'];
         $this->trace[] = 'body:'.$context->metadata()['test_id'];
         echo 'descendant-output';
 
@@ -194,6 +197,22 @@ $executor = new LifecycleExecutor(
     static fn (string $id): Closure|array => isset($runtimes[$id])
         ? ['closure' => $bodies[$id], 'runtime' => $runtimes[$id]]
         : $bodies[$id],
+    static function (ScopeContext $context) use (&$dispatchTrace): void {
+        $dispatchTrace[] = 'before:'.$context->metadata()['id'];
+    },
+    static function (ScopeContext $context, array $task) use (&$dispatchTrace): void {
+        $dispatchTrace[] = 'enter:'.$task['id'].':'.$context->metadata()['id'];
+    },
+    static function (ScopeContext $context, array $task) use (&$dispatchTrace): void {
+        $dispatchTrace[] = 'leave:'.$task['id'].':'.$context->metadata()['id'];
+
+        if ($task['id'] === 'test:failed') {
+            throw new RuntimeException('descendant cleanup failed');
+        }
+    },
+    static function (ScopeContext $context) use (&$dispatchTrace): void {
+        $dispatchTrace[] = 'after:'.$context->metadata()['id'];
+    },
 );
 $run = $executor->run($plan);
 $projection = LifecycleExecutor::semanticProjection($run);
@@ -230,6 +249,14 @@ $expect($results[$ids[4]]['status'] === 'failed', 'Thrown test did not fail.');
 $expect($results[$ids[4]]['failure']['kind'] === FailureKind::PhpException->value, 'Failure kind changed.');
 $expect($results[$ids[4]]['failure']['class'] === RuntimeException::class, 'Throwable class changed.');
 $expect($results[$ids[4]]['failure']['message'] === 'original boom', 'Throwable message changed.');
+$expect(
+    $results[$ids[4]]['teardown_failures'][0]['message'] === 'descendant cleanup failed',
+    'Descendant cleanup failure was not reported separately.',
+);
+$expect(
+    $results[$ids[4]]['teardown_failures'][0]['kind'] === FailureKind::TeardownFailure->value,
+    'Descendant cleanup failure was misclassified.',
+);
 $expect($results[$ids[4]]['stdout'] === 'descendant-output', 'Descendant output drifted.');
 $expect($scopes['scope:child']['stdout'] === 'scope-output', 'Scope stdout was lost.');
 $expect($scopes['scope:child']['stderr'] === 'scope-diagnostic', 'Scope stderr was lost.');
@@ -251,6 +278,154 @@ $expect(
     array_intersect_key($projectedResults[$ids[0]], array_flip(['name', 'source', 'dataset', 'groups']))
         === array_intersect_key($tests[0], array_flip(['name', 'source', 'dataset', 'groups'])),
     'Semantic projection metadata drifted.',
+);
+$bodyFailurePosition = array_search('body:test:failed', $dispatchTrace, true);
+$leaveFailurePosition = array_search('leave:test:failed:scope:child', $dispatchTrace, true);
+$expect(
+    is_int($bodyFailurePosition)
+        && is_int($leaveFailurePosition)
+        && $bodyFailurePosition < $leaveFailurePosition,
+    'Descendant cleanup did not run after a failed body.',
+);
+$expect(
+    in_array('before:suite:phase-two', $dispatchTrace, true)
+        && in_array('after:suite:phase-two', $dispatchTrace, true)
+        && in_array('before:scope:child', $dispatchTrace, true)
+        && in_array('after:scope:child', $dispatchTrace, true),
+    'Dispatch callbacks did not cover nested scope boundaries.',
+);
+
+$cleanupOnlyPlan = [
+    'root' => [
+        'id' => 'suite:cleanup-only',
+        'type' => 'suite',
+        'hooks' => [
+            'before_all' => [],
+            'before_each' => [],
+            'after_each' => [],
+            'after_all' => [],
+        ],
+        'tests' => [$tests[3]],
+        'children' => [],
+    ],
+];
+$cleanupOnlyRun = (new LifecycleExecutor(
+    $scheduler,
+    static fn (string $id): Closure => $hooks[$id],
+    static fn (string $id): Closure|array => isset($runtimes[$id])
+        ? ['closure' => $bodies[$id], 'runtime' => $runtimes[$id]]
+        : $bodies[$id],
+    leaveDescendant: static function (): never {
+        throw new RuntimeException('only cleanup failed');
+    },
+))->run($cleanupOnlyPlan);
+$cleanupOnlyResult = $cleanupOnlyRun['tests'][0];
+$expect($cleanupOnlyRun['status'] === 'failed', 'A lone descendant cleanup failure passed the run.');
+$expect(
+    $cleanupOnlyResult['failure']['message'] === 'only cleanup failed'
+        && $cleanupOnlyResult['failure'] === $cleanupOnlyResult['teardown_failures'][0],
+    'A lone descendant cleanup failure was not promoted to primary.',
+);
+$cleanupOnlyTerminal = array_find(
+    $cleanupOnlyResult['events'],
+    static fn (array $event): bool => $event['type'] === 'test.finished',
+);
+$expect(
+    is_array($cleanupOnlyTerminal)
+        && $cleanupOnlyTerminal['status'] === 'failed'
+        && $cleanupOnlyTerminal['failure'] === $cleanupOnlyResult['failure'],
+    'A descendant cleanup failure left a passing terminal event.',
+);
+
+$afterDispatchRan = false;
+$primaryPreserved = false;
+$throwingScheduler = new class implements Scheduler
+{
+    public function runId(): string
+    {
+        return 'phase-2-dispatch-failure';
+    }
+
+    public function map(array $tasks, Closure $execute): array
+    {
+        throw new RuntimeException('primary dispatch failed');
+    }
+
+    public function withPermit(array $scopes, Closure $work): mixed
+    {
+        return $work();
+    }
+};
+$throwingExecutor = new LifecycleExecutor(
+    $throwingScheduler,
+    static fn (string $id): Closure => $hooks[$id],
+    static fn (string $id): Closure|array => isset($runtimes[$id])
+        ? ['closure' => $bodies[$id], 'runtime' => $runtimes[$id]]
+        : $bodies[$id],
+    afterDispatch: static function () use (&$afterDispatchRan): never {
+        $afterDispatchRan = true;
+
+        throw new RuntimeException('after dispatch also failed');
+    },
+);
+
+try {
+    $throwingExecutor->run($cleanupOnlyPlan);
+} catch (RuntimeException $exception) {
+    $primaryPreserved = $exception->getMessage() === 'primary dispatch failed';
+}
+
+$expect($afterDispatchRan, 'afterDispatch did not run from the parent finally path.');
+$expect($primaryPreserved, 'afterDispatch cleanup replaced the primary dispatch failure.');
+
+$afterOnlyRun = (new LifecycleExecutor(
+    $scheduler,
+    static fn (string $id): Closure => $hooks[$id],
+    static fn (string $id): Closure|array => isset($runtimes[$id])
+        ? ['closure' => $bodies[$id], 'runtime' => $runtimes[$id]]
+        : $bodies[$id],
+    afterDispatch: static function (): never {
+        throw new StateAdapterException('only after dispatch failed');
+    },
+))->run($cleanupOnlyPlan);
+$expect(
+    $afterOnlyRun['status'] === 'failed'
+        && $afterOnlyRun['root']['failure']['kind'] === FailureKind::StateAdapterFailure->value
+        && $afterOnlyRun['tests'][0]['status'] === 'passed',
+    'A lone afterDispatch failure did not preserve completed test results.',
+);
+
+$beforeFailureAfterAllRan = false;
+$beforeFailureAfterDispatchRan = false;
+$beforeFailureHooks = $hooks + [
+    'hook:adapter-after-all' => static function () use (&$beforeFailureAfterAllRan): void {
+        $beforeFailureAfterAllRan = true;
+    },
+];
+$beforeFailurePlan = $cleanupOnlyPlan;
+$beforeFailurePlan['root']['hooks']['after_all'] = ['hook:adapter-after-all'];
+$beforeFailureRun = (new LifecycleExecutor(
+    $scheduler,
+    static fn (string $id): Closure => $beforeFailureHooks[$id],
+    static fn (string $id): Closure|array => isset($runtimes[$id])
+        ? ['closure' => $bodies[$id], 'runtime' => $runtimes[$id]]
+        : $bodies[$id],
+    beforeDispatch: static function (): never {
+        throw new StateAdapterException('before dispatch failed');
+    },
+    afterDispatch: static function () use (&$beforeFailureAfterDispatchRan): void {
+        $beforeFailureAfterDispatchRan = true;
+    },
+))->run($beforeFailurePlan);
+$expect(
+    $beforeFailureRun['status'] === 'failed'
+        && $beforeFailureRun['root']['failure']['kind'] === FailureKind::StateAdapterFailure->value
+        && $beforeFailureRun['tests'][0]['status'] === 'blocked',
+    'A beforeDispatch failure did not become a structured blocked scope.',
+);
+$expect(
+    $beforeFailureAfterDispatchRan && $beforeFailureAfterAllRan,
+    'A beforeDispatch failure skipped adapter or user cleanup.',
 );
 
 $invalidPlan = $plan;

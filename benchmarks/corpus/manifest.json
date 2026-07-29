@@ -1,0 +1,156 @@
+{
+    "schema_version": 1,
+    "drove_revision": "the Git commit containing this manifest",
+    "environment": {
+        "os": "Linux",
+        "php": "8.4",
+        "laravel": "13.23.0",
+        "drove": "0.1.x-dev",
+        "drove_laravel": "1.0.x-dev",
+        "phpunit": "13.2.4",
+        "database": "file-backed SQLite in DELETE journal mode"
+    },
+    "classifications": {
+        "SUPPORTED": "The selected cases must complete with the same pass/fail semantics.",
+        "EXPLICITLY_UNSUPPORTED": "Drove must reject before any selected test body executes or persistent application state is mutated.",
+        "UNEXPECTED_DIVERGENCE": "The selection exposed a Drove bug and is not an accepted result."
+    },
+    "corpora": [
+        {
+            "id": "invoiceshelf",
+            "repository": "https://github.com/InvoiceShelf/InvoiceShelf.git",
+            "commit": "403a4d67225a153838ec126c484339abf60229d1",
+            "classification": "SUPPORTED",
+            "selection": [
+                "tests/Unit/DocumentTotalsTest.php",
+                "tests/Unit/AddressTest.php",
+                "tests/Unit/CustomerTest.php"
+            ],
+            "dependency_uplift": {
+                "pest_frontend": "oxhq/drove 0.1.x-dev",
+                "pest_plugin_laravel": "5.0.0",
+                "pest_plugin_faker": "5.0.0",
+                "phpunit": "13.2.4",
+                "laravel": "13.23.0"
+            },
+            "baseline": {
+                "runner": "conventional Pest command on the same uplifted dependency graph",
+                "passed": 18,
+                "failed": 0,
+                "assertions": 32
+            },
+            "drove": {
+                "passed": 18,
+                "failed": 0,
+                "matrix": [
+                    {"processes": 1, "wall_ms": 129345},
+                    {"processes": 2, "wall_ms": 65869},
+                    {"processes": 4, "wall_ms": 72621},
+                    {"processes": 8, "wall_ms": 21735}
+                ],
+                "matrix_note": "Single runs on a shared Docker host; the four-process sample is noisy.",
+                "workspace_artifacts_after_each_run": 0
+            }
+        },
+        {
+            "id": "larastreamers",
+            "repository": "https://github.com/christophrumpel/larastreamers.git",
+            "commit": "9ebb96c6ed8ec9aa7f0f528351a746f4a924e0e6",
+            "classification": "SUPPORTED",
+            "selection": [
+                "tests/Feature/Models/StreamTest.php",
+                "tests/Feature/Actions/SortStreamsByDateActionTest.php",
+                "tests/Feature/Commands/CheckIfUpcomingStreamsAreLiveCommandTest.php",
+                "tests/Feature/Commands/CheckIfLiveStreamsHaveEndedCommandTest.php",
+                "tests/Feature/Commands/ImportChannelStreamsCommandTest.php",
+                "tests/Feature/PageHomeTest.php"
+            ],
+            "dependency_uplift": {
+                "php_platform": "8.4.1",
+                "pest_frontend": "oxhq/drove 0.1.x-dev",
+                "pest_plugin_laravel": "5.0.0",
+                "phpunit": "13.2.4",
+                "laravel": "13.23.0"
+            },
+            "baseline": {
+                "runner": "conventional Pest command on the same uplifted dependency graph",
+                "passed": 24,
+                "failed": 0,
+                "assertions": 52
+            },
+            "drove": {
+                "passed": 24,
+                "failed": 0,
+                "matrix": [
+                    {"processes": 1, "wall_ms": 120600},
+                    {"processes": 2, "wall_ms": 64969},
+                    {"processes": 4, "wall_ms": 34362},
+                    {"processes": 8, "wall_ms": 27338}
+                ],
+                "workspace_artifacts_after_each_run": 0
+            }
+        },
+        {
+            "id": "phpreleases",
+            "repository": "https://github.com/tighten/phpreleases.git",
+            "commit": "9100e19372b3011cf348802942aa08a3022b3d57",
+            "classification": "SUPPORTED",
+            "selection": [
+                "tests/Feature/ReleaseControllerTest.php"
+            ],
+            "dependency_uplift": {
+                "pest_frontend": "oxhq/drove 0.1.x-dev",
+                "pest_plugin_laravel": "5.0.0",
+                "phpunit": "13.2.4",
+                "laravel": "13.23.0"
+            },
+            "baseline": {
+                "runner": "conventional Pest command on the same uplifted dependency graph",
+                "passed": 14,
+                "failed": 0,
+                "assertions": 94
+            },
+            "drove": {
+                "processes": 2,
+                "passed": 14,
+                "failed": 0,
+                "database_bytes_before": 0,
+                "database_bytes_after": 0,
+                "workspace_artifacts_after": 0
+            }
+        },
+        {
+            "id": "filament",
+            "repository": "https://github.com/filamentphp/filament.git",
+            "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
+            "classification": "EXPLICITLY_UNSUPPORTED",
+            "selection": [
+                "tests/src/Support/EvaluatesClosuresTest.php"
+            ],
+            "baseline": {
+                "runner": "conventional Pest command on the same uplifted dependency graph",
+                "passed": 8,
+                "failed": 0,
+                "assertions": 8
+            },
+            "drove": {
+                "processes": 2,
+                "rejected": 8,
+                "expected_diagnostic": "Drove Laravel does not support Orchestra Testbench TestCase instances yet.",
+                "database_bytes_before": 0,
+                "database_bytes_after": 0,
+                "workspace_artifacts_after": 0
+            }
+        }
+    ],
+    "deferred": [
+        {
+            "id": "livewire",
+            "reason": "The pinned suite is ordinary PHPUnit/Testbench rather than Pest."
+        },
+        {
+            "id": "nucleus",
+            "reason": "The current internal suite uses Pest 4 and transactions across central, central-testing, and logs; this alpha supports one selected connection."
+        }
+    ]
+}

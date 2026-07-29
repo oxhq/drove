@@ -1,6 +1,6 @@
 # Migrating from Pest to the Drove compatibility alpha
 
-Drove Phase 2 is a source-only Linux alpha. It keeps a deliberately small Pest
+Drove is a source-only Linux alpha. It keeps a deliberately small Pest
 surface while Drove owns scope planning, scope lifecycle, native scheduling,
 result aggregation, and rendering.
 
@@ -24,8 +24,9 @@ php bin/drove --testsuite=Feature
 
 When this checkout is installed into a disposable project through a Composer
 path repository, invoke `vendor/bin/drove` and point `DROVER_LIBRARY` at the
-library built from this checkout. The package is still named `pestphp/pest`;
-there is no published Drove package.
+library built from this checkout. The package is named `oxhq/drove` and
+declares that it replaces Pest 5.0.1 for plugin compatibility. Neither Drove
+package is published yet.
 
 Keep `vendor/bin/pest` in CI while evaluating the alpha. Run both commands
 against the same selected suite and treat a semantic difference as a
@@ -39,12 +40,12 @@ compatibility bug.
 | `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns scope hooks; generated Pest cases preserve per-test hook order. |
 | Named and positional datasets | Compatible | Every selected row receives a stable case ID. |
 | Custom `TestCase`, `uses()`, `setUp()`, `tearDown()` | Compatible | Instance lifecycle runs in the test child. |
+| Custom static class lifecycle | Compatible | File-scope setup and teardown wrap Pest `beforeAll` and `afterAll`. |
 | Skips and todos | Compatible | Status and reason are preserved. |
 | `--filter`, `--group`, `--exclude-group`, `--testsuite` | Compatible | PHPUnit selects generated cases before Drove schedules them. |
 | `--parallel`, `--processes` | Native | Drover enforces the global limit; C1 and C8 output must match. |
 | Ordinary PHPUnit test classes | Unsupported | Rejected with exit 2 instead of being skipped. |
 | Test dependencies | Unsupported | Rejected with exit 2; result transport is not implemented. |
-| Custom static class lifecycle | Unsupported | `setUpBeforeClass()` and `tearDownAfterClass()` are rejected. |
 | Process isolation | Unsupported | CLI, XML, and supported PHPUnit metadata forms are rejected. |
 | PHPUnit-enforced time limits | Unsupported | XML enforcement is rejected; Drove adds no implicit compatibility timeout. |
 | Coverage, profiling, alternate printers, mutation, browser, and watch modes | Unsupported | Recognized CLI modes exit 2; plugin discovery is not exhaustive. |
@@ -66,8 +67,8 @@ exhaustive, so the dual-run comparison remains required.
 - Drove preserves a body failure as primary and reports teardown failures
   separately.
 - Result order follows the test plan, not process completion order.
-- Custom instance `setUp()` and `tearDown()` are supported; custom static class
-  lifecycle is rejected.
+- Custom instance and static class lifecycle are supported. Static setup runs
+  before file `beforeAll`; static teardown runs after file `afterAll`.
 - The compatibility CLI exposes only a global `--processes` limit. Scope limits
   remain an internal kernel policy in this alpha.
 

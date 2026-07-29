@@ -1,0 +1,26 @@
+{
+    "name": "oxhq/drove-laravel",
+    "description": "Narrow Laravel runtime integration for Drove.",
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": "^8.4",
+        "laravel/framework": "^13.0",
+        "oxhq/drove": "^0.1@dev"
+    },
+    "autoload": {
+        "psr-4": {
+            "Drove\\Laravel\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Drove\\Laravel\\DroveLaravelServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

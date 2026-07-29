@@ -1,0 +1,68 @@
+{
+    "name": "drove/phase-3-laravel-proof",
+    "description": "Installed Laravel 13 proof for the Drove Laravel runtime package.",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "/drove",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "oxhq/drove": "0.1.x-dev"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "/drove/packages/drove-laravel",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "oxhq/drove-laravel": "1.0.x-dev"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-pcntl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-pdo_sqlite": "*",
+        "laravel/framework": "^13.0",
+        "oxhq/drove": "^0.1@dev",
+        "oxhq/drove-laravel": "^1.0@dev"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "proof": "php proof.php",
+        "proof:guards": "php proof-runtime-guards.php",
+        "proof:mysql": "php proof-mysql.php"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

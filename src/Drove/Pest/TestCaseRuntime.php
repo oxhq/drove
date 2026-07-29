@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drove\Pest;
 
 use Closure;
+use Drove\Kernel\ScopeContext;
 use Drove\Kernel\TestOutcome;
 use InvalidArgumentException;
 use LogicException;
@@ -34,15 +35,26 @@ final class TestCaseRuntime
     /** @var array<string, Throwable> */
     private array $throwables = [];
 
-    private function __construct()
-    {
+    /**
+     * @param  (Closure(TestCase, ScopeContext): void)|null  $prepareCase
+     */
+    private function __construct(
+        private readonly ?Closure $prepareCase,
+    ) {
         //
     }
 
-    public static function fromSuite(ScopeCompiler $compiler, TestSuite $suite): self
-    {
-        $runtime = new self;
+    /**
+     * @param  (Closure(TestCase, ScopeContext): void)|null  $prepareCase
+     */
+    public static function fromSuite(
+        ScopeCompiler $compiler,
+        TestSuite $suite,
+        ?Closure $prepareCase = null,
+    ): self {
+        $runtime = new self($prepareCase);
         $casesByFile = array_fill_keys($compiler->files(), []);
+        $classLifecycles = [];
 
         foreach ($suite->collect() as $case) {
             if (! $case instanceof TestCase) {
@@ -67,6 +79,13 @@ final class TestCaseRuntime
 
             self::assertSupported($case, $reflection);
 
+            if (isset($classLifecycles[$filename])
+                && $classLifecycles[$filename]['class'] !== $case::class) {
+                throw new RuntimeException('Drove received multiple generated Pest classes for one file.');
+            }
+
+            $classLifecycles[$filename] ??= self::classLifecycle($reflection);
+
             $descriptor = $compiler->caseDescriptor(
                 $filename,
                 $case->name(),
@@ -87,6 +106,14 @@ final class TestCaseRuntime
 
         $compiler->bindCases($casesByFile);
 
+        foreach ($classLifecycles as $filename => $lifecycle) {
+            $compiler->bindClassLifecycle(
+                $filename,
+                $lifecycle['before_class'],
+                $lifecycle['after_class'],
+            );
+        }
+
         return $runtime;
     }
 
@@ -101,7 +128,7 @@ final class TestCaseRuntime
     /**
      * @return array<string, mixed>
      */
-    public function run(string $id): array
+    public function run(string $id, ?ScopeContext $context = null): array
     {
         $case = $this->cases[$id] ?? throw new OutOfBoundsException(sprintf(
             'No generated Pest case was captured for %s.',
@@ -116,6 +143,14 @@ final class TestCaseRuntime
         Assert::resetCount();
 
         try {
+            if ($this->prepareCase instanceof Closure) {
+                if (! $context instanceof ScopeContext) {
+                    throw new LogicException('Drove case preparation requires a scope context.');
+                }
+
+                ($this->prepareCase)($case, $context);
+            }
+
             $case->runBare();
         } catch (Throwable $throwable) {
             if ($case->status()->isUnknown()) {
@@ -155,8 +190,8 @@ final class TestCaseRuntime
     {
         $runtime = $this;
 
-        return static function () use ($id, $runtime): TestOutcome {
-            $result = $runtime->run($id);
+        return static function (ScopeContext $context) use ($id, $runtime): TestOutcome {
+            $result = $runtime->run($id, $context);
 
             echo $result['output'];
 
@@ -243,16 +278,43 @@ final class TestCaseRuntime
             $class = $class->getParentClass();
         }
 
+        if (! $reflection->getParentClass() instanceof ReflectionClass) {
+            throw new RuntimeException('Drove received an invalid generated Pest TestCase.');
+        }
+    }
+
+    /**
+     * @param  ReflectionClass<TestCase>  $reflection
+     * @return array{
+     *     class: class-string<TestCase>,
+     *     before_class: (Closure(): void)|null,
+     *     after_class: (Closure(): void)|null
+     * }
+     */
+    private static function classLifecycle(ReflectionClass $reflection): array
+    {
+        $class = $reflection->getName();
         $baseClass = $reflection->getParentClass();
 
         if (! $baseClass instanceof ReflectionClass) {
             throw new RuntimeException('Drove received an invalid generated Pest TestCase.');
         }
 
-        foreach (['setUpBeforeClass', 'tearDownAfterClass'] as $method) {
-            if ($baseClass->getMethod($method)->getDeclaringClass()->getName() !== TestCase::class) {
-                throw new InvalidArgumentException('Drove does not support custom static TestCase lifecycle methods yet.');
-            }
-        }
+        $beforeClass = $baseClass->getMethod('setUpBeforeClass')->getDeclaringClass()->getName() === TestCase::class
+            ? null
+            : static function () use ($class): void {
+                $class::setUpBeforeClass();
+            };
+        $afterClass = $baseClass->getMethod('tearDownAfterClass')->getDeclaringClass()->getName() === TestCase::class
+            ? null
+            : static function () use ($class): void {
+                $class::tearDownAfterClass();
+            };
+
+        return [
+            'class' => $class,
+            'before_class' => $beforeClass,
+            'after_class' => $afterClass,
+        ];
     }
 }
