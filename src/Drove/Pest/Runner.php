@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Drove\Pest;
 
 use Drove\Console\Renderer;
+use Drove\Kernel\DroverScheduler;
 use Drove\Kernel\LifecycleExecutor;
-use Drove\Kernel\PcntlScheduler;
 use InvalidArgumentException;
 use ParaTest\Options;
 use Pest\Kernel as PestKernel;
@@ -148,7 +148,7 @@ final class Runner
             $resolvers = $runtime->resolvers();
 
             $executor = new LifecycleExecutor(
-                new PcntlScheduler(
+                new DroverScheduler(
                     'drove-'.bin2hex(random_bytes(8)),
                     $concurrency,
                 ),

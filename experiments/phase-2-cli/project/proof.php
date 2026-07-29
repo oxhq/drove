@@ -41,7 +41,8 @@ $cases = [
     'exclude_group' => $run('tests/FastTest.php', '--exclude-group=slow'),
     'testsuite' => $run('--testsuite=Other'),
     'parallel' => $run('--parallel', '--processes=2', 'tests/FastTest.php'),
-    'compatibility' => $run('--parallel', '--processes=2', 'tests/CompatibilityTest.php'),
+    'compatibility_c1' => $run('--parallel', '--processes=1', 'tests/CompatibilityTest.php'),
+    'compatibility_c8' => $run('--parallel', '--processes=8', 'tests/CompatibilityTest.php'),
     'slow' => $run('tests/SlowTest.php'),
     'failure' => $run('tests/FailingTest.php'),
     'coverage' => $run('--coverage'),
@@ -58,7 +59,17 @@ $markers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 @unlink($markerPath);
 putenv('DROVE_COMPATIBILITY_MARKER');
 
-foreach (['path', 'filter', 'group', 'exclude_group', 'testsuite', 'parallel', 'compatibility', 'slow'] as $name) {
+foreach ([
+    'path',
+    'filter',
+    'group',
+    'exclude_group',
+    'testsuite',
+    'parallel',
+    'compatibility_c1',
+    'compatibility_c8',
+    'slow',
+] as $name) {
     $expect($cases[$name]['exit'] === 0, $name.' did not exit successfully: '.$cases[$name]['stderr']);
 }
 
@@ -94,23 +105,35 @@ $expect(
     $alpha !== false && $beta !== false && $alpha < $beta,
     'Parallel rendering drifted from discovery order.',
 );
+$compatibilityOutput = $cases['compatibility_c1']['stdout'];
+$semanticOutput = static fn (string $output): string => preg_replace(
+    '/\ADrove [^\r\n]+\R/',
+    '',
+    $output,
+) ?? throw new RuntimeException('Unable to normalize Drove output.');
+
 $expect(
-    str_contains($cases['compatibility']['stdout'], 'runs a named dataset')
-        && str_contains($cases['compatibility']['stdout'], 'named:10')
-        && str_contains($cases['compatibility']['stdout'], 'runs a positional dataset')
-        && str_contains($cases['compatibility']['stdout'], 'positional:20')
-        && str_contains($cases['compatibility']['stdout'], 'preserves an installed skip')
-        && str_contains($cases['compatibility']['stdout'], 'installed skip')
-        && str_contains($cases['compatibility']['stdout'], 'preserves an installed todo'),
+    str_contains($compatibilityOutput, 'runs a named dataset')
+        && str_contains($compatibilityOutput, 'named:10')
+        && str_contains($compatibilityOutput, 'runs a positional dataset')
+        && str_contains($compatibilityOutput, 'positional:20')
+        && str_contains($compatibilityOutput, 'preserves an installed skip')
+        && str_contains($compatibilityOutput, 'installed skip')
+        && str_contains($compatibilityOutput, 'preserves an installed todo'),
     'The installed compatibility surface did not render the expected cases.',
 );
+$expect(
+    $semanticOutput($cases['compatibility_c1']['stdout'])
+        === $semanticOutput($cases['compatibility_c8']['stdout']),
+    'The installed Drover run changed semantics between concurrency one and eight.',
+);
 $expectedMarkers = [
-    'before_all' => 1,
-    'before_each' => 4,
-    'set_up' => 4,
-    'tear_down' => 4,
-    'after_each' => 4,
-    'after_all' => 1,
+    'before_all' => 2,
+    'before_each' => 8,
+    'set_up' => 8,
+    'tear_down' => 8,
+    'after_each' => 8,
+    'after_all' => 2,
 ];
 
 $expect(is_array($markers), 'The installed compatibility marker is unreadable.');
@@ -184,6 +207,8 @@ $expect(
 
 fwrite(STDOUT, json_encode([
     'status' => 'passed',
+    'backend' => 'drover',
+    'concurrency' => [1, 8],
     'selections' => ['path', 'filter', 'group', 'exclude-group', 'testsuite'],
     'exit_codes' => [
         'passed' => $cases['path']['exit'],
