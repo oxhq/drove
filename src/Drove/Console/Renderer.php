@@ -31,6 +31,12 @@ final class Renderer
             $lines[] = sprintf(' %s %s', $this->marker($status), $name);
             $message = $test['failure']['message'] ?? $test['message'] ?? null;
 
+            if (! is_string($message)
+                && in_array($status, ['skipped', 'todo'], true)
+                && is_string($test['value'] ?? null)) {
+                $message = $test['value'];
+            }
+
             if (is_string($message) && $message !== '') {
                 $lines[] = '   '.$message;
             }
