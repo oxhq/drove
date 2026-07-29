@@ -8,6 +8,10 @@ use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
+use PHPUnit\Framework\TestCase;
 use Throwable;
 
 final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
@@ -36,6 +40,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
     public function __construct(
         ?string $connection = null,
         private readonly ?string $configuredWorkspace = null,
+        private readonly bool $preparedSchema = false,
     ) {
         parent::__construct($connection);
     }
@@ -72,13 +77,44 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         $this->workspace = str_replace('\\', '/', $workspace);
         $this->currentDatabase = $database;
         $this->copyPrefix = 'drove-'.bin2hex(random_bytes(12)).'-';
-        $this->rootPid = getmypid();
+        $this->rootPid = $this->pid('adapter boot');
         $this->disconnect();
     }
 
     public function name(): string
     {
         return 'sqlite-copy';
+    }
+
+    public function assertTestCaseSupported(TestCase $testCase): void
+    {
+        parent::assertTestCaseSupported($testCase);
+
+        if (! in_array(
+            RefreshDatabase::class,
+            class_uses_recursive($testCase),
+            true,
+        )) {
+            return;
+        }
+
+        if ($this->preparedSchema) {
+            RefreshDatabaseState::$migrated = true;
+        }
+    }
+
+    public function preflightTestCase(TestCase $testCase): void
+    {
+        if (in_array(
+            DatabaseTruncation::class,
+            class_uses_recursive($testCase),
+            true,
+        )) {
+            throw new StateAdapterException(sprintf(
+                'Drove Laravel sqlite-copy mode does not support TestCase trait %s.',
+                DatabaseTruncation::class,
+            ));
+        }
     }
 
     /**
@@ -91,6 +127,8 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
             'SQLite must use DELETE journal mode with no WAL, SHM, journal, or attached database files.',
             'Each descendant receives a verified PHP file copy; no reflink optimization is claimed.',
             'In-memory SQLite, URI databases, attached databases, and multiple connections are rejected.',
+            'RefreshDatabase migrates each private copy unless prepared_schema=true declares the parent file already migrated.',
+            'DatabaseTruncation is rejected before execution.',
             'Queue, cache, Redis, HTTP, and other external resources are not managed.',
         ];
     }
@@ -102,7 +140,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
     {
         $this->assertScopeApplication($scope);
         $this->assertTasks($tasks);
-        $pid = getmypid();
+        $pid = $this->pid('beforeDispatch');
 
         if ($this->dispatchPid === $pid || $this->pendingCopies !== []) {
             throw new StateAdapterException('An SQLite copy dispatch is already active.');
@@ -139,7 +177,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
     {
         $this->assertScopeApplication($scope);
         $this->assertTask($task);
-        $pid = getmypid();
+        $pid = $this->pid('enterDescendant');
 
         if ($this->descendantPid === $pid) {
             throw new StateAdapterException('An SQLite copy descendant is already active.');
@@ -455,5 +493,19 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
                 ));
             }
         }
+    }
+
+    private function pid(string $phase): int
+    {
+        $pid = getmypid();
+
+        if (! is_int($pid)) {
+            throw new StateAdapterException(sprintf(
+                'Drove could not resolve the SQLite copy process during %s.',
+                $phase,
+            ));
+        }
+
+        return $pid;
     }
 }

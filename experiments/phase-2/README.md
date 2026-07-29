@@ -31,8 +31,13 @@ docker build -f experiments/phase-2-cli/Dockerfile -t drove-phase-two-cli .
 docker run --rm drove-phase-two-cli
 ```
 
-It also requires explicit exit-2 diagnostics for ordinary PHPUnit cases,
-dependencies, process isolation, and XML time
-limits. This remains a source-built Linux alpha. See
+It also proves one ordinary PHPUnit `TestCase` class per file, native datasets
+and groups, class lifecycle, and mixed Pest/PHPUnit discovery. Dependencies,
+multiple native classes in one file, process isolation, XML time limits, and
+`failOnIncomplete` remain explicit exit-2 boundaries. XML `failOnRisky` is
+preserved; the CLI `--fail-on-risky` flag remains rejected. Drove deliberately
+uses exit 1 for any test failure or error and exit 2 for invalid or unsupported
+input, so it does not preserve PHPUnit's separate error exit code. This remains a
+source-built Linux alpha. See
 [`docs/migration-from-pest.md`](../../docs/migration-from-pest.md) for the
 supported and rejected Pest surfaces.

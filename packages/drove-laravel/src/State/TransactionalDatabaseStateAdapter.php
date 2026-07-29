@@ -8,6 +8,7 @@ use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,6 +22,7 @@ final class TransactionalDatabaseStateAdapter extends AbstractDatabaseStateAdapt
         LazilyRefreshDatabase::class,
         RefreshDatabase::class,
         DatabaseMigrations::class,
+        DatabaseTransactions::class,
         DatabaseTruncation::class,
     ];
 
@@ -39,9 +41,8 @@ final class TransactionalDatabaseStateAdapter extends AbstractDatabaseStateAdapt
         return 'transaction';
     }
 
-    public function assertTestCaseSupported(TestCase $testCase): void
+    public function preflightTestCase(TestCase $testCase): void
     {
-        parent::assertTestCaseSupported($testCase);
         $traits = class_uses_recursive($testCase);
 
         foreach (self::UNSUPPORTED_DATABASE_TRAITS as $trait) {
@@ -63,7 +64,7 @@ final class TransactionalDatabaseStateAdapter extends AbstractDatabaseStateAdapt
             'Exactly one resolved MySQL connection in a disposable test database with InnoDB tables is supported.',
             'Only test descendants are isolated by rollback; scope hooks are not transaction-isolated.',
             'A dispatch containing a scope must contain only that one scope.',
-            'Laravel migration and truncation test traits are rejected; DatabaseTransactions may use the selected connection.',
+            'Laravel-managed migration, transaction, and truncation test traits are rejected.',
             'DDL, explicit commits, implicit commits, reconnects, raw PDO transactions, and writes outside the selected connection are unsupported.',
             'Queue, cache, Redis, HTTP, and other external resources are not managed.',
         ];

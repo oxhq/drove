@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../compatibility-bootstrap.php" stopOnFailure="true">
+    <testsuites>
+        <testsuite name="Stop">
+            <file>../tests/FailingTest.php</file>
+            <file>../tests/FastTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

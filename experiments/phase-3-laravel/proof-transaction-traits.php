@@ -43,6 +43,15 @@ $cases = [
             //
         }
     },
+    DatabaseTransactions::class => new class('placeholder') extends TestCase
+    {
+        use DatabaseTransactions;
+
+        public function placeholder(): void
+        {
+            //
+        }
+    },
     DatabaseTruncation::class => new class('placeholder') extends TestCase
     {
         use DatabaseTruncation;
@@ -63,23 +72,6 @@ foreach ($cases as $trait => $case) {
     }
 }
 
-$allowed = new class('placeholder') extends TestCase
-{
-    use DatabaseTransactions;
-
-    public function placeholder(): void
-    {
-        //
-    }
-};
-$allowedFailure = null;
-
-try {
-    $runtime->bindTestCase($allowed, $scope);
-} catch (Throwable $throwable) {
-    $allowedFailure = $throwable::class.': '.$throwable->getMessage();
-}
-
 $connection = $runtime->application()->make('db')->connection('mysql');
 $connection->statement('DROP TABLE IF EXISTS drove_non_transactional_guard');
 $connection->statement(
@@ -98,8 +90,7 @@ try {
     $connection->statement('DROP TABLE IF EXISTS drove_non_transactional_guard');
 }
 
-$passed = $allowedFailure === null
-    && count($rejections) === count($cases)
+$passed = count($rejections) === count($cases)
     && $engineFailure
         === 'Drove Laravel transaction mode requires InnoDB tables; received drove_non_transactional_guard (MyISAM).';
 
@@ -112,7 +103,6 @@ foreach (array_keys($cases) as $trait) {
 fwrite(STDOUT, json_encode([
     'status' => $passed ? 'passed' : 'failed',
     'rejections' => $rejections,
-    'database_transactions_failure' => $allowedFailure,
     'non_transactional_engine_failure' => $engineFailure,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);
 

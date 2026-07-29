@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit failOnPhpunitWarning="false">
+    <testsuites>
+        <testsuite name="Warning">
+            <file>NativePhpunitWarningTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

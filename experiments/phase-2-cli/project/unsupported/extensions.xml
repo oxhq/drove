@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit>
+    <extensions>
+        <bootstrap class="stdClass"/>
+    </extensions>
+    <testsuites>
+        <testsuite name="Extensions">
+            <file>../tests/FastTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

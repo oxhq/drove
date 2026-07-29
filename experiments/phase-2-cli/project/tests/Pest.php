@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use PHPUnit\Framework\Attributes\BeforeClass;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
 
@@ -100,6 +101,23 @@ abstract class DroveFailingStaticTeardownTestCase extends TestCase
     }
 }
 
+abstract class DroveSkippedStaticTestCase extends TestCase
+{
+    public static function setUpBeforeClass(): void
+    {
+        self::markTestSkipped('generated Pest class skip proof');
+    }
+}
+
+abstract class DroveUnsupportedAttributeStaticTestCase extends TestCase
+{
+    #[BeforeClass]
+    public static function customBeforeClassAttribute(): void
+    {
+        //
+    }
+}
+
 abstract class DrovePreparedCaseTestCase extends TestCase
 {
     public ?string $preparedTestId = null;
@@ -126,20 +144,12 @@ abstract class DroveUnsupportedProcessIsolationTestCase extends TestCase
     //
 }
 
-function droveCompatibilityMarker(string $event): void
-{
-    $path = getenv('DROVE_COMPATIBILITY_MARKER');
-
-    if (! is_string($path) || $path === ''
-        || file_put_contents($path, $event.PHP_EOL, FILE_APPEND | LOCK_EX) === false) {
-        throw new RuntimeException('Unable to write the Drove compatibility marker.');
-    }
-}
-
 uses(DroveCompatibilityTestCase::class)->in('CompatibilityTest.php');
 uses(DroveStaticLifecycleTestCase::class)->in('../unsupported/StaticLifecycleTest.php');
 uses(DroveFailingStaticSetupTestCase::class)->in('../unsupported/StaticSetupFailureTest.php');
 uses(DroveFailingStaticTeardownTestCase::class)->in('../unsupported/StaticTeardownFailureTest.php');
+uses(DroveSkippedStaticTestCase::class)->in('../unsupported/StaticSkippedTest.php');
+uses(DroveUnsupportedAttributeStaticTestCase::class)->in('../unsupported/StaticAttributeHookTest.php');
 uses(DrovePreparedCaseTestCase::class)->in('../unsupported/PrepareCaseTest.php');
 uses(DroveUnsupportedProcessIsolationTestCase::class)->in('../unsupported/ProcessIsolationTest.php');
 

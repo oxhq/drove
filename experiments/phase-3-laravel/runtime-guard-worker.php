@@ -11,11 +11,12 @@ $expected = $argv[1] ?? null;
 $expectedMessage = match ($expected) {
     'process' => 'Drove Laravel requires process APP_ENV=testing before boot.',
     'application' => 'Drove Laravel requires the booted application environment to be testing.',
+    'connection' => 'Drove requires its selected database connection (secondary) to be Laravel\'s default connection (sqlite).',
     default => null,
 };
 
 if (! is_string($expectedMessage)) {
-    fwrite(STDERR, 'runtime-guard-worker requires process or application.'.PHP_EOL);
+    fwrite(STDERR, 'runtime-guard-worker requires process, application, or connection.'.PHP_EOL);
 
     exit(2);
 }

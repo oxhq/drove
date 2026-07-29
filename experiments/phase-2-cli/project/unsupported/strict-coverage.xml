@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="../compatibility-bootstrap.php" requireCoverageMetadata="true">
+    <testsuites>
+        <testsuite name="Strict">
+            <file>../tests/FastTest.php</file>
+        </testsuite>
+    </testsuites>
+</phpunit>

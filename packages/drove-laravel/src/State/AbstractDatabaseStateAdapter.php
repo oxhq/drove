@@ -57,6 +57,16 @@ abstract class AbstractDatabaseStateAdapter implements DatabaseStateAdapter
             throw new StateAdapterException('Drove requires one named Laravel database connection.');
         }
 
+        $defaultConnection = $database->getDefaultConnection();
+
+        if ($connection !== $defaultConnection) {
+            throw new StateAdapterException(sprintf(
+                'Drove requires its selected database connection (%s) to be Laravel\'s default connection (%s).',
+                $connection,
+                $defaultConnection,
+            ));
+        }
+
         $this->application = $application;
         $this->database = $database;
         $this->config = $config;
@@ -67,6 +77,8 @@ abstract class AbstractDatabaseStateAdapter implements DatabaseStateAdapter
 
     public function assertTestCaseSupported(TestCase $testCase): void
     {
+        $this->preflightTestCase($testCase);
+
         if (! method_exists($testCase, 'connectionsToTransact')) {
             return;
         }
@@ -89,9 +101,10 @@ abstract class AbstractDatabaseStateAdapter implements DatabaseStateAdapter
         }
 
         $selected = $this->connectionName();
+        $default = $this->database()->getDefaultConnection();
         $connections = array_values(array_unique(array_map(
             static fn (mixed $connection): string => $connection === null
-                ? $selected
+                ? $default
                 : (is_string($connection) ? $connection : ''),
             $connections,
         )));
@@ -103,6 +116,11 @@ abstract class AbstractDatabaseStateAdapter implements DatabaseStateAdapter
                 implode(', ', $connections),
             ));
         }
+    }
+
+    public function preflightTestCase(TestCase $testCase): void
+    {
+        //
     }
 
     abstract public function name(): string;

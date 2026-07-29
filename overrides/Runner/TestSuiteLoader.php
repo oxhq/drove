@@ -38,6 +38,7 @@ namespace PHPUnit\Runner;
 
 use Drove\Pest\ScopeCompiler;
 use Exception;
+use InvalidArgumentException;
 use Pest\Contracts\HasPrintableTestCaseName;
 use Pest\Panic;
 use Pest\TestCases\IgnorableTestCase;
@@ -121,6 +122,33 @@ final class TestSuiteLoader
         }
 
         $loadedClasses = array_merge(self::$loadedClassesByFilename[$suiteClassFile] ?? [], $loadedClasses);
+
+        if (ScopeCompiler::isActive()) {
+            $nativeTestCases = [];
+
+            foreach (array_unique($loadedClasses) as $loadedClass) {
+                if (! is_subclass_of($loadedClass, TestCase::class)
+                    || is_subclass_of($loadedClass, HasPrintableTestCaseName::class)) {
+                    continue;
+                }
+
+                $reflection = new ReflectionClass($loadedClass);
+
+                if (! $reflection->isAbstract() && $reflection->getFileName() === $suiteClassFile) {
+                    $nativeTestCases[] = $loadedClass;
+                }
+            }
+
+            if (count($nativeTestCases) > 1) {
+                sort($nativeTestCases);
+
+                throw new InvalidArgumentException(sprintf(
+                    'Drove supports one native PHPUnit TestCase class per file; %s declares %s.',
+                    $suiteClassFile,
+                    implode(', ', $nativeTestCases),
+                ));
+            }
+        }
 
         if (empty($loadedClasses)) {
             return $this->exceptionFor($suiteClassName, $suiteClassFile);

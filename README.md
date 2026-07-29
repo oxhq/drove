@@ -17,6 +17,8 @@ The proven compatibility surface includes:
 - `beforeAll`, `beforeEach`, `afterEach`, and `afterAll`;
 - named and positional datasets;
 - custom `TestCase` instance and static lifecycle plus direct `uses()` binding;
+- one native PHPUnit `TestCase` class per file, including datasets, groups,
+  class lifecycle, and mixed Pest/PHPUnit suites;
 - skips, todos, filters, groups, excluded groups, and test suites;
 - deterministic test and scope failure/output rendering;
 - identical installed-runner output at concurrency 1 and 8.
@@ -37,6 +39,9 @@ docker run --rm drove-phase-two-cli
 docker build --file experiments/phase-3-laravel/Dockerfile \
   --tag drove-phase-three-laravel .
 docker run --rm drove-phase-three-laravel
+docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
+docker run --rm drove-phase-three-laravel php proof-testbench.php
+docker run --rm drove-phase-three-laravel php proof-data-provider.php
 ```
 
 The installed-project proof runs the real `drove` executable through Drover,
@@ -49,12 +54,19 @@ installation, the compatibility matrix, and declared limitations.
 ## Laravel alpha
 
 `packages/drove-laravel` adds an Artisan subprocess command, one prepared
-Laravel application, Laravel-aware file `beforeAll`, and explicit database
-state adapters:
+Laravel or Orchestra Testbench application, Laravel-aware file `beforeAll`,
+and explicit database state adapters:
 
-- verified file copies for one file-backed SQLite database; and
+- verified file copies for one file-backed SQLite database;
+- one inherited in-memory SQLite connection with an explicit prepared-schema
+  contract; and
 - rollback isolation for one MySQL connection and InnoDB tables in a disposable
   test database.
+
+`DROVE_LARAVEL_RUNTIME=auto` selects a normal application when
+`bootstrap/app.php` exists and otherwise defers to Testbench discovery.
+`application` and `testbench` force either mode. A Testbench project that also
+ships `bootstrap/app.php` must select `testbench` explicitly.
 
 The installed proof requires a real `testing` environment, one bootstrap PID,
 isolated sibling writes, paired cleanup after failures, and no remaining
@@ -62,19 +74,29 @@ SQLite artifacts. MySQL migration/truncation traits are rejected before test
 execution because they can commit schema changes outside the adapter
 transaction.
 
-The pinned public source revisions currently pass 56 selected cases across
-InvoiceShelf, Larastreamers, and PHPReleases. Filament is a safety gate:
-Orchestra Testbench cases are rejected before its database is mutated. See
+The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
+Pest, InvoiceShelf, and the selected Livewire Testbench cohort are proven;
+Filament's full Support selection is the final pending gate. Nucleus is
+deliberately excluded because its Docker/MySQL suite is not part of this
+portable corpus. See
 [`benchmarks/corpus`](benchmarks/corpus/README.md) for revisions, selections,
 dependency overlays, and observed results.
 
 ## Current boundary
 
 This branch is not a released package or a broad Pest/PHPUnit replacement. It
-is Linux only and uses FFI as the native bridge. Ordinary PHPUnit classes, test
-dependencies, process isolation, Orchestra Testbench, coverage, profiling,
-multiple database connections, Redis/queue isolation, and the wider plugin
-ecosystem are outside the declared alpha surface.
+is Linux only and uses FFI as the native bridge. Multiple native PHPUnit
+classes in one file, test dependencies, process isolation, PHPUnit
+`failOnIncomplete`, other unsupported `failOn*` policies, `stopOn*`, strict
+global-state/coverage/output modes, conflicting coverage metadata, PHPUnit
+extensions, non-default execution order, profiling, multiple Testbench application
+profiles, Testbench attributes, multiple database connections, Redis/queue
+isolation, and the wider plugin ecosystem are outside the declared alpha
+surface.
+
+Drove uses exit 1 for any test failure or runtime error and exit 2 for invalid
+or explicitly unsupported input. It does not preserve PHPUnit's separate
+runtime-error exit code.
 
 Neither Drove package has been published to Packagist. Installation is
 source/path based until the native bridge is distributed and a tagged

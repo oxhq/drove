@@ -157,6 +157,7 @@ final readonly class LifecycleExecutor
         $events = [$this->event('scope.started', $scopeId, status: 'running')];
         $scopeFailures = [];
         $initialized = true;
+        $skipReason = null;
 
         $this->scheduler->withPermit($scopeIds, function () use (
             $hooks,
@@ -165,6 +166,7 @@ final readonly class LifecycleExecutor
             &$events,
             &$scopeFailures,
             &$initialized,
+            &$skipReason,
         ): void {
             foreach ($hooks['before_all'] as $hookId) {
                 $events[] = $this->event('hook.started', $scopeId, hookId: $hookId, phase: 'before_all');
@@ -178,6 +180,18 @@ final readonly class LifecycleExecutor
                         phase: 'before_all',
                         status: 'passed',
                     );
+                } catch (SkipScope $skipped) {
+                    $skipReason = $skipped->getMessage();
+                    $initialized = false;
+                    $events[] = $this->event(
+                        'hook.finished',
+                        $scopeId,
+                        hookId: $hookId,
+                        phase: 'before_all',
+                        status: 'skipped',
+                    );
+
+                    break;
                 } catch (Throwable $throwable) {
                     $failure = $this->failure($throwable, 'before_all', $hookId);
                     $scopeFailures[] = $failure;
@@ -205,6 +219,30 @@ final readonly class LifecycleExecutor
             'initialized' => $initialized,
             'concurrency' => $node['concurrency'] ?? null,
         ];
+
+        if ($skipReason !== null) {
+            $skipped = $this->skippedDescendants($node, $skipReason);
+            $deferred = $this->runDeferred($context, $scopeIds, $scopeId);
+            array_push($events, ...$skipped['events'], ...$deferred['events']);
+            array_push($scopeFailures, ...$deferred['failures']);
+            $scope['status'] = $scopeFailures === [] ? 'passed' : 'failed';
+            $scope['failure'] = $scopeFailures[0] ?? null;
+            $scope['failures'] = $scopeFailures;
+            $events[] = $this->event(
+                'scope.finished',
+                $scopeId,
+                status: $scope['status'],
+                failure: $scope['failure'],
+            );
+
+            return [
+                'scope' => $scope,
+                'scopes' => [$scope, ...$skipped['scopes']],
+                'tests' => $skipped['tests'],
+                'events' => $events,
+                'completion_order' => [],
+            ];
+        }
 
         if (! $initialized) {
             $blocked = $this->blockedDescendants($node, $scopeFailures[0]);
@@ -769,6 +807,66 @@ final readonly class LifecycleExecutor
                 failure: $childFailure,
             );
             array_push($events, ...$blocked['events']);
+        }
+
+        return ['scopes' => $scopes, 'tests' => $tests, 'events' => $events];
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @return array{scopes: list<array<string, mixed>>, tests: list<array<string, mixed>>, events: list<array<string, mixed>>}
+     */
+    private function skippedDescendants(array $node, string $reason): array
+    {
+        $scopeId = $this->string($node, 'id');
+        $scopes = [];
+        $tests = [];
+        $events = [];
+
+        foreach ($node['tests'] ?? [] as $test) {
+            $id = $this->string($test, 'id');
+            $tests[] = [
+                'id' => $id,
+                'scope_id' => $scopeId,
+                'scopes' => [$scopeId],
+                ...$this->testMetadata($test),
+                'status' => 'skipped',
+                'failure' => null,
+                'teardown_failures' => [],
+                'value' => $reason,
+                'stdout' => '',
+                'stderr' => '',
+                'events' => [],
+                'telemetry' => null,
+            ];
+            $events[] = $this->event(
+                'test.finished',
+                $scopeId,
+                $id,
+                status: 'skipped',
+            );
+        }
+
+        foreach ($node['children'] ?? [] as $child) {
+            $childId = $this->string($child, 'id');
+            $skipped = $this->skippedDescendants($child, $reason);
+            $scopes[] = [
+                'id' => $childId,
+                'type' => $this->string($child, 'type'),
+                'status' => 'passed',
+                'failure' => null,
+                'failures' => [],
+                'initialized' => false,
+                'concurrency' => $child['concurrency'] ?? null,
+            ];
+            array_push($scopes, ...$skipped['scopes']);
+            array_push($tests, ...$skipped['tests']);
+            $events[] = $this->event(
+                'scope.finished',
+                $childId,
+                status: 'passed',
+            );
+            array_push($events, ...$skipped['events']);
         }
 
         return ['scopes' => $scopes, 'tests' => $tests, 'events' => $events];

@@ -64,6 +64,12 @@ final class ScopeCompiler
     /** @var array<string, true> */
     private array $boundClassLifecycles = [];
 
+    /** @var array<string, true> */
+    private array $nativeFiles = [];
+
+    /** @var list<string>|null */
+    private ?array $boundFileOrder = null;
+
     private function __construct(
         private readonly string $rootPath,
         private readonly bool $ownsScopeHooks,
@@ -85,6 +91,11 @@ final class ScopeCompiler
     public static function ownsScopeHooks(): bool
     {
         return self::$active instanceof self && self::$active->ownsScopeHooks;
+    }
+
+    public static function isActive(): bool
+    {
+        return self::$active instanceof self;
     }
 
     public static function capture(?TestCaseFactory $factory): void
@@ -175,7 +186,85 @@ final class ScopeCompiler
      */
     public function files(): array
     {
-        return array_keys($this->plans);
+        return $this->boundFileOrder ?? array_keys($this->plans);
+    }
+
+    /**
+     * @param  list<string>  $groups
+     * @return CaseBinding
+     */
+    public function nativeCaseDescriptor(
+        string $filename,
+        string $sourceFile,
+        int $line,
+        string $method,
+        int|string $dataset,
+        string $datasetLabel,
+        array $groups,
+    ): array {
+        $filename = $this->canonicalPath($filename);
+        $sourceFile = $this->canonicalPath($sourceFile);
+
+        if (isset($this->plans[$filename]) && ! isset($this->nativeFiles[$filename])) {
+            throw new RuntimeException(sprintf(
+                'Drove cannot mix Pest and native PHPUnit cases in %s.',
+                $filename,
+            ));
+        }
+
+        if (! isset($this->nativeFiles[$filename])) {
+            $path = $this->relativePath($filename);
+            $this->nativeFiles[$filename] = true;
+            $this->plans[$filename] = [
+                'id' => 'file:'.$path,
+                'type' => 'file',
+                'path' => $path,
+                'tests' => [],
+            ];
+            $this->scopePlans[$filename] = [
+                'id' => 'file:'.$path,
+                'type' => 'file',
+                'path' => $path,
+                'hooks' => [
+                    'before_all' => [],
+                    'before_each' => [],
+                    'after_each' => [],
+                    'after_all' => [],
+                ],
+                'tests' => [],
+                'children' => [],
+            ];
+        }
+
+        if (! isset($this->caseTemplates[$filename][$method])) {
+            $path = $this->relativePath($filename);
+            $test = [
+                'id' => 'test:'.$path.'::'.rawurlencode($method),
+                'name' => $method,
+                'scope' => [],
+                'source' => [
+                    'path' => $this->relativePath($sourceFile),
+                    'line' => $line,
+                ],
+            ];
+            $this->caseTemplates[$filename][$method] = [
+                'test' => $test,
+                'disposition' => 'run',
+            ];
+            $this->plans[$filename]['tests'][] = $test;
+            $this->scopePlans[$filename]['tests'][] = $test + [
+                'before_each' => [],
+                'after_each' => [],
+            ];
+        }
+
+        return $this->caseDescriptor(
+            $filename,
+            $method,
+            $dataset,
+            $datasetLabel,
+            $groups,
+        );
     }
 
     /**
@@ -218,8 +307,11 @@ final class ScopeCompiler
      */
     public function bindCases(array $casesByFile): void
     {
+        $this->boundFileOrder = [];
+
         foreach ($casesByFile as $filename => $cases) {
             $filename = $this->canonicalPath($filename);
+            $this->boundFileOrder[] = $filename;
 
             if (isset($this->boundCases[$filename])) {
                 throw new RuntimeException(sprintf('Drove cases were already bound for %s.', $filename));

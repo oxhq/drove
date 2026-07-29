@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   phase-regressions:
-    name: Phase 0-3, kernel, and compatibility proofs
+    name: Phase 0-4, kernel, and compatibility proofs
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -112,6 +112,13 @@ jobs:
 
     - name: Phase 3 Laravel SQLite proof
       run: docker run --rm drove-phase-three-laravel
+
+    - name: Phase 4 Laravel and Testbench proofs
+      run: |
+        set -euo pipefail
+        docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
+        docker run --rm drove-phase-three-laravel php proof-testbench.php
+        docker run --rm drove-phase-three-laravel php proof-data-provider.php
 
     - name: Phase 3 Laravel MySQL transaction proof
       run: |
