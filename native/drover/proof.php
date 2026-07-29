@@ -347,7 +347,15 @@ $assert($maxActive === 2, 'Drover did not reserve global permits before fork.');
 $assert($prepared['items'] === ['root'], 'A child mutation escaped into the prepared PHP host.');
 $assert($results['task:slow-a']['value']['after'] === ['root', 'slow-a'], 'Prepared state was not inherited.');
 $assert($results['task:php-exception']['failure']['kind'] === 'php_exception', 'PHP failure drifted.');
-$assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout failure drifted.');
+$timeoutFailure = $results['task:timeout-tree']['failure'] ?? [];
+$assert(
+    ($timeoutFailure['kind'] ?? null) === 'timeout',
+    sprintf(
+        'Timeout failure drifted (kind=%s; message=%s).',
+        $timeoutFailure['kind'] ?? 'missing',
+        $timeoutFailure['message'] ?? 'missing',
+    ),
+);
 $assert(file_exists($readyPath), 'The timeout descendant did not start before cleanup.');
 usleep(1_200_000);
 $escapedState = @file_get_contents($escapedPath);
