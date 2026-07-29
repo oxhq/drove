@@ -368,6 +368,7 @@ struct ActiveTask {
     task: Task,
     pid: libc::pid_t,
     fd: RawFd,
+    exited: bool,
     reaped: bool,
     wait_status: Option<i32>,
     eof: bool,
@@ -405,6 +406,7 @@ impl ActiveTask {
             task,
             pid,
             fd,
+            exited: false,
             reaped: false,
             wait_status: None,
             eof: false,
@@ -545,8 +547,50 @@ impl ActiveTask {
         Ok(())
     }
 
+    fn observe_exit(&mut self, now_ns: u64) {
+        if self.exited || self.reaped {
+            return;
+        }
+
+        // Keep an exited group leader waitable until its descendants are killed.
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                self.pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+
+        if waited == 0 {
+            if unsafe { info.si_pid() } == self.pid {
+                self.exited = true;
+                self.finished_ns.get_or_insert(now_ns);
+            }
+
+            return;
+        }
+
+        let error = io::Error::last_os_error();
+
+        if error.kind() == io::ErrorKind::Interrupted {
+            return;
+        }
+
+        self.exited = true;
+        self.reaped = true;
+        self.finished_ns.get_or_insert(now_ns);
+        self.protocol_error
+            .get_or_insert_with(|| format!("waitid() lost the Drove child: {error}."));
+    }
+
     fn reap(&mut self, now_ns: u64) {
-        if self.reaped {
+        if self.reaped
+            || !self.exited
+            || self.kill_ns.is_none()
+                && (self.term_ns.is_some() || self.cleanup_term_ns.is_some() || !self.eof)
+        {
             return;
         }
 
@@ -634,7 +678,7 @@ impl ActiveTask {
     }
 
     fn enforce(&mut self, now_ns: u64, grace_ns: u64) {
-        if !self.reaped
+        if !self.exited
             && !self.timed_out
             && self.interrupted_signal.is_none()
             && self.task.timeout_ms > 0
@@ -661,7 +705,7 @@ impl ActiveTask {
             self.begin_cleanup(now_ns);
         }
 
-        if self.reaped && !self.eof {
+        if self.exited && !self.eof {
             self.begin_cleanup(now_ns);
         }
 
@@ -1143,6 +1187,7 @@ impl Scheduler {
             };
 
             active.read_available();
+            active.observe_exit(now_ns);
             active.reap(now_ns);
             active.read_available();
             active.enforce(now_ns, self.grace_ns);
@@ -1716,6 +1761,67 @@ mod tests {
             "child_protocol_failure"
         );
         assert_eq!(result.failure.unwrap()["message"], "killpg failed");
+    }
+
+    #[test]
+    fn retains_exited_group_leader_until_forced_cleanup() {
+        for mode in ["timeout", "interruption", "crash"] {
+            let pid = unsafe { libc::fork() };
+            assert_ne!(pid, -1);
+
+            if pid == 0 {
+                unsafe {
+                    libc::setpgid(0, 0);
+                    libc::_exit(0);
+                }
+            }
+
+            unsafe {
+                libc::setpgid(pid, pid);
+            }
+
+            let task = Task {
+                ordinal: 0,
+                id: format!("task:{mode}"),
+                kind: "test".into(),
+                scope_id: "scope:root".into(),
+                timeout_ms: 0,
+                permit_names: Vec::new(),
+            };
+            let mut active = ActiveTask::new(task, pid, -1, "zombie-anchor-run");
+            let deadline = monotonic_ns().unwrap() + 1_000_000_000;
+
+            while !active.exited && monotonic_ns().unwrap() < deadline {
+                active.observe_exit(monotonic_ns().unwrap());
+                std::thread::sleep(Duration::from_millis(1));
+            }
+
+            assert!(active.exited, "{mode} child did not exit");
+            let now_ns = monotonic_ns().unwrap();
+
+            match mode {
+                "timeout" => {
+                    active.timed_out = true;
+                    active.term_ns = Some(now_ns);
+                }
+                "interruption" => active.interrupt(libc::SIGINT, now_ns),
+                "crash" => {
+                    active.enforce(now_ns, 1);
+                    assert!(active.cleanup_term_ns.is_some());
+                }
+                _ => unreachable!(),
+            }
+
+            active.reap(now_ns);
+            assert!(
+                !active.reaped,
+                "{mode} cleanup reaped its process-group anchor before SIGKILL"
+            );
+
+            active.kill_ns = Some(now_ns);
+            active.reap(now_ns);
+            assert!(active.reaped, "{mode} cleanup did not reap after SIGKILL");
+        }
     }
 
     #[test]
