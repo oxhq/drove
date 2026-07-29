@@ -701,7 +701,7 @@ impl ActiveTask {
     }
 
     fn begin_cleanup(&mut self, now_ns: u64) {
-        if self.cleanup_term_ns.is_some() {
+        if self.cleanup_term_ns.is_some() || self.kill_ns.is_some() {
             return;
         }
 
@@ -2089,6 +2089,30 @@ mod tests {
             "child_protocol_failure"
         );
         assert_eq!(result.failure.unwrap()["message"], "killpg failed");
+    }
+
+    #[test]
+    fn does_not_resignal_a_reaped_group_after_forced_cleanup() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:forced-cleanup".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1,
+            permit_names: Vec::new(),
+        };
+        let mut active = ActiveTask::new(task, 41, 42, -1, -1, 0, "forced-cleanup-run");
+        active.exited = true;
+        active.reaped = true;
+        active.anchor_reaped = true;
+        active.timed_out = true;
+        active.term_ns = Some(1);
+        active.kill_ns = Some(2);
+
+        active.enforce(3, 10);
+
+        assert!(active.protocol_error.is_none());
+        assert!(active.cleanup_term_ns.is_none());
     }
 
     #[test]

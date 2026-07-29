@@ -8,7 +8,7 @@ COPY native/drover/src ./src
 COPY native/drover/protocol ./protocol
 
 RUN rustup component add clippy
-RUN cargo test --locked
+RUN cargo test --locked -- --test-threads=1
 RUN cargo clippy --locked --all-targets -- -D warnings
 RUN cargo build --release --locked
 
