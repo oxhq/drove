@@ -81,6 +81,8 @@ jobs:
         COMPOSER_ROOT_VERSION: 0.4.0-alpha.1
       run: |
         set -euo pipefail
+        mkdir -p experiments/phase-3-laravel/{bootstrap/cache,database,storage/framework/{cache,drove,drove-proof,drove-proof-mysql,sessions,views},storage/logs}
+        touch experiments/phase-3-laravel/database/database.sqlite
         composer --working-dir=experiments/phase-3-laravel install \
           --no-interaction --no-progress --ansi
         composer --working-dir=experiments/phase-3-laravel validate --strict
