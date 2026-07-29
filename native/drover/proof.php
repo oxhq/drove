@@ -184,10 +184,16 @@ $tasks = [
         'scopes' => ['scope:root', 'scope:serial'],
         'timeout_ms' => 500,
         'callback' => static function () use ($escapedPath, $readyPath): never {
-            $script = 'trap "" TERM; printf ready > '.escapeshellarg($readyPath)
-                .'; sleep 1; printf escaped > '.escapeshellarg($escapedPath);
+            $script = sprintf(
+                'if (! pcntl_signal(SIGTERM, SIG_IGN)) { exit(70); } '
+                    .'file_put_contents(%s, "ready"); '
+                    .'usleep(1_000_000); '
+                    .'file_put_contents(%s, "escaped");',
+                var_export($readyPath, true),
+                var_export($escapedPath, true),
+            );
             $process = proc_open(
-                ['sh', '-c', $script],
+                [PHP_BINARY, '-r', $script],
                 [
                     0 => ['file', '/dev/null', 'r'],
                     1 => ['file', '/dev/null', 'a'],

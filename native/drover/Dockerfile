@@ -16,7 +16,7 @@ FROM php:8.4-cli-bullseye@sha256:aa9ca431aa35219492184f73202359109e172e33710e7d9
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libffi-dev \
-    && docker-php-ext-install ffi \
+    && docker-php-ext-install ffi pcntl \
     && test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31" \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
