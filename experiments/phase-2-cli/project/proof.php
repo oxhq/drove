@@ -31,6 +31,9 @@ $expect = static function (bool $condition, string $message): void {
         throw new RuntimeException($message);
     }
 };
+$markerPath = sys_get_temp_dir().'/drove-phase-two-compatibility-'.getmypid();
+@unlink($markerPath);
+putenv('DROVE_COMPATIBILITY_MARKER='.$markerPath);
 $cases = [
     'path' => $run('tests/OtherTest.php'),
     'filter' => $run('tests/FastTest.php', '--filter=alpha'),
@@ -38,13 +41,17 @@ $cases = [
     'exclude_group' => $run('tests/FastTest.php', '--exclude-group=slow'),
     'testsuite' => $run('--testsuite=Other'),
     'parallel' => $run('--parallel', '--processes=2', 'tests/FastTest.php'),
+    'compatibility' => $run('--parallel', '--processes=2', 'tests/CompatibilityTest.php'),
     'failure' => $run('tests/FailingTest.php'),
     'coverage' => $run('--coverage'),
     'coverage_text' => $run('--coverage-text'),
     'process_isolation' => $run('--process-isolation'),
 ];
+$markers = file($markerPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+@unlink($markerPath);
+putenv('DROVE_COMPATIBILITY_MARKER');
 
-foreach (['path', 'filter', 'group', 'exclude_group', 'testsuite', 'parallel'] as $name) {
+foreach (['path', 'filter', 'group', 'exclude_group', 'testsuite', 'parallel', 'compatibility'] as $name) {
     $expect($cases[$name]['exit'] === 0, $name.' did not exit successfully: '.$cases[$name]['stderr']);
 }
 
@@ -79,6 +86,43 @@ $beta = strpos($cases['parallel']['stdout'], 'beta slow');
 $expect(
     $alpha !== false && $beta !== false && $alpha < $beta,
     'Parallel rendering drifted from discovery order.',
+);
+$expect(
+    str_contains($cases['compatibility']['stdout'], 'runs a named dataset')
+        && str_contains($cases['compatibility']['stdout'], 'named:10')
+        && str_contains($cases['compatibility']['stdout'], 'runs a positional dataset')
+        && str_contains($cases['compatibility']['stdout'], 'positional:20')
+        && str_contains($cases['compatibility']['stdout'], 'preserves an installed skip')
+        && str_contains($cases['compatibility']['stdout'], 'installed skip')
+        && str_contains($cases['compatibility']['stdout'], 'preserves an installed todo'),
+    'The installed compatibility surface did not render the expected cases.',
+);
+$expectedMarkers = [
+    'class_before' => 1,
+    'before_all' => 1,
+    'before_each' => 4,
+    'set_up' => 4,
+    'tear_down' => 4,
+    'after_each' => 4,
+    'after_all' => 1,
+    'class_after' => 1,
+];
+
+$expect(is_array($markers), 'The installed compatibility marker is unreadable.');
+
+foreach ($expectedMarkers as $marker => $count) {
+    $expect(
+        count(array_keys($markers, $marker, true)) === $count,
+        sprintf('The installed %s lifecycle ran an unexpected number of times.', $marker),
+    );
+}
+
+$expect(
+    $markers[0] === 'class_before'
+        && $markers[1] === 'before_all'
+        && $markers[array_key_last($markers) - 1] === 'after_all'
+        && $markers[array_key_last($markers)] === 'class_after',
+    'The installed class and Drove scope lifecycle order drifted.',
 );
 $expect(
     $cases['failure']['exit'] === 1

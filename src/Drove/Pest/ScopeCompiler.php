@@ -262,6 +262,11 @@ final class ScopeCompiler
             }
 
             $plan = $this->plan($filename);
+
+            if ($plan['tests'] === []) {
+                continue;
+            }
+
             $tests = [];
 
             foreach ($plan['tests'] as $test) {
