@@ -36,7 +36,11 @@ final readonly class LifecycleExecutor
         }
 
         $startedNs = hrtime(true);
-        $result = $this->runScope($root, $context ?? new ScopeContext, []);
+        $result = $this->runScope(
+            $root,
+            $this->scopeContext($root, $context ?? new ScopeContext),
+            [],
+        );
         $finishedNs = hrtime(true);
         $events = [[
             'type' => 'run.started',
@@ -269,16 +273,7 @@ final readonly class LifecycleExecutor
 
                 $child = $job['node'];
 
-                return $this->runScope(
-                    $child,
-                    $context->child(
-                        is_array($child['metadata'] ?? null) ? $child['metadata'] : [],
-                        ['policy' => is_string($child['state_policy'] ?? null)
-                            ? $child['state_policy']
-                            : 'inherit'],
-                    ),
-                    $nextLevels,
-                );
+                return $this->runScope($child, $this->scopeContext($child, $context), $nextLevels);
             },
         );
 
@@ -806,6 +801,35 @@ final readonly class LifecycleExecutor
         return $reflection->isStatic()
             ? $closure(...$arguments)
             : $closure->call($context, ...$arguments);
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     */
+    private function scopeContext(array $node, ScopeContext $parent): ScopeContext
+    {
+        $id = $this->string($node, 'id');
+        $type = $this->string($node, 'type');
+        $path = is_string($node['path'] ?? null)
+            ? $node['path']
+            : ($parent->metadata()['path'] ?? '');
+        $name = is_string($node['name'] ?? null)
+            ? $node['name']
+            : ($type === 'file' ? $path : $id);
+        $metadata = [
+            'id' => $id,
+            'type' => $type,
+            'name' => $name,
+            'path' => $path,
+        ] + (is_array($node['metadata'] ?? null) ? $node['metadata'] : []);
+        $policy = is_string($node['state_policy'] ?? null)
+            ? $node['state_policy']
+            : 'inherit';
+        $state = $policy !== 'inherit' || ! array_key_exists('policy', $parent->state())
+            ? ['policy' => $policy]
+            : [];
+
+        return $parent->child($metadata, $state);
     }
 
     /**

@@ -41,10 +41,12 @@ final class ScopeContext
 
     public function get(string $key): mixed
     {
-        return $this->values[$key] ?? throw new OutOfBoundsException(sprintf(
-            'No value named %s was shared with this Drove scope.',
-            $key,
-        ));
+        return array_key_exists($key, $this->values)
+            ? $this->values[$key]
+            : throw new OutOfBoundsException(sprintf(
+                'No value named %s was shared with this Drove scope.',
+                $key,
+            ));
     }
 
     public function defer(Closure $cleanup): void

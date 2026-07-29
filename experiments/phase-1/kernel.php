@@ -89,8 +89,66 @@ $plan = $compiler->suitePlan([$fixture], [
     'scope_concurrency' => $limits,
     'test_timeouts' => $timeouts,
 ]);
+$contextTestId = 'test:scope-context';
+$contextTestName = 'exposes root scope context';
+$plan['root']['path'] = '';
+$plan['root']['metadata'] = ['layer' => 'root', 'root_marker' => true];
+$plan['root']['state_policy'] = 'transactional';
+array_unshift($plan['root']['tests'], [
+    'id' => $contextTestId,
+    'name' => $contextTestName,
+    'timeout_ms' => 1_000,
+]);
+array_unshift($plannedIds, $contextTestId);
+$testNames[$contextTestId] = $contextTestName;
+$fileNode = &$plan['root']['children'][0];
+$fileNode['metadata'] = ['layer' => 'file', 'file_marker' => true];
 
-$runAt = static function (int $concurrency) use ($compiler, $limits, $plan): array {
+foreach ($fileNode['children'] as &$childNode) {
+    if (($childNode['name'] ?? null) === 'parallel') {
+        $childNode['metadata'] = ['layer' => 'parallel'];
+    }
+
+    if (($childNode['name'] ?? null) === 'snapshots') {
+        $childNode['state_policy'] = 'snapshot';
+    }
+}
+
+unset($childNode, $fileNode);
+
+$contextTest = static function (ScopeContext $context): void {
+    $metadata = $context->metadata();
+
+    if ($metadata !== [
+        'id' => 'suite:root',
+        'type' => 'suite',
+        'name' => 'Drove Phase 1',
+        'path' => '',
+        'layer' => 'root',
+        'root_marker' => true,
+        'bootstrap' => true,
+    ]) {
+        throw new RuntimeException('The root scope received incomplete metadata.');
+    }
+
+    if ($context->state() !== ['policy' => 'transactional', 'adapter' => 'sqlite']) {
+        throw new RuntimeException('The root scope received incomplete state.');
+    }
+
+    $context->share('nullable', null);
+
+    if ($context->get('nullable') !== null) {
+        throw new RuntimeException('The root scope could not retrieve a shared null value.');
+    }
+};
+
+$runAt = static function (int $concurrency) use (
+    $compiler,
+    $contextTest,
+    $contextTestId,
+    $limits,
+    $plan,
+): array {
     $scheduler = new PcntlScheduler(
         'phase-1-c'.$concurrency,
         $concurrency,
@@ -101,10 +159,18 @@ $runAt = static function (int $concurrency) use ($compiler, $limits, $plan): arr
     $executor = new LifecycleExecutor(
         $scheduler,
         static fn (string $id): Closure => $compiler->hook($id),
-        static fn (string $id): Closure => $compiler->closure($id),
+        static fn (string $id): Closure => $id === $contextTestId
+            ? $contextTest
+            : $compiler->closure($id),
     );
 
-    return $executor->run($plan, new ScopeContext);
+    return $executor->run(
+        $plan,
+        new ScopeContext(
+            metadata: ['bootstrap' => true],
+            state: ['adapter' => 'sqlite'],
+        ),
+    );
 };
 
 $sequential = $runAt(1);

@@ -5,8 +5,28 @@ declare(strict_types=1);
 use PHPUnit\Framework\AssertionFailedError;
 
 beforeAll(function (): void {
+    $metadata = $this->metadata();
+
+    if (($metadata['type'] ?? null) !== 'file'
+        || ($metadata['name'] ?? null) !== 'kernel-fixtures/KernelTest.php'
+        || ($metadata['path'] ?? null) !== 'kernel-fixtures/KernelTest.php'
+        || ($metadata['layer'] ?? null) !== 'file'
+        || ($metadata['root_marker'] ?? null) !== true
+        || ($metadata['file_marker'] ?? null) !== true) {
+        throw new RuntimeException('The file scope received incomplete metadata.');
+    }
+
+    if ($this->state() !== ['policy' => 'transactional', 'adapter' => 'sqlite']) {
+        throw new RuntimeException('The file scope did not inherit root state.');
+    }
+
     $this->share('prepared', ['file']);
     $this->share('trace', ['file.before_all']);
+    $this->share('nullable', null);
+
+    if ($this->get('nullable') !== null) {
+        throw new RuntimeException('A shared null value could not be retrieved.');
+    }
 });
 
 beforeEach(function (): void {
@@ -33,6 +53,18 @@ afterAll(function (): void {
 
 describe('parallel', function (): void {
     beforeAll(function (): void {
+        $metadata = $this->metadata();
+
+        if (($metadata['type'] ?? null) !== 'describe'
+            || ($metadata['name'] ?? null) !== 'parallel'
+            || ($metadata['path'] ?? null) !== 'kernel-fixtures/KernelTest.php'
+            || ($metadata['layer'] ?? null) !== 'parallel'
+            || ($metadata['file_marker'] ?? null) !== true
+            || $this->get('nullable') !== null
+            || $this->state() !== ['policy' => 'transactional', 'adapter' => 'sqlite']) {
+            throw new RuntimeException('The describe scope did not inherit its context.');
+        }
+
         $this->share('prepared', [...$this->get('prepared'), 'parallel']);
     });
 
@@ -58,11 +90,19 @@ describe('serial', function (): void {
 
 describe('snapshots', function (): void {
     beforeAll(function (): void {
+        if ($this->state() !== ['policy' => 'snapshot', 'adapter' => 'sqlite']) {
+            throw new RuntimeException('The scope state policy did not override its parent.');
+        }
+
         $this->share('prepared', [...$this->get('prepared'), 'snapshots']);
     });
 
     describe('same', function (): void {
         beforeAll(function (): void {
+            if ($this->state() !== ['policy' => 'snapshot', 'adapter' => 'sqlite']) {
+                throw new RuntimeException('The nested scope did not inherit its state policy.');
+            }
+
             $this->share('prepared', [...$this->get('prepared'), 'first']);
         });
 
