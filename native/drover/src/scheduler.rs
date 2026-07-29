@@ -618,8 +618,8 @@ impl ActiveTask {
             return;
         }
 
-        unsafe {
-            libc::kill(-self.pid, libc::SIGTERM);
+        if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, !self.reaped) {
+            self.protocol_error.get_or_insert(error);
         }
         self.cleanup_term_ns = Some(now_ns);
     }
@@ -646,8 +646,8 @@ impl ActiveTask {
                     .unwrap_or_default();
 
                 if now_ns >= deadline_ns.max(terminal_grace) {
-                    unsafe {
-                        libc::kill(-self.pid, libc::SIGTERM);
+                    if let Err(error) = signal_process_tree(self.pid, libc::SIGTERM, true) {
+                        self.protocol_error.get_or_insert(error);
                     }
                     self.timed_out = true;
                     self.term_ns = Some(now_ns);
@@ -670,8 +670,8 @@ impl ActiveTask {
         if self.kill_ns.is_none()
             && escalation_ns.is_some_and(|started| now_ns.saturating_sub(started) >= grace_ns)
         {
-            unsafe {
-                libc::kill(-self.pid, libc::SIGKILL);
+            if let Err(error) = signal_process_tree(self.pid, libc::SIGKILL, !self.reaped) {
+                self.protocol_error.get_or_insert(error);
             }
             self.kill_ns = Some(now_ns);
         }
@@ -709,6 +709,16 @@ impl ActiveTask {
             self.interrupted_signal,
         );
 
+        if let Some(error) = self.protocol_error {
+            return failed_result(
+                self.task,
+                "child_protocol_failure",
+                error,
+                telemetry,
+                self.frames,
+            );
+        }
+
         if let Some(interrupted) = self.interrupted_signal {
             return failed_result(
                 self.task,
@@ -734,16 +744,6 @@ impl ActiveTask {
                 self.task,
                 "signal_termination",
                 format!("The Drove task ended from signal {signal}."),
-                telemetry,
-                self.frames,
-            );
-        }
-
-        if let Some(error) = self.protocol_error {
-            return failed_result(
-                self.task,
-                "child_protocol_failure",
-                error,
                 telemetry,
                 self.frames,
             );
@@ -1376,6 +1376,48 @@ fn wait_blocking(pid: libc::pid_t) {
     }
 }
 
+fn signal_process_tree(
+    pid: libc::pid_t,
+    signal: i32,
+    allow_direct_child: bool,
+) -> Result<(), String> {
+    if unsafe { libc::kill(-pid, signal) } == 0 {
+        return Ok(());
+    }
+
+    let group_error = io::Error::last_os_error();
+
+    if !allow_direct_child {
+        return if group_error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Drover could not send signal {signal} to process group {pid}: {group_error}."
+            ))
+        };
+    }
+
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        return Err(format!(
+            "Drover could not send signal {signal} to process group {pid}: {group_error}; \
+             the child was signaled directly but descendant cleanup is not guaranteed."
+        ));
+    }
+
+    let process_error = io::Error::last_os_error();
+
+    if group_error.raw_os_error() == Some(libc::ESRCH)
+        && process_error.raw_os_error() == Some(libc::ESRCH)
+    {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Drover could not send signal {signal} to process group {pid} ({group_error}) \
+         or child {pid} ({process_error})."
+    ))
+}
+
 fn telemetry(
     pid: Option<libc::pid_t>,
     started_ns: Option<u64>,
@@ -1651,6 +1693,37 @@ mod tests {
         };
         assert_eq!(result.telemetry.interrupted_signal, Some(libc::SIGINT));
         assert_eq!(result.telemetry.signal, None);
+    }
+
+    #[test]
+    fn reports_cleanup_signal_errors_before_timeout() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:cleanup-error".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1,
+            permit_names: Vec::new(),
+        };
+        let mut active = ActiveTask::new(task, unsafe { libc::getpid() }, -1, "cleanup-error-run");
+        active.timed_out = true;
+        active.protocol_error = Some("killpg failed".into());
+
+        let result = active.into_result();
+
+        assert_eq!(
+            result.failure.as_ref().unwrap()["kind"],
+            "child_protocol_failure"
+        );
+        assert_eq!(result.failure.unwrap()["message"], "killpg failed");
+    }
+
+    #[test]
+    fn reports_group_and_child_signal_failures() {
+        let error = signal_process_tree(unsafe { libc::getpid() }, i32::MAX, true).unwrap_err();
+
+        assert!(error.contains("process group"));
+        assert!(error.contains("or child"));
     }
 
     #[test]

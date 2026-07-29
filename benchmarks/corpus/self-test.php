@@ -21,6 +21,11 @@ $samples = [
         'incomplete' => 3,
         'assertions' => 1034,
     ],
+    "OK (36 tests, 68 assertions)\n" => [
+        'tests' => 36,
+        'passed' => 36,
+        'assertions' => 68,
+    ],
 ];
 
 foreach ($samples as $sample => $expected) {

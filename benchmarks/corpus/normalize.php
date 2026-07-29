@@ -35,7 +35,12 @@ $summary = [
 preg_match_all('/^\s*Tests:\s*(.+)$/mi', $plain, $matches);
 $line = trim((string) end($matches[1]));
 
-if ($line === '') {
+if ($line === ''
+    && preg_match('/\bOK \((\d+) tests?,\s*(\d+) assertions?\)/i', $plain, $ok) === 1) {
+    $summary['tests'] = (int) $ok[1];
+    $summary['passed'] = (int) $ok[1];
+    $summary['assertions'] = (int) $ok[2];
+} elseif ($line === '') {
     $summary['parse_error'] = 'No Tests summary was found.';
 } elseif (preg_match('/\bAssertions:\s*\d+/i', $line) === 1) {
     if (preg_match('/^(\d+)\s*,/', $line, $tests) === 1) {

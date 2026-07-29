@@ -7,7 +7,7 @@ gate. It is deliberately sequential, and Filament remains the final proof:
 | --- | --- | --- |
 | Pest 5.0.1 | 143 files, 797 cases | 726 passed, 71 skipped |
 | InvoiceShelf | 47 files, 202 cases | 202 passed |
-| Livewire | 20 files, 288 cases | 285 passed, 3 incomplete |
+| Livewire | 20-file serial and 7-file parallel cohorts | 285 passed + 3 incomplete; 36 parallel-safe passed |
 | Filament | 39 files, 705 cases | 677 parallel-safe and 28 serial |
 
 The recorded numbers above are historical evidence from the revision named by
@@ -23,19 +23,28 @@ InvoiceShelf, Livewire, and finally Filament.
 
 - **Required smoke** on pull requests and `develop`: Pest plus InvoiceShelf.
 - **Full ladder** weekly, manually, and for `v0.*` tags: smoke, Livewire
-  sqlite-memory at 1/2/4/8 processes, then Filament.
+  full parity serially plus its filesystem-neutral cohort at 1/2/4/8
+  processes, then Filament.
+
+The full Livewire selection retains all 288 calibrated cases at one process.
+Its separate 36-case cohort uses seven unchanged Testbench files whose test
+bodies do not render Blade views, launch Dusk, or generate application files.
+Replay metadata must report observed concurrency of exactly 1/2/4/8, preventing
+a serialized run from satisfying the parallel gate.
 
 The full Filament cohort runs its 677 parallel-safe cases at 1/2/4/8 processes
 and its 28 filesystem-sensitive cases serially. Every run starts from a fresh
 copy of one migrated database and verifies its SHA-256, an empty snapshot
 directory, and the absence of transient SQLite files.
 
-The workflow uploads raw logs and normalized JSON. `verify.php` rejects:
+The workflow uploads raw logs, normalized JSON, and replay metadata. The gate
+rejects:
 
 - a corpus commit or selected-file count mismatch;
 - a changed selected source root;
 - an unexpected Drove revision;
 - a baseline/Drove status, assertion, or exit-code difference;
+- observed concurrency that differs from the requested process count;
 - a missing or changed dependency lock;
 - a manifest that does not keep Filament in the final position.
 
@@ -79,20 +88,20 @@ contains:
   "schema_version": 1,
   "corpus": "livewire",
   "runner": "drove",
-  "cohort": "full",
+  "cohort": "parallel",
   "processes": 8,
-  "selected_files": 20,
+  "selected_files": 7,
   "drove_revision": "40-character Git SHA",
   "outcome": {
-    "tests": 288,
-    "passed": 285,
+    "tests": 36,
+    "passed": 36,
     "failed": 0,
     "errors": 0,
     "skipped": 0,
-    "incomplete": 3,
+    "incomplete": 0,
     "risky": 0,
     "warnings": 0,
-    "assertions": 1034,
+    "assertions": 68,
     "exit": 0
   },
   "raw_sha256": "SHA-256 of the retained raw log"

@@ -214,7 +214,32 @@ jobs:
         run: |
           set -euo pipefail
 
+          assert_observed_concurrency() {
+            processes=$1
+            replay=$2
+            docker run --rm --volume "$PWD/results:/results" drove-corpus \
+              php -r '
+                $run = json_decode(
+                    file_get_contents($argv[1]),
+                    true,
+                    flags: JSON_THROW_ON_ERROR,
+                );
+                $expected = (int) $argv[2];
+                $observed = $run["result"]["observed_concurrency"]["global"] ?? null;
+
+                if ($observed !== $expected) {
+                    fwrite(
+                        STDERR,
+                        "expected observed concurrency $expected, found "
+                            .json_encode($observed).PHP_EOL,
+                    );
+                    exit(1);
+                }
+              ' "/results/$replay" "$processes"
+          }
+
           docker run --rm \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
             --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
             --volume "$PWD/corpora/livewire:/app" \
             --volume drove-livewire-vendor:/app/vendor \
@@ -226,7 +251,55 @@ jobs:
               set -- $(cat "$selection")
               files=$(wc -l <"$selection" | tr -d "[:space:]")
               DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
-                livewire baseline full 1 "$files" /results/livewire-baseline.json -- \
+                livewire baseline full 1 "$files" \
+                /results/livewire-baseline-full-1.json -- \
+                php vendor/bin/phpunit --configuration=phpunit.xml.dist \
+                  --do-not-cache-result "$@"
+            '
+
+          docker run --rm \
+            --env APP_ENV=testing \
+            --env DB_CONNECTION=testbench \
+            --env DB_DATABASE=:memory: \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --env DROVE_LARAVEL_RUNTIME=testbench \
+            --env DROVE_LARAVEL_STATE=sqlite-memory \
+            --env DROVE_LARAVEL_DB_CONNECTION=testbench \
+            --env DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc '
+              selection=$(mktemp)
+              sh /drove/benchmarks/corpus/select.sh livewire /app >"$selection"
+              set -- $(cat "$selection")
+              files=$(wc -l <"$selection" | tr -d "[:space:]")
+              DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                livewire drove full 1 "$files" \
+                /results/livewire-drove-full-1.json -- \
+                php vendor/bin/drove --configuration=phpunit.xml.dist \
+                  --parallel --processes=1 \
+                  --replay=/results/livewire-drove-full-1-replay.json "$@"
+            '
+          assert_observed_concurrency 1 livewire-drove-full-1-replay.json
+
+          docker run --rm \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc '
+              selection=$(mktemp)
+              sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >"$selection"
+              set -- $(cat "$selection")
+              files=$(wc -l <"$selection" | tr -d "[:space:]")
+              DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                livewire baseline parallel 1 "$files" \
+                /results/livewire-baseline-parallel-1.json -- \
                 php vendor/bin/phpunit --configuration=phpunit.xml.dist \
                   --do-not-cache-result "$@"
             '
@@ -249,22 +322,30 @@ jobs:
               --workdir /app \
               --entrypoint sh drove-corpus -lc "
                 selection=\$(mktemp)
-                sh /drove/benchmarks/corpus/select.sh livewire /app >\"\$selection\"
+                sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >\"\$selection\"
                 set -- \$(cat \"\$selection\")
                 files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
                 DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
-                  livewire drove full $processes \"\$files\" \
-                  /results/livewire-drove-$processes.json -- \
+                  livewire drove parallel $processes \"\$files\" \
+                  /results/livewire-drove-parallel-$processes.json -- \
                   php vendor/bin/drove --configuration=phpunit.xml.dist \
-                    --parallel --processes=$processes \"\$@\"
+                    --parallel --processes=$processes \
+                    --replay=/results/livewire-drove-parallel-$processes-replay.json \
+                    \"\$@\"
               "
+            assert_observed_concurrency \
+              "$processes" "livewire-drove-parallel-$processes-replay.json"
           done
 
           docker run --rm --volume "$PWD/results:/results" drove-corpus \
             php /drove/benchmarks/corpus/verify.php \
-              /results/livewire-baseline.json \
-              /results/livewire-drove-1.json /results/livewire-drove-2.json \
-              /results/livewire-drove-4.json /results/livewire-drove-8.json \
+              /results/livewire-baseline-full-1.json \
+              /results/livewire-drove-full-1.json \
+              /results/livewire-baseline-parallel-1.json \
+              /results/livewire-drove-parallel-1.json \
+              /results/livewire-drove-parallel-2.json \
+              /results/livewire-drove-parallel-4.json \
+              /results/livewire-drove-parallel-8.json \
             | tee results/livewire-verification.json
 
       - name: Install locked Filament overlay

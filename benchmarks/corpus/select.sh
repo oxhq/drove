@@ -28,13 +28,18 @@ case "$target" in
         expected_files=20
         set -- src
         ;;
+    livewire-parallel)
+        commit=9c1450739d30c9b0b223ad6512be2a33f8f62f96
+        expected_files=7
+        set -- src
+        ;;
     filament)
         commit=e9348b2e3792088ee877068116b6c1e1559a7df8
         expected_files=39
         set -- tests/src/Support
         ;;
     *)
-        echo "usage: $0 pest|invoiceshelf|livewire|filament [corpus-root]" >&2
+        echo "usage: $0 pest|invoiceshelf|livewire|livewire-parallel|filament [corpus-root]" >&2
         exit 2
         ;;
 esac
@@ -144,6 +149,16 @@ case "$target" in
         find src -type f -name '*UnitTest.php' -print |
             LC_ALL=C sort |
             sed -n '1,20p' > "$selection"
+        ;;
+    livewire-parallel)
+        printf '%s\n' \
+            src/Features/SupportEntangle/UnitTest.php \
+            src/Mechanisms/FrontendAssets/EndpointResolverIntegrationUnitTest.php \
+            src/Mechanisms/HandleComponents/SecurityPolicyUnitTest.php \
+            src/Mechanisms/HandleRequests/EndpointResolverUnitTest.php \
+            src/Mechanisms/HandleRequests/EnforceWebMiddlewareUnitTest.php \
+            src/Tests/InvadeHelperUnitTest.php \
+            src/Tests/LivewireRouteCachingUnitTest.php > "$selection"
         ;;
     filament)
         find tests/src/Support -type f -name '*.php' -print |
