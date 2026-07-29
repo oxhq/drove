@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   static:
-    if: github.event_name != 'schedule' || github.repository == 'pestphp/pest'
+    if: github.event_name != 'schedule' || github.repository == 'oxhq/drove'
     name: Static Tests
 
     runs-on: ubuntu-latest
