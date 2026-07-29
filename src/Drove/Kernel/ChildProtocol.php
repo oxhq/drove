@@ -247,6 +247,7 @@ final readonly class ChildProtocol
             'task.stdout' => 'stdout',
             'task.stderr' => 'stderr',
             'task.value' => 'value_buffer',
+            default => throw new RuntimeException('Drove received an unknown child data stream.'),
         };
 
         if (strlen($child[$target]) + strlen($bytes) > self::STREAM_LIMIT) {
