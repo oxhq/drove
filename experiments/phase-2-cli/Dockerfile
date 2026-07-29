@@ -11,7 +11,7 @@ COPY . /drove
 
 WORKDIR /app
 
-COPY experiments/phase-2-cli/composer.json ./
+COPY experiments/phase-2-cli/composer.* ./
 RUN composer install --no-interaction --no-progress --prefer-dist --optimize-autoloader
 
 COPY experiments/phase-2-cli/project/ ./
