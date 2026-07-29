@@ -1,53 +1,73 @@
 # Migrating from Pest to the Drove compatibility alpha
 
-Drove is currently an experimental Pest fork. Its compatibility frontend keeps
-common Pest syntax while Drove owns scope planning, lifecycle order, scheduling,
-and result aggregation.
+Drove Phase 2 is a source-only Linux alpha. It keeps a deliberately small Pest
+surface while Drove owns scope planning, lifecycle order, native scheduling,
+result aggregation, and rendering.
 
-## Install and run
+## Build and run from source
 
-This alpha is source-only and Linux-only:
+The current branch requires PHP 8.4 with FFI and PCNTL, Composer 2, Rust 1.88,
+and Linux:
 
 ```bash
 composer install
-vendor/bin/drove
-vendor/bin/drove --filter=Invoice
-vendor/bin/drove --group=slow
-vendor/bin/drove --testsuite=Feature
+cargo build --manifest-path native/drover/Cargo.toml --release --locked
+
+export DROVER_LIBRARY="$PWD/native/drover/target/release/libdrover.so"
+php bin/drove
+php bin/drove --parallel --processes=8
+php bin/drove --filter=Invoice
+php bin/drove --group=slow
+php bin/drove --exclude-group=integration
+php bin/drove --testsuite=Feature
 ```
 
-Keep `vendor/bin/pest` in CI while evaluating Drove. Run both commands against
-the same suite and treat a semantic difference as a compatibility bug.
+When this checkout is installed into a disposable project through a Composer
+path repository, invoke `vendor/bin/drove` and point `DROVER_LIBRARY` at the
+library built from this checkout. The package is still named `pestphp/pest`;
+there is no published Drove package.
 
-## Compatibility levels
+Keep `vendor/bin/pest` in CI while evaluating the alpha. Run both commands
+against the same selected suite and treat a semantic difference as a
+compatibility bug.
+
+## Declared compatibility
 
 | Surface | Level | Notes |
 | --- | --- | --- |
-| `test()`, `it()`, `describe()` and expectations | Native | Compiled into Drove Scope IR. |
-| `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns ordering and partial unwind; hooks run once. |
-| Named and positional datasets | Compatible | Each selected dataset row has its own stable case ID. |
-| Custom PHPUnit `TestCase` and `uses()` binding | Compatible | Setup, body, teardown, assertions, skips, and todos run through the generated case. |
-| `--filter`, `--group`, `--exclude-group`, `--testsuite` | Compatible | PHPUnit selects cases before Drove schedules them. |
-| Test dependencies | Unsupported | Dependency result transport is not implemented. |
-| Higher-order tests, repetitions, process-isolation attributes | Unsupported | They are rejected before scheduling. |
-| Coverage, profiling, snapshots, browser, mutation, architecture, and watch plugins | Unsupported | These need explicit child aggregation or plugin adapters. |
-| Windows and macOS snapshot execution | Unsupported | The execution engine requires Linux process semantics. |
+| `test()`, `it()`, `describe()`, expectations | Native | Compiled into Drove Scope IR. |
+| `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns ordering, blocking, and partial unwind. |
+| Named and positional datasets | Compatible | Every selected row receives a stable case ID. |
+| Custom `TestCase`, `uses()`, `setUp()`, `tearDown()` | Compatible | Instance lifecycle runs in the test child. |
+| Skips and todos | Compatible | Status and reason are preserved. |
+| `--filter`, `--group`, `--exclude-group`, `--testsuite` | Compatible | PHPUnit selects generated cases before Drove schedules them. |
+| `--parallel`, `--processes` | Native | Drover enforces the global limit; C1 and C8 output must match. |
+| Ordinary PHPUnit test classes | Unsupported | Rejected with exit 2 instead of being skipped. |
+| Test dependencies | Unsupported | Rejected with exit 2; result transport is not implemented. |
+| Custom static class lifecycle | Unsupported | `setUpBeforeClass()` and `tearDownAfterClass()` are rejected. |
+| Process isolation | Unsupported | CLI, XML, and supported PHPUnit metadata forms are rejected. |
+| PHPUnit-enforced time limits | Unsupported | XML enforcement is rejected; Drove adds no implicit compatibility timeout. |
+| Coverage, profiling, alternate printers, mutation, browser, and watch modes | Unsupported | Recognized CLI modes exit 2; plugin discovery is not exhaustive. |
+| Windows and macOS execution | Unsupported | The execution engine requires Linux process semantics. |
 
-Drove does not silently fall back to Pest. Unsupported cases fail with a
-diagnostic; use `vendor/bin/pest` explicitly when conventional execution is
-required.
+Higher-order tests, repetitions, architecture tests, snapshots, and third-party
+plugins are not part of the declared alpha surface. Detection is not yet
+exhaustive, so the dual-run comparison remains required.
 
 ## Lifecycle differences to audit
 
-- `beforeAll` prepares a scope snapshot. Mutations made by one test child do not
-  return to its parent or siblings.
-- Nested `beforeAll` and `afterAll` are valid Drove scope hooks.
+- `beforeAll` prepares a copy-on-write scope snapshot. Mutations made by one
+  test child do not return to its parent or siblings.
+- Nested `beforeAll` and `afterAll` are Drove scope hooks.
 - A failed `beforeAll` blocks only its subtree. Initialized ancestors still
   unwind and siblings continue.
 - Drove preserves a body failure as primary and reports teardown failures
   separately.
 - Result order follows the test plan, not process completion order.
-- Global and scope concurrency limits apply before test descendants are forked.
+- Custom instance `setUp()` and `tearDown()` are supported; custom static class
+  lifecycle is rejected.
+- The compatibility CLI exposes only a global `--processes` limit. Scope limits
+  remain an internal kernel policy in this alpha.
 
 Tests that depend on mutations leaking between siblings are order-dependent and
 must be rewritten before using Drove.
@@ -62,5 +82,5 @@ must be rewritten before using Drove.
 - `src/Drove/Kernel` is original Drove lifecycle and scheduling code.
 - `native/drover` is the original Rust execution engine.
 
-The project will not claim broad Pest parity until the published compatibility
-matrix and dual-run corpus support it.
+The project will not claim broad Pest parity until a larger dual-run corpus
+supports it.

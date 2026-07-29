@@ -609,6 +609,7 @@ final class ScopeCompiler
         $node['metadata'] = [];
         $node['state_policy'] = 'inherit';
         $node['concurrency'] = $configuration['scope_concurrency'][$id] ?? null;
+        $node['timeout_ms'] = 0;
         $node['tests'] = $runtimeTests;
         $node['children'] = array_map(
             fn (array $child): array => $this->runtimeNode($child, $tests, $configuration),

@@ -11,3 +11,7 @@ test('alpha fast', function (): void {
 test('beta slow', function (): void {
     expect(true)->toBeTrue();
 })->group('slow');
+
+it('supports the it alias', function (): void {
+    expect(true)->toBeTrue();
+});

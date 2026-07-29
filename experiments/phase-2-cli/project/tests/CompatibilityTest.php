@@ -45,3 +45,26 @@ test('preserves an installed skip', function (): never {
 })->skip('installed skip');
 
 todo('preserves an installed todo');
+
+describe('an installed describe', function (): void {
+    beforeAll(function (): void {
+        droveCompatibilityMarker('nested_before_all');
+    });
+
+    beforeEach(function (): void {
+        droveCompatibilityMarker('nested_before_each');
+    });
+
+    afterEach(function (): void {
+        droveCompatibilityMarker('nested_after_each');
+    });
+
+    afterAll(function (): void {
+        droveCompatibilityMarker('nested_after_all');
+    });
+
+    test('runs a nested describe case', function (): void {
+        expect($this)->toBeInstanceOf(DroveCompatibilityTestCase::class)
+            ->and($this->bindingMarker())->toBe('custom-test-case');
+    });
+});

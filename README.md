@@ -3,49 +3,59 @@
 Drove is an experimental fork of Pest exploring hierarchical prepared-state
 snapshots and native parallel execution.
 
-The current `refactor/phase-1` branch is a source-built Linux kernel proof. It
-defines a framework-independent Scope IR, deterministic lifecycle semantics,
-structured child events and failures, bounded global and scope concurrency,
-and two conforming schedulers:
+The current `refactor/phase-2` branch is a source-built Linux compatibility
+alpha. Supported Pest syntax is compiled into Drove's independent Scope IR,
+executed by the lifecycle kernel, and scheduled through the Rust-backed Drover
+engine.
 
-- `PcntlScheduler`, the PHP reference backend;
-- `DroverScheduler`, backed by the Rust engine in `native/drover`.
+The proven compatibility surface includes:
 
-The same lifecycle fixture runs at concurrency 1 and 8 through both backends
-and must produce the same semantic projection. Drover owns process creation,
-permit acquisition, polling, timeouts, process-group cleanup, protocol frame
-collection, and canonical result delivery.
+- `test()`, `it()`, `describe()`, and expectations;
+- `beforeAll`, `beforeEach`, `afterEach`, and `afterAll`;
+- named and positional datasets;
+- custom `TestCase` instance setup/teardown and direct `uses()` binding;
+- skips, todos, filters, groups, excluded groups, and test suites;
+- deterministic test and scope failure/output rendering;
+- identical installed-runner output at concurrency 1 and 8.
 
-## Run the Phase 1 gate
+## Run the compatibility gate
 
-Docker is the supported reproducible path:
+Docker is the reproducible path:
 
 ```bash
-docker build --file experiments/phase-1/Dockerfile --tag drove-phase-one .
-docker run --rm drove-phase-one
-docker run --rm drove-phase-one php inactive.php
-docker run --rm drove-phase-one php kernel.php
-docker run --rm drove-phase-one timeout 15 php scheduler.php
-docker run --rm drove-phase-one timeout 15 php interruption.php
-docker run --rm drove-phase-one php -d ffi.enable=true /pest/native/drover/proof.php
+docker build --file experiments/phase-2/Dockerfile --tag drove-phase-two .
+docker run --rm drove-phase-two
+docker run --rm drove-phase-two php kernel-seam.php
+docker run --rm drove-phase-two php renderer.php
+
+docker build --file experiments/phase-2-cli/Dockerfile --tag drove-phase-two-cli .
+docker run --rm drove-phase-two-cli
 ```
 
-The image build also runs the locked Rust tests, warning-clean Clippy, and a
-release build. See
-[`experiments/phase-1/README.md`](experiments/phase-1/README.md) and
-[`native/drover/README.md`](native/drover/README.md) for the proof contracts.
+The installed-project proof runs the real `drove` executable through Drover,
+checks path/filter/group/suite selection, and requires exit codes 0, 1, and 2
+for passing, failing, and explicitly unsupported input.
+
+See [`docs/migration-from-pest.md`](docs/migration-from-pest.md) for source
+installation, the compatibility matrix, and declared limitations.
 
 ## Current boundary
 
-This branch is not a released package or a drop-in Pest runner. It is Linux
-only, uses FFI as the native bridge, and does not provide coverage merging,
-plugin parity, native extension packaging, or a stable public API. The Pest
-compatibility runner belongs to Phase 2.
+This branch is not a released package or a broad Pest/PHPUnit replacement. It
+is Linux only and uses FFI as the native bridge. Ordinary PHPUnit classes, test
+dependencies, process isolation, custom static `TestCase` lifecycle, coverage,
+profiling, and the wider plugin ecosystem are outside the declared alpha
+surface.
+
+The Composer package name remains `pestphp/pest` during the hard-fork stage for
+plugin and installer compatibility. No Drove package has been published to
+Packagist.
 
 ## Attribution
 
 Drove began as a hard fork of [Pest](https://github.com/pestphp/pest). The Pest
 DSL, expectations, PHPUnit integration, and other upstream-derived code retain
 their original copyright and the repository's [MIT license](LICENSE.md).
-`src/Drove` contains the independent kernel and compatibility work;
-`native/drover` contains the original Rust execution engine.
+`src/Drove/Pest` contains the modified compatibility frontend, `src/Drove/Kernel`
+contains the independent lifecycle kernel, and `native/drover` contains the
+original Rust execution engine.

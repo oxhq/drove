@@ -74,6 +74,11 @@ $assert(
 $assert(array_keys($resolvers) === array_column($tests, 'id'), 'Runtime resolver order drifted from filtered Scope IR.');
 $assert(count($tests) === 5, 'PHPUnit collect() did not expand the two datasets.');
 $assert(
+    $file['timeout_ms'] === 0
+        && array_all($tests, static fn (array $test): bool => $test['timeout_ms'] === 0),
+    'The Pest compatibility plan introduced an implicit timeout.',
+);
+$assert(
     ! in_array('is removed by PHPUnit filtering', array_column($tests, 'name'), true),
     'PHPUnit-filtered case leaked back into Scope IR.',
 );
@@ -101,75 +106,64 @@ $assert(
     'Pest todo disposition was not preserved in Scope IR.',
 );
 
-$classes = array_values(array_unique(array_map(
-    static fn (array $resolver): string => $resolver['runtime']::class,
-    $resolvers,
-)));
-$assert(count($classes) === 1, 'Phase 2 generated more than one Pest class.');
-$class = $classes[0];
-$class::setUpBeforeClass();
 $results = [];
 $emitted = [];
 $originalFailure = null;
 $scopeContext = new ScopeContext;
 
-try {
-    foreach ($file['hooks']['before_all'] as $hookId) {
+foreach ($file['hooks']['before_all'] as $hookId) {
+    $compiler->hook($hookId)->call($scopeContext);
+}
+
+foreach ($file['children'] as $child) {
+    foreach ($child['hooks']['before_all'] as $hookId) {
         $compiler->hook($hookId)->call($scopeContext);
     }
 
-    foreach ($file['children'] as $child) {
-        foreach ($child['hooks']['before_all'] as $hookId) {
-            $compiler->hook($hookId)->call($scopeContext);
-        }
+    foreach (array_reverse($child['hooks']['after_all']) as $hookId) {
+        $compiler->hook($hookId)->call($scopeContext);
+    }
+}
 
-        foreach (array_reverse($child['hooks']['after_all']) as $hookId) {
-            $compiler->hook($hookId)->call($scopeContext);
-        }
+foreach ($tests as $test) {
+    $id = $test['id'];
+    $resolver = $resolvers[$id];
+
+    foreach ($test['before_each'] as $hookId) {
+        $compiler->hook($hookId)->call($resolver['runtime']);
     }
 
-    foreach ($tests as $test) {
-        $id = $test['id'];
-        $resolver = $resolvers[$id];
+    $outputLevel = ob_get_level();
+    ob_start();
 
-        foreach ($test['before_each'] as $hookId) {
+    try {
+        $outcome = ($resolver['closure'])();
+        $assert($outcome instanceof TestOutcome, 'Runtime resolver did not return a TestOutcome.');
+        $results[$id] = is_array($outcome->value)
+            ? $outcome->value
+            : ['id' => $id, 'status' => $outcome->status, 'message' => $outcome->value];
+    } catch (AssertionFailedError $failure) {
+        if ($test['name'] !== 'rethrows the original assertion failure') {
+            throw $failure;
+        }
+
+        $originalFailure = $failure;
+        $results[$id] = ['id' => $id, 'status' => 'failed'];
+    } finally {
+        $emitted[$id] = '';
+
+        while (ob_get_level() > $outputLevel) {
+            $emitted[$id] = ob_get_clean().$emitted[$id];
+        }
+
+        foreach (array_reverse($test['after_each']) as $hookId) {
             $compiler->hook($hookId)->call($resolver['runtime']);
         }
-
-        $outputLevel = ob_get_level();
-        ob_start();
-
-        try {
-            $outcome = ($resolver['closure'])();
-            $assert($outcome instanceof TestOutcome, 'Runtime resolver did not return a TestOutcome.');
-            $results[$id] = is_array($outcome->value)
-                ? $outcome->value
-                : ['id' => $id, 'status' => $outcome->status, 'message' => $outcome->value];
-        } catch (AssertionFailedError $failure) {
-            if ($test['name'] !== 'rethrows the original assertion failure') {
-                throw $failure;
-            }
-
-            $originalFailure = $failure;
-            $results[$id] = ['id' => $id, 'status' => 'failed'];
-        } finally {
-            $emitted[$id] = '';
-
-            while (ob_get_level() > $outputLevel) {
-                $emitted[$id] = ob_get_clean().$emitted[$id];
-            }
-
-            foreach (array_reverse($test['after_each']) as $hookId) {
-                $compiler->hook($hookId)->call($resolver['runtime']);
-            }
-        }
     }
+}
 
-    foreach (array_reverse($file['hooks']['after_all']) as $hookId) {
-        $compiler->hook($hookId)->call($scopeContext);
-    }
-} finally {
-    $class::tearDownAfterClass();
+foreach (array_reverse($file['hooks']['after_all']) as $hookId) {
+    $compiler->hook($hookId)->call($scopeContext);
 }
 
 $assert(
@@ -217,12 +211,10 @@ $assert(
     'Dataset arguments or custom TestCase binding were lost.',
 );
 $assert(
-    $GLOBALS['drove_phase_two_custom'][0] === 'before_class'
-        && end($GLOBALS['drove_phase_two_custom']) === 'after_class'
-        && count(array_filter(
-            $GLOBALS['drove_phase_two_custom'],
-            static fn (string $event): bool => str_starts_with($event, 'set_up:'),
-        )) === 5
+    count(array_filter(
+        $GLOBALS['drove_phase_two_custom'],
+        static fn (string $event): bool => str_starts_with($event, 'set_up:'),
+    )) === 5
         && count(array_filter(
             $GLOBALS['drove_phase_two_custom'],
             static fn (string $event): bool => str_starts_with($event, 'tear_down:'),

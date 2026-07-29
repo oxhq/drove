@@ -102,7 +102,10 @@ $expect(
 $alpha = strpos($cases['parallel']['stdout'], 'alpha fast');
 $beta = strpos($cases['parallel']['stdout'], 'beta slow');
 $expect(
-    $alpha !== false && $beta !== false && $alpha < $beta,
+    $alpha !== false
+        && $beta !== false
+        && $alpha < $beta
+        && str_contains($cases['parallel']['stdout'], 'supports the it alias'),
     'Parallel rendering drifted from discovery order.',
 );
 $compatibilityOutput = $cases['compatibility_c1']['stdout'];
@@ -119,7 +122,8 @@ $expect(
         && str_contains($compatibilityOutput, 'positional:20')
         && str_contains($compatibilityOutput, 'preserves an installed skip')
         && str_contains($compatibilityOutput, 'installed skip')
-        && str_contains($compatibilityOutput, 'preserves an installed todo'),
+        && str_contains($compatibilityOutput, 'preserves an installed todo')
+        && str_contains($compatibilityOutput, 'runs a nested describe case'),
     'The installed compatibility surface did not render the expected cases.',
 );
 $expect(
@@ -129,10 +133,14 @@ $expect(
 );
 $expectedMarkers = [
     'before_all' => 2,
-    'before_each' => 8,
-    'set_up' => 8,
-    'tear_down' => 8,
-    'after_each' => 8,
+    'nested_before_all' => 2,
+    'before_each' => 10,
+    'nested_before_each' => 2,
+    'set_up' => 10,
+    'tear_down' => 10,
+    'nested_after_each' => 2,
+    'after_each' => 10,
+    'nested_after_all' => 2,
     'after_all' => 2,
 ];
 
