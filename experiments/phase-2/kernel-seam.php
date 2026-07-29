@@ -8,11 +8,7 @@ use Drove\Kernel\Scheduler;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\TestOutcome;
 
-require __DIR__.'/../../src/Drove/Kernel/Scheduler.php';
-require __DIR__.'/../../src/Drove/Kernel/FailureKind.php';
-require __DIR__.'/../../src/Drove/Kernel/ScopeContext.php';
-require __DIR__.'/../../src/Drove/Kernel/TestOutcome.php';
-require __DIR__.'/../../src/Drove/Kernel/LifecycleExecutor.php';
+require __DIR__.'/vendor/autoload.php';
 
 final class PhaseTwoKernelRuntime
 {
