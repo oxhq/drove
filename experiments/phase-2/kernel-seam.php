@@ -234,6 +234,27 @@ $expect(
     'Semantic projection metadata drifted.',
 );
 
+$invalidPlan = $plan;
+$invalidPlan['root']['hooks'] = [
+    'before_all' => [],
+    'before_each' => [],
+    'after_each' => [],
+    'after_all' => [],
+];
+$invalidPlan['root']['tests'] = [[
+    ...$tests[0],
+    'source' => ['path' => 42, 'line' => 'invalid'],
+]];
+$invalidMetadataRejected = false;
+
+try {
+    $executor->run($invalidPlan);
+} catch (InvalidArgumentException $exception) {
+    $invalidMetadataRejected = $exception->getMessage() === 'Drove Scope IR contains invalid test metadata.';
+}
+
+$expect($invalidMetadataRejected, 'Invalid test metadata crossed the kernel boundary.');
+
 echo json_encode([
     'status' => 'passed',
     'tests' => count($run['tests']),

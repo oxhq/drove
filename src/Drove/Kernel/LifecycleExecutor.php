@@ -16,7 +16,7 @@ use Throwable;
 final readonly class LifecycleExecutor
 {
     /**
-     * @param  Closure(string): (Closure|array{closure: Closure, runtime?: object})  $testResolver
+     * @param  Closure(string): (Closure|array<string, mixed>)  $testResolver
      */
     public function __construct(
         private Scheduler $scheduler,
@@ -802,8 +802,8 @@ final readonly class LifecycleExecutor
             return ['closure' => $test, 'runtime' => null];
         }
 
-        $closure = is_array($test) ? ($test['closure'] ?? null) : null;
-        $runtime = is_array($test) ? ($test['runtime'] ?? null) : null;
+        $closure = $test['closure'] ?? null;
+        $runtime = $test['runtime'] ?? null;
 
         if (! $closure instanceof Closure
             || ($runtime !== null && ! is_object($runtime))) {
@@ -817,8 +817,7 @@ final readonly class LifecycleExecutor
         Closure $closure,
         ScopeContext $context,
         ?object $runtime = null,
-    ): mixed
-    {
+    ): mixed {
         $reflection = new ReflectionFunction($closure);
 
         if ($reflection->getNumberOfRequiredParameters() > 1) {
@@ -843,24 +842,55 @@ final readonly class LifecycleExecutor
         $dataset = $test['dataset'] ?? null;
         $groups = $test['groups'] ?? [];
 
-        if (($name !== null && ! is_string($name))
-            || ($source !== null && (! is_array($source)
-                || ! is_string($source['path'] ?? null)
-                || ! is_int($source['line'] ?? null)))
-            || ($dataset !== null && (! is_array($dataset)
-                || (! is_int($dataset['key'] ?? null) && ! is_string($dataset['key'] ?? null))
-                || ! is_string($dataset['label'] ?? null)))
-            || ! is_array($groups)
-            || ! array_is_list($groups)
-            || array_any($groups, static fn (mixed $group): bool => ! is_string($group))) {
+        if ($name !== null && ! is_string($name)) {
             throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+        }
+
+        $normalizedSource = null;
+
+        if ($source !== null) {
+            $path = is_array($source) ? ($source['path'] ?? null) : null;
+            $line = is_array($source) ? ($source['line'] ?? null) : null;
+
+            if (! is_string($path) || ! is_int($line)) {
+                throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+            }
+
+            $normalizedSource = ['path' => $path, 'line' => $line];
+        }
+
+        $normalizedDataset = null;
+
+        if ($dataset !== null) {
+            $key = is_array($dataset) ? ($dataset['key'] ?? null) : null;
+            $label = is_array($dataset) ? ($dataset['label'] ?? null) : null;
+
+            if ((! is_int($key) && ! is_string($key)) || ! is_string($label)) {
+                throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+            }
+
+            $normalizedDataset = ['key' => $key, 'label' => $label];
+        }
+
+        if (! is_array($groups) || ! array_is_list($groups)) {
+            throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+        }
+
+        $normalizedGroups = [];
+
+        foreach ($groups as $group) {
+            if (! is_string($group)) {
+                throw new InvalidArgumentException('Drove Scope IR contains invalid test metadata.');
+            }
+
+            $normalizedGroups[] = $group;
         }
 
         return [
             'name' => $name,
-            'source' => $source,
-            'dataset' => $dataset,
-            'groups' => $groups,
+            'source' => $normalizedSource,
+            'dataset' => $normalizedDataset,
+            'groups' => $normalizedGroups,
         ];
     }
 

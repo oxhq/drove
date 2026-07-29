@@ -192,10 +192,6 @@ final class Runner
             throw $teardownFailure;
         }
 
-        if (! is_array($run)) {
-            throw new RuntimeException('Drove did not produce a run result.');
-        }
-
         $exitCode = $run['exit_code'] ?? null;
 
         if (! is_int($exitCode)) {
@@ -272,7 +268,7 @@ final class Runner
         }
 
         return [
-            array_values($phpunitArguments),
+            $phpunitArguments,
             $parallel ? ($processes ?? Options::getNumberOfCPUCores()) : 1,
         ];
     }
