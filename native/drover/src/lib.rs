@@ -4,8 +4,9 @@ mod scheduler;
 use crate::protocol::{
     validate_standalone, write_frame, Frame, ERR_JSON, ERR_NULL, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
-use crate::scheduler::{Scheduler, Step, TaskResult};
+use crate::scheduler::{Engine, Scheduler, Step, TaskResult};
 use libc::{c_char, c_int, c_void};
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::ptr;
 use std::time::Duration;
@@ -30,7 +31,7 @@ pub struct DroverAction {
     pub active_count: u32,
     pub max_active: u32,
     pub frame_count: u32,
-    pub task_id: [c_char; 128],
+    pub task_id: [c_char; 512],
     pub failure_kind: [c_char; 64],
     pub message: [c_char; 256],
 }
@@ -50,14 +51,14 @@ impl Default for DroverAction {
             active_count: 0,
             max_active: 0,
             frame_count: 0,
-            task_id: [0; 128],
+            task_id: [0; 512],
             failure_kind: [0; 64],
             message: [0; 256],
         }
     }
 }
 
-struct SchedulerHandle {
+struct MapHandle {
     scheduler: Scheduler,
     last_result: Vec<u8>,
 }
@@ -73,30 +74,126 @@ pub extern "C" fn drover_protocol_max_frame_bytes() -> usize {
 }
 
 #[no_mangle]
-/// Creates a single-threaded Drover scheduler.
+/// Creates the shared native permit engine inherited by every scope host.
 ///
 /// # Safety
 ///
-/// `run_id` must point to a readable, NUL-terminated UTF-8 string.
-pub unsafe extern "C" fn drover_scheduler_new(
+/// Both string pointers must be readable, NUL-terminated UTF-8. The scope
+/// limits string must contain a JSON object whose values are positive integers.
+pub unsafe extern "C" fn drover_engine_new(
     run_id: *const c_char,
     concurrency: u32,
-    queue_capacity: u32,
+    scope_limits_json: *const c_char,
     term_grace_ms: u64,
 ) -> *mut c_void {
     let Ok(run_id) = c_string(run_id) else {
         return ptr::null_mut();
     };
-    let Ok(scheduler) = Scheduler::new(
+    let Ok(scope_limits_json) = c_string(scope_limits_json) else {
+        return ptr::null_mut();
+    };
+    let Ok(scope_limits) = serde_json::from_str::<HashMap<String, usize>>(&scope_limits_json)
+    else {
+        return ptr::null_mut();
+    };
+    let Ok(engine) = Engine::new(
         run_id,
         concurrency as usize,
-        queue_capacity as usize,
+        scope_limits,
         Duration::from_millis(term_grace_ms),
     ) else {
         return ptr::null_mut();
     };
 
-    Box::into_raw(Box::new(SchedulerHandle {
+    Box::into_raw(Box::new(engine)).cast()
+}
+
+#[no_mangle]
+/// Acquires the shared global and configured scope permits for host work.
+///
+/// # Safety
+///
+/// `engine` must be live and exclusively used. `scopes_json` must point to a
+/// readable NUL-terminated JSON list of scope IDs.
+pub unsafe extern "C" fn drover_engine_acquire(
+    engine: *mut c_void,
+    scopes_json: *const c_char,
+) -> i32 {
+    let Some(engine) = engine_handle(engine) else {
+        return ERR_NULL;
+    };
+    let Ok(scopes) = json_string_list(scopes_json) else {
+        return ERR_JSON;
+    };
+
+    engine.acquire(&scopes).map(|_| 0).unwrap_or(ROLE_ERROR)
+}
+
+#[no_mangle]
+/// Releases one matching set of shared host-work permits.
+///
+/// # Safety
+///
+/// `engine` must be live and exclusively used. `scopes_json` must point to the
+/// same readable JSON list previously passed to `drover_engine_acquire`.
+pub unsafe extern "C" fn drover_engine_release(
+    engine: *mut c_void,
+    scopes_json: *const c_char,
+) -> i32 {
+    let Some(engine) = engine_handle(engine) else {
+        return ERR_NULL;
+    };
+    let Ok(scopes) = json_string_list(scopes_json) else {
+        return ERR_JSON;
+    };
+
+    engine.release(&scopes).map(|_| 0).unwrap_or(ROLE_ERROR)
+}
+
+#[no_mangle]
+/// Releases every host-work permit held by this process-local engine copy.
+///
+/// # Safety
+///
+/// `engine` must be a live, exclusively used pointer returned by
+/// `drover_engine_new`.
+pub unsafe extern "C" fn drover_engine_release_all(engine: *mut c_void) -> i32 {
+    let Some(engine) = engine_handle(engine) else {
+        return ERR_NULL;
+    };
+
+    engine.release_all().map(|_| 0).unwrap_or(ROLE_ERROR)
+}
+
+#[no_mangle]
+/// Frees the process-local engine copy and closes its permit descriptors.
+///
+/// # Safety
+///
+/// `engine` must be null or a live pointer returned by `drover_engine_new`. It
+/// must be passed at most once and no map may outlive it.
+pub unsafe extern "C" fn drover_engine_free(engine: *mut c_void) {
+    if !engine.is_null() {
+        drop(Box::from_raw(engine.cast::<Engine>()));
+    }
+}
+
+#[no_mangle]
+/// Creates a fresh native queue for one `Scheduler::map` call.
+///
+/// # Safety
+///
+/// `engine` must be live and exclusively used for the duration of this call.
+/// It must remain alive until the returned map is freed.
+pub unsafe extern "C" fn drover_map_new(engine: *mut c_void, queue_capacity: u32) -> *mut c_void {
+    let Some(engine) = engine_handle(engine) else {
+        return ptr::null_mut();
+    };
+    let Ok(scheduler) = engine.scheduler(queue_capacity as usize) else {
+        return ptr::null_mut();
+    };
+
+    Box::into_raw(Box::new(MapHandle {
         scheduler,
         last_result: Vec::new(),
     }))
@@ -104,58 +201,69 @@ pub unsafe extern "C" fn drover_scheduler_new(
 }
 
 #[no_mangle]
-pub extern "C" fn drover_child_exit(status: c_int) -> ! {
-    unsafe {
-        libc::_exit(status);
-    }
-}
-
-#[no_mangle]
-/// Adds a task descriptor to the native pending queue.
+/// Adds a fully normalized task descriptor to a native map queue.
 ///
 /// # Safety
 ///
-/// `scheduler` must be a live pointer returned by `drover_scheduler_new`, used
-/// without concurrent aliases, and `task_id` must be readable NUL-terminated
-/// UTF-8.
-pub unsafe extern "C" fn drover_scheduler_submit(
-    scheduler: *mut c_void,
+/// `map` must be live and exclusively used. Every string pointer must be
+/// readable NUL-terminated UTF-8; `scopes_json` must contain a JSON list.
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn drover_map_submit(
+    map: *mut c_void,
     task_id: *const c_char,
+    task_kind: *const c_char,
+    scope_id: *const c_char,
+    scopes_json: *const c_char,
     timeout_ms: u64,
+    permit: c_int,
 ) -> i32 {
-    let Some(handle) = scheduler_handle(scheduler) else {
+    let Some(handle) = map_handle(map) else {
         return ERR_NULL;
     };
     let Ok(task_id) = c_string(task_id) else {
         return ERR_NULL;
     };
+    let Ok(task_kind) = c_string(task_kind) else {
+        return ERR_NULL;
+    };
+    let Ok(scope_id) = c_string(scope_id) else {
+        return ERR_NULL;
+    };
+    let Ok(scopes) = json_string_list(scopes_json) else {
+        return ERR_JSON;
+    };
 
-    match handle
-        .scheduler
-        .submit(task_id, Duration::from_millis(timeout_ms))
-    {
+    if !matches!(permit, 0 | 1) {
+        return ROLE_ERROR;
+    }
+
+    match handle.scheduler.submit(
+        task_id,
+        task_kind,
+        scope_id,
+        scopes,
+        timeout_ms,
+        permit == 1,
+    ) {
         Ok(ordinal) => ordinal as i32,
         Err(_) => ROLE_ERROR,
     }
 }
 
 #[no_mangle]
-/// Advances the native event loop by one scheduling action.
+/// Advances one native map queue by one scheduling action.
 ///
 /// # Safety
 ///
-/// `scheduler` must be a live, exclusively used Drover scheduler and `action`
-/// must point to writable memory large enough for `DroverAction`.
-pub unsafe extern "C" fn drover_scheduler_step(
-    scheduler: *mut c_void,
-    action: *mut DroverAction,
-) -> i32 {
+/// `map` must be live and exclusively used. `action` must point to writable
+/// memory large enough for `DroverAction`.
+pub unsafe extern "C" fn drover_map_step(map: *mut c_void, action: *mut DroverAction) -> i32 {
     if action.is_null() {
         return ERR_NULL;
     }
 
     ptr::write(action, DroverAction::default());
-    let Some(handle) = scheduler_handle(scheduler) else {
+    let Some(handle) = map_handle(map) else {
         return ERR_NULL;
     };
     let action = &mut *action;
@@ -192,14 +300,44 @@ pub unsafe extern "C" fn drover_scheduler_step(
 }
 
 #[no_mangle]
-/// Returns the byte length of the most recently emitted result.
+/// Interrupts pending and active work in a native map.
 ///
 /// # Safety
 ///
-/// `scheduler` must be a live, non-concurrently-used pointer returned by
-/// `drover_scheduler_new`.
-pub unsafe extern "C" fn drover_scheduler_last_result_len(scheduler: *mut c_void) -> usize {
-    scheduler_handle(scheduler)
+/// `map` must be a live, exclusively used pointer returned by `drover_map_new`.
+pub unsafe extern "C" fn drover_map_interrupt(map: *mut c_void, signal: c_int) -> i32 {
+    let Some(handle) = map_handle(map) else {
+        return ERR_NULL;
+    };
+
+    handle
+        .scheduler
+        .interrupt(signal)
+        .map(|_| 0)
+        .unwrap_or(ROLE_ERROR)
+}
+
+#[no_mangle]
+/// Immediately kills/reaps active descendants and releases their permits.
+///
+/// # Safety
+///
+/// `map` must be a live, exclusively used pointer returned by `drover_map_new`.
+pub unsafe extern "C" fn drover_map_cancel(map: *mut c_void) {
+    if let Some(handle) = map_handle(map) {
+        handle.scheduler.cancel();
+    }
+}
+
+#[no_mangle]
+/// Returns the byte length of the most recently emitted map result.
+///
+/// # Safety
+///
+/// `map` must be a live, non-concurrently-used pointer returned by
+/// `drover_map_new`.
+pub unsafe extern "C" fn drover_map_last_result_len(map: *mut c_void) -> usize {
+    map_handle(map)
         .map(|handle| handle.last_result.len())
         .unwrap_or(0)
 }
@@ -209,14 +347,14 @@ pub unsafe extern "C" fn drover_scheduler_last_result_len(scheduler: *mut c_void
 ///
 /// # Safety
 ///
-/// `scheduler` must be live and exclusively used. `destination` must be
-/// writable for `capacity` bytes and must not overlap scheduler-owned memory.
-pub unsafe extern "C" fn drover_scheduler_copy_last_result(
-    scheduler: *mut c_void,
+/// `map` must be live and exclusively used. `destination` must be writable for
+/// `capacity` bytes and must not overlap map-owned memory.
+pub unsafe extern "C" fn drover_map_copy_last_result(
+    map: *mut c_void,
     destination: *mut c_char,
     capacity: usize,
 ) -> i32 {
-    let Some(handle) = scheduler_handle(scheduler) else {
+    let Some(handle) = map_handle(map) else {
         return ERR_NULL;
     };
 
@@ -235,43 +373,53 @@ pub unsafe extern "C" fn drover_scheduler_copy_last_result(
 }
 
 #[no_mangle]
-/// Returns the high-water mark of concurrently registered children.
+/// Returns the process-local active-child high-water mark for this map.
 ///
 /// # Safety
 ///
-/// `scheduler` must be a live, non-concurrently-used pointer returned by
-/// `drover_scheduler_new`.
-pub unsafe extern "C" fn drover_scheduler_max_active(scheduler: *mut c_void) -> u32 {
-    scheduler_handle(scheduler)
+/// `map` must be a live, non-concurrently-used pointer returned by
+/// `drover_map_new`.
+pub unsafe extern "C" fn drover_map_max_active(map: *mut c_void) -> u32 {
+    map_handle(map)
         .map(|handle| handle.scheduler.max_active() as u32)
         .unwrap_or(0)
 }
 
 #[no_mangle]
-/// Frees a scheduler and synchronously kills/reaps any registered children.
+/// Frees a native map, killing/reaping active children and releasing permits.
 ///
 /// # Safety
 ///
-/// `scheduler` must be null or a live pointer returned by
-/// `drover_scheduler_new`; it must be passed at most once and have no aliases
-/// in use.
-pub unsafe extern "C" fn drover_scheduler_free(scheduler: *mut c_void) {
-    if !scheduler.is_null() {
-        drop(Box::from_raw(scheduler.cast::<SchedulerHandle>()));
+/// `map` must be null or a live pointer returned by `drover_map_new`. It must
+/// be passed at most once.
+pub unsafe extern "C" fn drover_map_free(map: *mut c_void) {
+    if !map.is_null() {
+        drop(Box::from_raw(map.cast::<MapHandle>()));
     }
 }
 
 #[no_mangle]
-/// Emits one validated, length-prefixed task frame to a child channel.
+pub extern "C" fn drover_child_exit(status: c_int) -> ! {
+    unsafe {
+        libc::_exit(status);
+    }
+}
+
+#[no_mangle]
+/// Emits one canonical ChildProtocol v1 frame to a child channel.
 ///
 /// # Safety
 ///
 /// `fd` must identify a writable Drover child channel. Every string pointer
 /// must point to readable NUL-terminated UTF-8 for the duration of the call.
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn drover_emit_frame(
     fd: c_int,
     run_id: *const c_char,
     task_id: *const c_char,
+    task_kind: *const c_char,
+    scope_id: *const c_char,
+    ordinal: u32,
     sequence: u32,
     event_type: *const c_char,
     payload_json: *const c_char,
@@ -280,6 +428,12 @@ pub unsafe extern "C" fn drover_emit_frame(
         return ERR_NULL;
     };
     let Ok(task_id) = c_string(task_id) else {
+        return ERR_NULL;
+    };
+    let Ok(task_kind) = c_string(task_kind) else {
+        return ERR_NULL;
+    };
+    let Ok(scope_id) = c_string(scope_id) else {
         return ERR_NULL;
     };
     let Ok(event_type) = c_string(event_type) else {
@@ -291,7 +445,9 @@ pub unsafe extern "C" fn drover_emit_frame(
     let Ok(payload) = serde_json::from_str(&payload_json) else {
         return ERR_JSON;
     };
-    let frame = match Frame::new(run_id, task_id, sequence, event_type, payload) {
+    let frame = match Frame::new(
+        run_id, task_id, task_kind, scope_id, ordinal, sequence, event_type, payload,
+    ) {
         Ok(frame) => frame,
         Err(error) => return error.code(),
     };
@@ -302,15 +458,19 @@ pub unsafe extern "C" fn drover_emit_frame(
 }
 
 #[no_mangle]
-/// Validates a JSON frame against an expected v1 envelope and sequence.
+/// Validates one canonical ChildProtocol v1 JSON frame.
 ///
 /// # Safety
 ///
 /// Every string pointer must point to readable NUL-terminated UTF-8 for the
 /// duration of the call.
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn drover_validate_frame_json(
     expected_run_id: *const c_char,
     expected_task_id: *const c_char,
+    expected_task_kind: *const c_char,
+    expected_scope_id: *const c_char,
+    expected_ordinal: u32,
     expected_sequence: u32,
     frame_json: *const c_char,
 ) -> i32 {
@@ -320,37 +480,63 @@ pub unsafe extern "C" fn drover_validate_frame_json(
     let Ok(task_id) = c_string(expected_task_id) else {
         return ERR_NULL;
     };
+    let Ok(task_kind) = c_string(expected_task_kind) else {
+        return ERR_NULL;
+    };
+    let Ok(scope_id) = c_string(expected_scope_id) else {
+        return ERR_NULL;
+    };
     let Ok(frame_json) = c_string(frame_json) else {
         return ERR_NULL;
     };
 
-    validate_standalone(&frame_json, &run_id, &task_id, expected_sequence)
-        .map(|_| 0)
-        .unwrap_or_else(|error| error.code())
+    validate_standalone(
+        &frame_json,
+        &run_id,
+        &task_id,
+        &task_kind,
+        &scope_id,
+        expected_ordinal,
+        expected_sequence,
+    )
+    .map(|_| 0)
+    .unwrap_or_else(|error| error.code())
 }
 
 fn populate_result(action: &mut DroverAction, result: &TaskResult) {
     action.role = ROLE_RESULT;
     action.ordinal = result.ordinal;
-    action.pid = result.pid.unwrap_or(-1);
+    action.pid = result.telemetry.pid.unwrap_or(-1);
     action.status = if result.status == "passed" { 1 } else { 2 };
-    action.timed_out = i32::from(result.timed_out);
-    action.exit_code = result.exit_code.unwrap_or(-1);
-    action.term_signal = result.signal.unwrap_or(0);
-    action.frame_count = result.frames.len() as u32;
-    fill_array(&mut action.task_id, &result.task_id);
+    action.timed_out = i32::from(
+        result
+            .failure
+            .as_ref()
+            .and_then(|failure| failure["kind"].as_str())
+            == Some("timeout"),
+    );
+    action.exit_code = result.telemetry.exit_code.unwrap_or(-1);
+    action.term_signal = result.telemetry.signal.unwrap_or(0);
+    action.frame_count = result.events.len() as u32;
+    fill_array(&mut action.task_id, &result.id);
 
-    if let Some(kind) = result.failure_kind.as_deref() {
-        fill_array(&mut action.failure_kind, kind);
-    }
+    if let Some(failure) = result.failure.as_ref() {
+        if let Some(kind) = failure["kind"].as_str() {
+            fill_array(&mut action.failure_kind, kind);
+        }
 
-    if let Some(message) = result.message.as_deref() {
-        fill_array(&mut action.message, message);
+        if let Some(message) = failure["message"].as_str() {
+            fill_array(&mut action.message, message);
+        }
     }
 }
 
-unsafe fn scheduler_handle<'a>(scheduler: *mut c_void) -> Option<&'a mut SchedulerHandle> {
-    scheduler.cast::<SchedulerHandle>().as_mut()
+unsafe fn engine_handle<'a>(engine: *mut c_void) -> Option<&'a mut Engine> {
+    engine.cast::<Engine>().as_mut()
+}
+
+unsafe fn map_handle<'a>(map: *mut c_void) -> Option<&'a mut MapHandle> {
+    map.cast::<MapHandle>().as_mut()
 }
 
 unsafe fn c_string(pointer: *const c_char) -> Result<String, ()> {
@@ -362,6 +548,12 @@ unsafe fn c_string(pointer: *const c_char) -> Result<String, ()> {
         .to_str()
         .map(str::to_owned)
         .map_err(|_| ())
+}
+
+unsafe fn json_string_list(pointer: *const c_char) -> Result<Vec<String>, ()> {
+    let json = c_string(pointer)?;
+
+    serde_json::from_str(&json).map_err(|_| ())
 }
 
 fn fill_array<const N: usize>(target: &mut [c_char; N], value: &str) {

@@ -1,15 +1,322 @@
-use crate::protocol::{decode_available, Frame, Validator, MAX_BUFFER_BYTES, PROTOCOL_VERSION};
+use crate::protocol::{
+    decode_available, monotonic_ns, write_frame, Frame, ProtocolError, Validator, MAX_BUFFER_BYTES,
+    MAX_STREAM_BYTES,
+};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::os::fd::RawFd;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+const GLOBAL_POOL: &str = "@global";
+const MAX_QUEUE_CAPACITY: usize = 1_000_000;
+
+#[derive(Clone, Copy, Debug)]
+struct PermitPool {
+    read: RawFd,
+    write: RawFd,
+}
+
+#[derive(Clone, Debug)]
+struct PermitRegistry {
+    pools: HashMap<String, PermitPool>,
+}
+
+impl PermitRegistry {
+    fn new(global: usize, scope_limits: HashMap<String, usize>) -> Result<Self, String> {
+        if !(1..=256).contains(&global) {
+            return Err("Drover concurrency must be between 1 and 256.".into());
+        }
+
+        let mut pools = HashMap::new();
+        pools.insert(GLOBAL_POOL.into(), create_pool(global)?);
+
+        for (scope_id, limit) in scope_limits {
+            if scope_id.is_empty() || !(1..=256).contains(&limit) {
+                close_pools(&pools);
+
+                return Err("Drover scope concurrency limits must be between 1 and 256.".into());
+            }
+
+            let name = format!("scope:{scope_id}");
+
+            if pools.contains_key(&name) {
+                close_pools(&pools);
+
+                return Err(format!("Drover received duplicate scope pool {scope_id}."));
+            }
+
+            match create_pool(limit) {
+                Ok(pool) => {
+                    pools.insert(name, pool);
+                }
+                Err(error) => {
+                    close_pools(&pools);
+
+                    return Err(error);
+                }
+            }
+        }
+
+        Ok(Self { pools })
+    }
+
+    fn names(&self, scopes: &[String]) -> Vec<String> {
+        let mut names = Vec::new();
+
+        for scope in scopes.iter().rev() {
+            let name = format!("scope:{scope}");
+
+            if self.pools.contains_key(&name) {
+                names.push(name);
+            }
+        }
+
+        names.push(GLOBAL_POOL.into());
+        names
+    }
+
+    fn try_acquire(&self, names: &[String]) -> Result<bool, String> {
+        let mut acquired = Vec::new();
+
+        for name in names {
+            match self.take(name) {
+                Ok(true) => acquired.push(name.clone()),
+                Ok(false) => {
+                    self.release(&acquired)?;
+
+                    return Ok(false);
+                }
+                Err(error) => {
+                    let _ = self.release(&acquired);
+
+                    return Err(error);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn acquire(&self, names: &[String]) -> Result<(), String> {
+        loop {
+            if self.try_acquire(names)? {
+                return Ok(());
+            }
+
+            self.poll_names(names, 5)?;
+        }
+    }
+
+    fn release(&self, names: &[String]) -> Result<(), String> {
+        for name in names.iter().rev() {
+            let pool = self
+                .pools
+                .get(name)
+                .ok_or_else(|| format!("Drover has no permit pool named {name}."))?;
+            write_byte(pool.write)?;
+        }
+
+        Ok(())
+    }
+
+    fn poll_names(&self, names: &[String], timeout_ms: i32) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        let mut descriptors = Vec::new();
+
+        for name in names {
+            let pool = self
+                .pools
+                .get(name)
+                .ok_or_else(|| format!("Drover has no permit pool named {name}."))?;
+
+            if seen.insert(pool.read) {
+                descriptors.push(libc::pollfd {
+                    fd: pool.read,
+                    events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                });
+            }
+        }
+
+        poll_descriptors(&mut descriptors, timeout_ms)
+    }
+
+    fn append_poll_descriptors(
+        &self,
+        names: impl Iterator<Item = String>,
+        seen: &mut HashSet<RawFd>,
+        descriptors: &mut Vec<libc::pollfd>,
+    ) -> Result<(), String> {
+        for name in names {
+            let pool = self
+                .pools
+                .get(&name)
+                .ok_or_else(|| format!("Drover has no permit pool named {name}."))?;
+
+            if seen.insert(pool.read) {
+                descriptors.push(libc::pollfd {
+                    fd: pool.read,
+                    events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                    revents: 0,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn take(&self, name: &str) -> Result<bool, String> {
+        let pool = self
+            .pools
+            .get(name)
+            .ok_or_else(|| format!("Drover has no permit pool named {name}."))?;
+        let mut byte = 0_u8;
+
+        loop {
+            let result = unsafe { libc::read(pool.read, (&mut byte as *mut u8).cast(), 1) };
+
+            if result == 1 {
+                return if byte == b'.' {
+                    Ok(true)
+                } else {
+                    Err(format!("Drover permit pool {name} was corrupted."))
+                };
+            }
+
+            if result == 0 {
+                return Err(format!("Drover permit pool {name} closed unexpectedly."));
+            }
+
+            let error = io::Error::last_os_error();
+
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+
+            if error.kind() == io::ErrorKind::WouldBlock {
+                return Ok(false);
+            }
+
+            return Err(format!("Drover could not acquire permit {name}: {error}."));
+        }
+    }
+
+    fn close(&self) {
+        close_pools(&self.pools);
+    }
+}
+
+#[derive(Debug)]
+pub struct Engine {
+    run_id: String,
+    grace_ns: u64,
+    registry: PermitRegistry,
+    held: HashMap<String, usize>,
+}
+
+impl Engine {
+    pub fn new(
+        run_id: String,
+        concurrency: usize,
+        scope_limits: HashMap<String, usize>,
+        grace: Duration,
+    ) -> Result<Self, String> {
+        if run_id.is_empty() {
+            return Err("Drover run IDs cannot be empty.".into());
+        }
+
+        if grace.is_zero() || grace > Duration::from_secs(60) {
+            return Err("Drover termination grace must be between 1 ms and 60 seconds.".into());
+        }
+
+        Ok(Self {
+            run_id,
+            grace_ns: grace.as_nanos() as u64,
+            registry: PermitRegistry::new(concurrency, scope_limits)?,
+            held: HashMap::new(),
+        })
+    }
+
+    pub fn scheduler(&self, queue_capacity: usize) -> Result<Scheduler, String> {
+        Scheduler::new(
+            self.run_id.clone(),
+            queue_capacity,
+            self.grace_ns,
+            self.registry.clone(),
+        )
+    }
+
+    pub fn acquire(&mut self, scopes: &[String]) -> Result<(), String> {
+        validate_scopes(scopes)?;
+        let names = self.registry.names(scopes);
+        self.registry.acquire(&names)?;
+
+        for name in names {
+            *self.held.entry(name).or_default() += 1;
+        }
+
+        Ok(())
+    }
+
+    pub fn release(&mut self, scopes: &[String]) -> Result<(), String> {
+        validate_scopes(scopes)?;
+        let names = self.registry.names(scopes);
+
+        if names
+            .iter()
+            .any(|name| self.held.get(name).copied().unwrap_or_default() == 0)
+        {
+            return Err("Drover attempted to release an unheld permit.".into());
+        }
+
+        self.registry.release(&names)?;
+
+        for name in names {
+            let count = self
+                .held
+                .get_mut(&name)
+                .expect("held permit was checked above");
+            *count -= 1;
+
+            if *count == 0 {
+                self.held.remove(&name);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn release_all(&mut self) -> Result<(), String> {
+        let held = std::mem::take(&mut self.held);
+        let mut names = Vec::new();
+
+        for (name, count) in held {
+            names.extend(std::iter::repeat_n(name, count));
+        }
+
+        self.registry.release(&names)
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let _ = self.release_all();
+        self.registry.close();
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Task {
     pub ordinal: u32,
     pub id: String,
-    pub timeout: Duration,
+    pub kind: String,
+    pub scope_id: String,
+    pub timeout_ms: u64,
+    permit_names: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -21,27 +328,36 @@ pub struct ChildRole {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct TaskResult {
-    pub protocol: &'static str,
-    pub version: u32,
-    pub run_id: String,
-    pub task_id: String,
-    pub ordinal: u32,
-    pub status: String,
-    pub failure_kind: Option<String>,
-    pub message: Option<String>,
+pub struct Telemetry {
     pub pid: Option<libc::pid_t>,
+    pub pgid: Option<libc::pid_t>,
+    pub started_ns: Option<u64>,
+    pub finished_ns: Option<u64>,
+    pub duration_ms: Option<f64>,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
-    pub timed_out: bool,
-    pub duration_ms: u64,
-    pub frames: Vec<Frame>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TaskResult {
+    pub id: String,
+    pub kind: String,
+    pub scope_id: String,
+    pub ordinal: u32,
+    pub status: String,
+    pub failure: Option<Value>,
+    pub value: Value,
+    pub stdout: String,
+    pub stderr: String,
+    pub memory_peak_bytes: Option<u64>,
+    pub events: Vec<Frame>,
+    pub telemetry: Telemetry,
 }
 
 #[derive(Debug)]
 pub enum Step {
     Child(ChildRole),
-    Result(TaskResult),
+    Result(Box<TaskResult>),
     Progress,
     Done,
 }
@@ -51,42 +367,64 @@ struct ActiveTask {
     task: Task,
     pid: libc::pid_t,
     fd: RawFd,
-    started_at: Instant,
-    deadline: Instant,
-    cleanup_at: Option<Instant>,
-    timed_out: bool,
-    kill_sent: bool,
     reaped: bool,
     wait_status: Option<i32>,
     eof: bool,
     buffer: Vec<u8>,
     validator: Validator,
     frames: Vec<Frame>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    value_buffer: Vec<u8>,
+    started_ns: Option<u64>,
+    deadline_ns: Option<u64>,
+    finished_ns: Option<u64>,
+    terminal_received_ns: Option<u64>,
     terminal: Option<Frame>,
+    memory_peak_bytes: Option<u64>,
     protocol_error: Option<String>,
+    timed_out: bool,
+    term_ns: Option<u64>,
+    interrupted_signal: Option<i32>,
+    cleanup_term_ns: Option<u64>,
+    kill_ns: Option<u64>,
+    cleanup_failed: bool,
 }
 
 impl ActiveTask {
     fn new(task: Task, pid: libc::pid_t, fd: RawFd, run_id: &str) -> Self {
-        let started_at = Instant::now();
-
         Self {
-            deadline: started_at + task.timeout,
-            validator: Validator::new(run_id.into(), task.id.clone()),
+            validator: Validator::new(
+                run_id.into(),
+                task.id.clone(),
+                task.kind.clone(),
+                task.scope_id.clone(),
+                task.ordinal,
+            ),
             task,
             pid,
             fd,
-            started_at,
-            cleanup_at: None,
-            timed_out: false,
-            kill_sent: false,
             reaped: false,
             wait_status: None,
             eof: false,
             buffer: Vec::new(),
             frames: Vec::new(),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            value_buffer: Vec::new(),
+            started_ns: None,
+            deadline_ns: None,
+            finished_ns: None,
+            terminal_received_ns: None,
             terminal: None,
+            memory_peak_bytes: None,
             protocol_error: None,
+            timed_out: false,
+            term_ns: None,
+            interrupted_signal: None,
+            cleanup_term_ns: None,
+            kill_ns: None,
+            cleanup_failed: false,
         }
     }
 
@@ -105,7 +443,7 @@ impl ActiveTask {
 
                 if self.buffer.len() > MAX_BUFFER_BYTES {
                     self.protocol_error
-                        .get_or_insert_with(|| "Drover child buffer exceeded the v1 limit.".into());
+                        .get_or_insert_with(|| "Drove child buffer exceeded the v1 limit.".into());
                     break;
                 }
 
@@ -136,11 +474,10 @@ impl ActiveTask {
             match decode_available(&mut self.buffer, &mut self.validator) {
                 Ok(frames) => {
                     for frame in frames {
-                        if frame.event_type == "task.finished" {
-                            self.terminal = Some(frame.clone());
+                        if let Err(error) = self.accept_frame(frame) {
+                            self.protocol_error = Some(error);
+                            break;
                         }
-
-                        self.frames.push(frame);
                     }
                 }
                 Err(error) => {
@@ -151,11 +488,61 @@ impl ActiveTask {
 
         if self.eof && !self.buffer.is_empty() {
             self.protocol_error
-                .get_or_insert_with(|| "Drover received a truncated child frame.".into());
+                .get_or_insert_with(|| "Drove received a truncated child frame.".into());
         }
     }
 
-    fn reap(&mut self) {
+    fn accept_frame(&mut self, mut frame: Frame) -> Result<(), String> {
+        match frame.event_type.as_str() {
+            "task.started" => {
+                let started_ns = frame.payload["started_ns"]
+                    .as_u64()
+                    .ok_or_else(|| "Drove received an invalid child start.".to_string())?;
+                self.started_ns = Some(started_ns);
+                self.deadline_ns = (self.task.timeout_ms > 0)
+                    .then(|| started_ns.checked_add(self.task.timeout_ms.saturating_mul(1_000_000)))
+                    .flatten();
+
+                if self.task.timeout_ms > 0 && self.deadline_ns.is_none() {
+                    return Err("The Drove task deadline overflowed.".into());
+                }
+            }
+            "task.stdout" | "task.stderr" | "task.value" => {
+                let encoded = frame.payload["data"]
+                    .as_str()
+                    .ok_or_else(|| "Drove received an invalid child data chunk.".to_string())?;
+                let bytes = STANDARD
+                    .decode(encoded)
+                    .map_err(|_| "Drove received invalid base64 child data.".to_string())?;
+                let target = match frame.event_type.as_str() {
+                    "task.stdout" => &mut self.stdout,
+                    "task.stderr" => &mut self.stderr,
+                    "task.value" => &mut self.value_buffer,
+                    _ => unreachable!(),
+                };
+
+                if target.len().saturating_add(bytes.len()) > MAX_STREAM_BYTES {
+                    return Err("A Drove child stream exceeded 64 MiB.".into());
+                }
+
+                target.extend_from_slice(&bytes);
+                frame.payload = json!({ "bytes": encoded.len() });
+            }
+            "task.finished" => {
+                self.finished_ns = frame.payload["finished_ns"].as_u64();
+                self.memory_peak_bytes = frame.payload["memory_peak_bytes"].as_u64();
+                self.terminal_received_ns =
+                    Some(monotonic_ns().map_err(|error| error.to_string())?);
+                self.terminal = Some(frame.clone());
+            }
+            _ => return Err("Drove received an invalid child event sequence.".into()),
+        }
+
+        self.frames.push(frame);
+        Ok(())
+    }
+
+    fn reap(&mut self, now_ns: u64) {
         if self.reaped {
             return;
         }
@@ -166,6 +553,8 @@ impl ActiveTask {
         if waited == self.pid {
             self.reaped = true;
             self.wait_status = Some(status);
+            self.finished_ns.get_or_insert(now_ns);
+
             return;
         }
 
@@ -177,178 +566,264 @@ impl ActiveTask {
             }
 
             self.reaped = true;
+            self.finished_ns.get_or_insert(now_ns);
             self.protocol_error
-                .get_or_insert_with(|| format!("Drover lost a child while waiting: {error}."));
+                .get_or_insert_with(|| format!("waitpid() lost the Drove child: {error}."));
         }
     }
 
     fn exit_code(&self) -> Option<i32> {
         let status = self.wait_status?;
 
-        if libc::WIFEXITED(status) {
-            Some(libc::WEXITSTATUS(status))
-        } else {
-            None
-        }
+        libc::WIFEXITED(status).then(|| libc::WEXITSTATUS(status))
     }
 
     fn signal(&self) -> Option<i32> {
         let status = self.wait_status?;
 
-        if libc::WIFSIGNALED(status) {
-            Some(libc::WTERMSIG(status))
-        } else {
-            None
-        }
+        libc::WIFSIGNALED(status).then(|| libc::WTERMSIG(status))
     }
 
     fn normalize_terminal_consistency(&mut self) {
-        if !self.reaped || self.timed_out || self.protocol_error.is_some() {
+        if !self.reaped
+            || self.timed_out
+            || self.interrupted_signal.is_some()
+            || self.protocol_error.is_some()
+            || self.signal().is_some()
+        {
             return;
         }
 
         let Some(terminal) = self.terminal.as_ref() else {
-            if self.signal().is_none() {
-                self.protocol_error = Some("Drover child exited without a terminal result.".into());
-            }
+            self.protocol_error = Some(format!(
+                "The Drove task exited without a terminal result (exit {}).",
+                self.exit_code()
+                    .map_or_else(|| "unknown".into(), |code| code.to_string())
+            ));
 
             return;
         };
 
-        let status = terminal
-            .payload
-            .get("status")
-            .and_then(serde_json::Value::as_str);
-
-        match (status, self.exit_code()) {
-            (Some("passed"), Some(0)) => {}
-            (Some("failed"), Some(code)) if code != 0 => {}
-            (Some("passed"), code) => {
-                self.protocol_error = Some(format!(
-                    "A passing Drover child exited with {}.",
-                    code.map_or_else(|| "no exit code".into(), |value| value.to_string())
-                ));
-            }
-            (Some("failed"), code) => {
-                self.protocol_error = Some(format!(
-                    "A failed Drover child exited with {}.",
-                    code.map_or_else(|| "no exit code".into(), |value| value.to_string())
-                ));
-            }
-            _ => {
-                self.protocol_error =
-                    Some("Drover received a terminal result without a valid status.".into());
-            }
+        if terminal.payload["status"].as_str() == Some("passed") && self.exit_code() != Some(0) {
+            self.protocol_error = Some("A passing Drove task exited unsuccessfully.".into());
         }
     }
 
-    fn begin_cleanup(&mut self, now: Instant) {
-        if self.cleanup_at.is_some() {
+    fn begin_cleanup(&mut self, now_ns: u64) {
+        if self.cleanup_term_ns.is_some() {
             return;
         }
 
         unsafe {
             libc::kill(-self.pid, libc::SIGTERM);
         }
-        self.cleanup_at = Some(now);
+        self.cleanup_term_ns = Some(now_ns);
     }
 
-    fn enforce(&mut self, now: Instant, grace: Duration) {
-        if !self.reaped && !self.timed_out && now >= self.deadline {
-            self.timed_out = true;
-            self.begin_cleanup(now);
+    fn interrupt(&mut self, signal: i32, now_ns: u64) {
+        if self.interrupted_signal.is_some() {
+            return;
+        }
+
+        self.interrupted_signal = Some(signal);
+        self.begin_cleanup(now_ns);
+    }
+
+    fn enforce(&mut self, now_ns: u64, grace_ns: u64) {
+        if !self.reaped
+            && !self.timed_out
+            && self.interrupted_signal.is_none()
+            && self.task.timeout_ms > 0
+        {
+            if let Some(deadline_ns) = self.deadline_ns {
+                let terminal_grace = self
+                    .terminal_received_ns
+                    .map(|received| received.saturating_add(grace_ns))
+                    .unwrap_or_default();
+
+                if now_ns >= deadline_ns.max(terminal_grace) {
+                    unsafe {
+                        libc::kill(-self.pid, libc::SIGTERM);
+                    }
+                    self.timed_out = true;
+                    self.term_ns = Some(now_ns);
+                }
+            }
         }
 
         self.normalize_terminal_consistency();
 
-        if self.protocol_error.is_some() || (self.reaped && self.signal().is_some()) {
-            self.begin_cleanup(now);
+        if self.protocol_error.is_some() && !self.reaped {
+            self.begin_cleanup(now_ns);
         }
 
-        if let Some(cleanup_at) = self.cleanup_at {
-            if !self.kill_sent && now.saturating_duration_since(cleanup_at) >= grace {
-                unsafe {
-                    libc::kill(-self.pid, libc::SIGKILL);
-                }
-                self.kill_sent = true;
+        if self.reaped && !self.eof {
+            self.begin_cleanup(now_ns);
+        }
+
+        let escalation_ns = self.term_ns.or(self.cleanup_term_ns);
+
+        if self.kill_ns.is_none()
+            && escalation_ns.is_some_and(|started| now_ns.saturating_sub(started) >= grace_ns)
+        {
+            unsafe {
+                libc::kill(-self.pid, libc::SIGKILL);
             }
+            self.kill_ns = Some(now_ns);
+        }
+
+        if self.reaped
+            && !self.eof
+            && self
+                .kill_ns
+                .is_some_and(|killed| now_ns.saturating_sub(killed) >= grace_ns)
+        {
+            self.cleanup_failed = true;
+            self.eof = true;
         }
     }
 
     fn ready(&self) -> bool {
-        self.reaped && self.eof && self.cleanup_at.map(|_| self.kill_sent).unwrap_or(true)
+        let cleanup_complete = if self.term_ns.is_some() || self.cleanup_term_ns.is_some() {
+            self.kill_ns.is_some()
+        } else {
+            true
+        };
+
+        self.reaped && self.eof && cleanup_complete
     }
 
-    fn into_result(self, run_id: &str) -> TaskResult {
+    fn into_result(self) -> TaskResult {
         let exit_code = self.exit_code();
         let signal = self.signal();
-        let duration_ms = self.started_at.elapsed().as_millis() as u64;
+        let telemetry = telemetry(
+            Some(self.pid),
+            self.started_ns,
+            self.finished_ns,
+            exit_code,
+            signal,
+        );
 
-        let (status, failure_kind, message) = if self.timed_out {
-            (
-                "failed".into(),
-                Some("timeout".into()),
-                Some("The Drover task exceeded its monotonic timeout.".into()),
-            )
-        } else if let Some(error) = self.protocol_error {
-            (
-                "failed".into(),
-                Some("child_protocol_failure".into()),
-                Some(error),
-            )
-        } else if let Some(signal) = signal {
-            (
-                "failed".into(),
-                Some("signal_termination".into()),
-                Some(format!("The Drover task ended from signal {signal}.")),
-            )
-        } else if let Some(terminal) = self.terminal {
-            let terminal_status = terminal
-                .payload
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("failed");
+        if let Some(interrupted) = self.interrupted_signal {
+            return failed_result(
+                self.task,
+                "user_interruption",
+                format!("The Drove run was interrupted by signal {interrupted}."),
+                telemetry,
+                self.frames,
+            );
+        }
 
-            if terminal_status == "passed" {
-                ("passed".into(), None, None)
-            } else {
-                (
-                    "failed".into(),
-                    terminal
-                        .payload
-                        .get("failure_kind")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned),
-                    terminal
-                        .payload
-                        .get("message")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned),
-                )
+        if self.timed_out {
+            return failed_result(
+                self.task,
+                "timeout",
+                "The Drove task exceeded its timeout.".into(),
+                telemetry,
+                self.frames,
+            );
+        }
+
+        if self.cleanup_failed {
+            return failed_result(
+                self.task,
+                "blocked_descendant",
+                "A Drove descendant kept the task channel open after forced cleanup.".into(),
+                telemetry,
+                self.frames,
+            );
+        }
+
+        if let Some(signal) = signal {
+            return failed_result(
+                self.task,
+                "signal_termination",
+                format!("The Drove task ended from signal {signal}."),
+                telemetry,
+                self.frames,
+            );
+        }
+
+        if let Some(error) = self.protocol_error {
+            return failed_result(
+                self.task,
+                "child_protocol_failure",
+                error,
+                telemetry,
+                self.frames,
+            );
+        }
+
+        let Some(terminal) = self.terminal else {
+            return failed_result(
+                self.task,
+                "child_protocol_failure",
+                format!(
+                    "The Drove task exited without a terminal result (exit {}).",
+                    exit_code.map_or_else(|| "unknown".into(), |code| code.to_string())
+                ),
+                telemetry,
+                self.frames,
+            );
+        };
+
+        let value = match serde_json::from_slice(&self.value_buffer) {
+            Ok(value) => value,
+            Err(error) => {
+                return failed_result(
+                    self.task,
+                    "child_protocol_failure",
+                    error.to_string(),
+                    telemetry,
+                    self.frames,
+                );
             }
-        } else {
-            (
-                "failed".into(),
-                Some("child_protocol_failure".into()),
-                Some("The Drover task produced no terminal result.".into()),
-            )
+        };
+        let stdout = match String::from_utf8(self.stdout) {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                return failed_result(
+                    self.task,
+                    "child_protocol_failure",
+                    error.to_string(),
+                    telemetry,
+                    self.frames,
+                );
+            }
+        };
+        let stderr = match String::from_utf8(self.stderr) {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                return failed_result(
+                    self.task,
+                    "child_protocol_failure",
+                    error.to_string(),
+                    telemetry,
+                    self.frames,
+                );
+            }
         };
 
         TaskResult {
-            protocol: "drover.result",
-            version: PROTOCOL_VERSION,
-            run_id: run_id.into(),
-            task_id: self.task.id,
+            id: self.task.id,
+            kind: self.task.kind,
+            scope_id: self.task.scope_id,
             ordinal: self.task.ordinal,
-            status,
-            failure_kind,
-            message,
-            pid: Some(self.pid),
-            exit_code,
-            signal,
-            timed_out: self.timed_out,
-            duration_ms,
-            frames: self.frames,
+            status: terminal.payload["status"]
+                .as_str()
+                .unwrap_or("failed")
+                .into(),
+            failure: terminal
+                .payload
+                .get("failure")
+                .filter(|failure| !failure.is_null())
+                .cloned(),
+            value,
+            stdout,
+            stderr,
+            memory_peak_bytes: self.memory_peak_bytes,
+            events: self.frames,
+            telemetry,
         }
     }
 }
@@ -356,62 +831,65 @@ impl ActiveTask {
 #[derive(Debug)]
 pub struct Scheduler {
     run_id: String,
-    concurrency: usize,
     queue_capacity: usize,
-    grace: Duration,
+    grace_ns: u64,
+    registry: PermitRegistry,
     next_ordinal: u32,
     submitted: HashSet<String>,
     pending: VecDeque<Task>,
     active: HashMap<libc::pid_t, ActiveTask>,
     completed: VecDeque<TaskResult>,
     max_active: usize,
+    interrupted_signal: Option<i32>,
 }
 
 impl Scheduler {
-    pub fn new(
+    fn new(
         run_id: String,
-        concurrency: usize,
         queue_capacity: usize,
-        grace: Duration,
+        grace_ns: u64,
+        registry: PermitRegistry,
     ) -> Result<Self, String> {
-        if run_id.is_empty() {
-            return Err("Drover run IDs cannot be empty.".into());
-        }
-
-        if !(1..=256).contains(&concurrency) {
-            return Err("Drover concurrency must be between 1 and 256.".into());
-        }
-
-        if !(1..=1_000_000).contains(&queue_capacity) {
-            return Err("Drover queue capacity must be between 1 and 1000000.".into());
-        }
-
-        if grace.is_zero() {
-            return Err("Drover termination grace must be positive.".into());
+        if !(1..=MAX_QUEUE_CAPACITY).contains(&queue_capacity) {
+            return Err(format!(
+                "Drover queue capacity must be between 1 and {MAX_QUEUE_CAPACITY}."
+            ));
         }
 
         Ok(Self {
             run_id,
-            concurrency,
             queue_capacity,
-            grace,
+            grace_ns,
+            registry,
             next_ordinal: 0,
             submitted: HashSet::new(),
             pending: VecDeque::new(),
             active: HashMap::new(),
             completed: VecDeque::new(),
             max_active: 0,
+            interrupted_signal: None,
         })
     }
 
-    pub fn submit(&mut self, task_id: String, timeout: Duration) -> Result<u32, String> {
-        if task_id.is_empty() || task_id.len() >= 128 {
-            return Err("Drover task IDs must contain between 1 and 127 bytes.".into());
+    #[allow(clippy::too_many_arguments)]
+    pub fn submit(
+        &mut self,
+        id: String,
+        kind: String,
+        scope_id: String,
+        scopes: Vec<String>,
+        timeout_ms: u64,
+        permit: bool,
+    ) -> Result<u32, String> {
+        if id.is_empty() || id.len() >= 512 {
+            return Err("Drove task IDs must contain between 1 and 511 bytes.".into());
         }
 
-        if timeout.is_zero() {
-            return Err("Drover task timeouts must be positive.".into());
+        if !matches!(kind.as_str(), "scope" | "test") || scope_id.is_empty() {
+            return Err("Drove received an invalid process task identity.".into());
         }
+
+        validate_scopes(&scopes)?;
 
         if self.pending.len() >= self.queue_capacity {
             return Err(format!(
@@ -420,34 +898,42 @@ impl Scheduler {
             ));
         }
 
-        if !self.submitted.insert(task_id.clone()) {
-            return Err(format!("Duplicate Drover task ID {task_id}."));
+        if !self.submitted.insert(id.clone()) {
+            return Err(format!("Duplicate Drove task ID {id}."));
         }
 
         let ordinal = self.next_ordinal;
         self.next_ordinal = self
             .next_ordinal
             .checked_add(1)
-            .ok_or_else(|| "Drover task ordinal overflowed.".to_string())?;
+            .ok_or_else(|| "Drove task ordinal overflowed.".to_string())?;
+        let permit_names = if permit {
+            self.registry.names(&scopes)
+        } else {
+            Vec::new()
+        };
         self.pending.push_back(Task {
             ordinal,
-            id: task_id,
-            timeout,
+            id,
+            kind,
+            scope_id,
+            timeout_ms,
+            permit_names,
         });
 
         Ok(ordinal)
     }
 
     pub fn step(&mut self) -> Result<Step, String> {
-        self.collect();
+        self.collect()?;
 
         if let Some(result) = self.completed.pop_front() {
-            return Ok(Step::Result(result));
+            return Ok(Step::Result(Box::new(result)));
         }
 
-        if self.active.len() < self.concurrency {
-            if let Some(task) = self.pending.pop_front() {
-                return self.spawn(task);
+        if self.interrupted_signal.is_none() {
+            if let Some(step) = self.spawn_available()? {
+                return Ok(step);
             }
         }
 
@@ -456,13 +942,38 @@ impl Scheduler {
         }
 
         self.poll_once()?;
-        self.collect();
+        self.collect()?;
 
         if let Some(result) = self.completed.pop_front() {
-            return Ok(Step::Result(result));
+            return Ok(Step::Result(Box::new(result)));
         }
 
         Ok(Step::Progress)
+    }
+
+    pub fn interrupt(&mut self, signal: i32) -> Result<(), String> {
+        if self.interrupted_signal.is_some() {
+            return Ok(());
+        }
+
+        self.interrupted_signal = Some(signal);
+        let now_ns = monotonic_ns().map_err(|error| error.to_string())?;
+
+        while let Some(task) = self.pending.pop_front() {
+            self.completed.push_back(failed_result(
+                task,
+                "user_interruption",
+                format!("The Drove run was interrupted by signal {signal}."),
+                empty_telemetry(),
+                Vec::new(),
+            ));
+        }
+
+        for active in self.active.values_mut() {
+            active.interrupt(signal, now_ns);
+        }
+
+        Ok(())
     }
 
     pub fn active_count(&self) -> usize {
@@ -473,9 +984,47 @@ impl Scheduler {
         self.max_active
     }
 
+    pub fn cancel(&mut self) {
+        let active = std::mem::take(&mut self.active);
+
+        for (_, child) in active {
+            unsafe {
+                libc::kill(-child.pid, libc::SIGKILL);
+                libc::kill(child.pid, libc::SIGKILL);
+                libc::close(child.fd);
+            }
+
+            wait_blocking(child.pid);
+            let _ = self.registry.release(&child.task.permit_names);
+        }
+
+        self.pending.clear();
+    }
+
+    fn spawn_available(&mut self) -> Result<Option<Step>, String> {
+        for index in 0..self.pending.len() {
+            let permit_names = &self
+                .pending
+                .get(index)
+                .expect("pending index came from its length")
+                .permit_names;
+
+            if !self.registry.try_acquire(permit_names)? {
+                continue;
+            }
+
+            let task = self
+                .pending
+                .remove(index)
+                .expect("pending task existed while reserving permits");
+
+            return self.spawn(task).map(Some);
+        }
+
+        Ok(None)
+    }
+
     fn spawn(&mut self, task: Task) -> Result<Step, String> {
-        // The active slot is checked before this method and this scheduler is
-        // deliberately single-threaded, so capacity is reserved before fork.
         let mut sockets = [0_i32; 2];
         let socket_result = unsafe {
             libc::socketpair(
@@ -487,13 +1036,16 @@ impl Scheduler {
         };
 
         if socket_result != 0 {
-            self.completed.push_back(self.immediate_failure(
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
                 task,
                 "fork_failure",
                 format!(
-                    "Drover could not create a child channel: {}.",
+                    "Unable to create a Drove child channel: {}.",
                     io::Error::last_os_error()
                 ),
+                empty_telemetry(),
+                Vec::new(),
             ));
 
             return Ok(Step::Progress);
@@ -506,13 +1058,16 @@ impl Scheduler {
                 libc::close(sockets[0]);
                 libc::close(sockets[1]);
             }
-            self.completed.push_back(self.immediate_failure(
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
                 task,
                 "fork_failure",
                 format!(
-                    "Drover could not fork a PHP task: {}.",
+                    "Unable to fork a Drove task: {}.",
                     io::Error::last_os_error()
                 ),
+                empty_telemetry(),
+                Vec::new(),
             ));
 
             return Ok(Step::Progress);
@@ -527,9 +1082,13 @@ impl Scheduler {
                 }
 
                 libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+            }
 
-                if libc::setpgid(0, 0) != 0 {
-                    libc::_exit(126);
+            if unsafe { libc::setpgid(0, 0) } != 0 {
+                write_process_group_failure(sockets[1], &self.run_id, &task);
+
+                unsafe {
+                    libc::_exit(1);
                 }
             }
 
@@ -549,14 +1108,22 @@ impl Scheduler {
         if let Err(error) = set_nonblocking(sockets[0]) {
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
+                libc::kill(pid, libc::SIGKILL);
                 libc::close(sockets[0]);
-                libc::waitpid(pid, std::ptr::null_mut(), 0);
             }
-            self.completed
-                .push_back(self.immediate_failure(task, "fork_failure", error));
+            wait_blocking(pid);
+            self.registry.release(&task.permit_names)?;
+            self.completed.push_back(failed_result(
+                task,
+                "fork_failure",
+                error,
+                empty_telemetry(),
+                Vec::new(),
+            ));
 
             return Ok(Step::Progress);
         }
+
         self.active
             .insert(pid, ActiveTask::new(task, pid, sockets[0], &self.run_id));
         self.max_active = self.max_active.max(self.active.len());
@@ -564,9 +1131,15 @@ impl Scheduler {
         Ok(Step::Progress)
     }
 
-    fn collect(&mut self) {
-        let now = Instant::now();
-        let pids: Vec<_> = self.active.keys().copied().collect();
+    fn collect(&mut self) -> Result<(), String> {
+        let now_ns = monotonic_ns().map_err(|error| error.to_string())?;
+        let mut pids: Vec<_> = self.active.keys().copied().collect();
+        pids.sort_by_key(|pid| {
+            self.active
+                .get(pid)
+                .map(|active| active.task.ordinal)
+                .unwrap_or(u32::MAX)
+        });
         let mut ready = Vec::new();
 
         for pid in pids {
@@ -575,8 +1148,8 @@ impl Scheduler {
             };
 
             active.read_available();
-            active.reap();
-            active.enforce(now, self.grace);
+            active.reap(now_ns);
+            active.enforce(now_ns, self.grace_ns);
             active.read_available();
 
             if active.ready() {
@@ -589,101 +1162,159 @@ impl Scheduler {
                 unsafe {
                     libc::close(active.fd);
                 }
-                self.completed.push_back(active.into_result(&self.run_id));
-            }
-        }
-    }
-
-    fn poll_once(&self) -> Result<(), String> {
-        let mut descriptors: Vec<_> = self
-            .active
-            .values()
-            .map(|active| libc::pollfd {
-                fd: active.fd,
-                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
-                revents: 0,
-            })
-            .collect();
-
-        if descriptors.is_empty() {
-            return Ok(());
-        }
-
-        let timeout = self.poll_timeout_ms();
-        let result = unsafe {
-            libc::poll(
-                descriptors.as_mut_ptr(),
-                descriptors.len() as libc::nfds_t,
-                timeout,
-            )
-        };
-
-        if result == -1 {
-            let error = io::Error::last_os_error();
-
-            if error.kind() != io::ErrorKind::Interrupted {
-                return Err(format!("Drover poll failed: {error}."));
+                self.registry.release(&active.task.permit_names)?;
+                self.completed.push_back(active.into_result());
             }
         }
 
         Ok(())
     }
 
-    fn poll_timeout_ms(&self) -> i32 {
-        let now = Instant::now();
-        let mut timeout = Duration::from_millis(5);
+    fn poll_once(&self) -> Result<(), String> {
+        let mut descriptors = Vec::new();
+        let mut seen = HashSet::new();
 
         for active in self.active.values() {
-            let target = if let Some(cleanup_at) = active.cleanup_at {
-                if active.kill_sent {
-                    continue;
-                }
-
-                cleanup_at + self.grace
-            } else {
-                active.deadline
-            };
-
-            timeout = timeout.min(target.saturating_duration_since(now));
+            seen.insert(active.fd);
+            descriptors.push(libc::pollfd {
+                fd: active.fd,
+                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                revents: 0,
+            });
         }
 
-        timeout.as_millis().min(5) as i32
+        self.registry.append_poll_descriptors(
+            self.pending
+                .iter()
+                .flat_map(|task| task.permit_names.iter().cloned()),
+            &mut seen,
+            &mut descriptors,
+        )?;
+
+        poll_descriptors(&mut descriptors, self.poll_timeout_ms())
     }
 
-    fn immediate_failure(&self, task: Task, failure_kind: &str, message: String) -> TaskResult {
-        TaskResult {
-            protocol: "drover.result",
-            version: PROTOCOL_VERSION,
-            run_id: self.run_id.clone(),
-            task_id: task.id,
-            ordinal: task.ordinal,
-            status: "failed".into(),
-            failure_kind: Some(failure_kind.into()),
-            message: Some(message),
-            pid: None,
-            exit_code: None,
-            signal: None,
-            timed_out: false,
-            duration_ms: 0,
-            frames: Vec::new(),
+    fn poll_timeout_ms(&self) -> i32 {
+        let Ok(now_ns) = monotonic_ns() else {
+            return 0;
+        };
+        let mut timeout_ns = 5_000_000_u64;
+
+        for active in self.active.values() {
+            let target = if let Some(kill_ns) = active.kill_ns {
+                kill_ns.saturating_add(self.grace_ns)
+            } else if let Some(term_ns) = active.term_ns.or(active.cleanup_term_ns) {
+                term_ns.saturating_add(self.grace_ns)
+            } else if let Some(deadline_ns) = active.deadline_ns {
+                deadline_ns.max(
+                    active
+                        .terminal_received_ns
+                        .map(|received| received.saturating_add(self.grace_ns))
+                        .unwrap_or_default(),
+                )
+            } else {
+                continue;
+            };
+
+            timeout_ns = timeout_ns.min(target.saturating_sub(now_ns));
         }
+
+        (timeout_ns / 1_000_000).min(5) as i32
     }
 }
 
 impl Drop for Scheduler {
     fn drop(&mut self) {
-        for active in self.active.values() {
-            unsafe {
-                libc::kill(-active.pid, libc::SIGKILL);
-                libc::close(active.fd);
-            }
+        self.cancel();
+    }
+}
+
+fn validate_scopes(scopes: &[String]) -> Result<(), String> {
+    if scopes.iter().any(String::is_empty) {
+        return Err("Drove task scopes cannot be empty.".into());
+    }
+
+    let unique: HashSet<_> = scopes.iter().collect();
+
+    if unique.len() != scopes.len() {
+        return Err("Drove task scopes cannot contain duplicates.".into());
+    }
+
+    Ok(())
+}
+
+fn create_pool(limit: usize) -> Result<PermitPool, String> {
+    let mut sockets = [0_i32; 2];
+
+    if unsafe {
+        libc::socketpair(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
+            0,
+            sockets.as_mut_ptr(),
+        )
+    } != 0
+    {
+        return Err(format!(
+            "Drover could not create a concurrency permit pool: {}.",
+            io::Error::last_os_error()
+        ));
+    }
+
+    if let Err(error) = set_nonblocking(sockets[0]) {
+        unsafe {
+            libc::close(sockets[0]);
+            libc::close(sockets[1]);
         }
 
-        for pid in self.active.keys() {
+        return Err(error);
+    }
+
+    for _ in 0..limit {
+        if let Err(error) = write_byte(sockets[1]) {
             unsafe {
-                libc::waitpid(*pid, std::ptr::null_mut(), 0);
+                libc::close(sockets[0]);
+                libc::close(sockets[1]);
             }
+
+            return Err(error);
         }
+    }
+
+    Ok(PermitPool {
+        read: sockets[0],
+        write: sockets[1],
+    })
+}
+
+fn close_pools(pools: &HashMap<String, PermitPool>) {
+    for pool in pools.values() {
+        unsafe {
+            libc::close(pool.read);
+            libc::close(pool.write);
+        }
+    }
+}
+
+fn write_byte(fd: RawFd) -> Result<(), String> {
+    let byte = b'.';
+
+    loop {
+        let result = unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
+
+        if result == 1 {
+            return Ok(());
+        }
+
+        let error = io::Error::last_os_error();
+
+        if error.kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+
+        return Err(format!(
+            "Drover could not release a concurrency permit: {error}."
+        ));
     }
 }
 
@@ -692,12 +1323,168 @@ fn set_nonblocking(fd: RawFd) -> Result<(), String> {
 
     if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
         return Err(format!(
-            "Drover could not make a child channel nonblocking: {}.",
+            "Drover could not make a descriptor nonblocking: {}.",
             io::Error::last_os_error()
         ));
     }
 
     Ok(())
+}
+
+fn poll_descriptors(descriptors: &mut [libc::pollfd], timeout_ms: i32) -> Result<(), String> {
+    if descriptors.is_empty() {
+        return Ok(());
+    }
+
+    let result = unsafe {
+        libc::poll(
+            descriptors.as_mut_ptr(),
+            descriptors.len() as libc::nfds_t,
+            timeout_ms,
+        )
+    };
+
+    if result == -1 {
+        let error = io::Error::last_os_error();
+
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(format!("Drover poll failed: {error}."));
+        }
+    }
+
+    Ok(())
+}
+
+fn wait_blocking(pid: libc::pid_t) {
+    loop {
+        let result = unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) };
+
+        if result == pid
+            || result == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+        {
+            return;
+        }
+
+        if result == -1 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return;
+        }
+    }
+}
+
+fn telemetry(
+    pid: Option<libc::pid_t>,
+    started_ns: Option<u64>,
+    finished_ns: Option<u64>,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+) -> Telemetry {
+    let duration_ms = started_ns.zip(finished_ns).map(|(started, finished)| {
+        let duration = finished.saturating_sub(started) as f64 / 1_000_000.0;
+
+        (duration * 1_000.0).round() / 1_000.0
+    });
+
+    Telemetry {
+        pid,
+        pgid: pid,
+        started_ns,
+        finished_ns,
+        duration_ms,
+        exit_code,
+        signal,
+    }
+}
+
+fn empty_telemetry() -> Telemetry {
+    telemetry(None, None, None, None, None)
+}
+
+fn scheduler_failure(kind: &str, message: String) -> Value {
+    json!({
+        "kind": kind,
+        "message": message,
+        "class": null,
+        "file": null,
+        "line": null,
+        "phase": "scheduler",
+        "hook_id": null
+    })
+}
+
+fn failed_result(
+    task: Task,
+    kind: &str,
+    message: String,
+    telemetry: Telemetry,
+    events: Vec<Frame>,
+) -> TaskResult {
+    TaskResult {
+        id: task.id,
+        kind: task.kind,
+        scope_id: task.scope_id,
+        ordinal: task.ordinal,
+        status: "failed".into(),
+        failure: Some(scheduler_failure(kind, message)),
+        value: Value::Null,
+        stdout: String::new(),
+        stderr: String::new(),
+        memory_peak_bytes: None,
+        events,
+        telemetry,
+    }
+}
+
+fn write_process_group_failure(fd: RawFd, run_id: &str, task: &Task) {
+    let Ok(started_ns) = monotonic_ns() else {
+        return;
+    };
+    let Ok(started) = Frame::new(
+        run_id.into(),
+        task.id.clone(),
+        task.kind.clone(),
+        task.scope_id.clone(),
+        task.ordinal,
+        0,
+        "task.started".into(),
+        json!({ "started_ns": started_ns }),
+    ) else {
+        return;
+    };
+    let finished_ns = monotonic_ns().unwrap_or(started_ns);
+    let Ok(finished) = Frame::new(
+        run_id.into(),
+        task.id.clone(),
+        task.kind.clone(),
+        task.scope_id.clone(),
+        task.ordinal,
+        1,
+        "task.finished".into(),
+        json!({
+            "status": "failed",
+            "failure": {
+                "kind": "fork_failure",
+                "message": "The Drove child could not create its process group.",
+                "class": null,
+                "file": null,
+                "line": null,
+                "phase": "process_group",
+                "hook_id": null
+            },
+            "finished_ns": finished_ns,
+            "memory_peak_bytes": null
+        }),
+    ) else {
+        return;
+    };
+
+    let _ = write_frame(fd, &started);
+    let _ = write_frame(fd, &finished);
+}
+
+impl From<ProtocolError> for String {
+    fn from(error: ProtocolError) -> Self {
+        error.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -706,18 +1493,51 @@ mod tests {
 
     #[test]
     fn rejects_work_beyond_the_pending_queue_capacity() {
-        let mut scheduler =
-            Scheduler::new("bounded-run".into(), 1, 1, Duration::from_millis(10)).unwrap();
+        let engine = Engine::new(
+            "bounded-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(1).unwrap();
 
         assert_eq!(
             scheduler
-                .submit("task:first".into(), Duration::from_millis(10))
+                .submit(
+                    "task:first".into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    10,
+                    true,
+                )
                 .unwrap(),
             0
         );
         assert!(scheduler
-            .submit("task:overflow".into(), Duration::from_millis(10))
+            .submit(
+                "task:overflow".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                10,
+                true,
+            )
             .unwrap_err()
             .contains("reached its 1 task capacity"));
+    }
+
+    #[test]
+    fn shared_pool_reserves_before_any_fork() {
+        let registry = PermitRegistry::new(1, HashMap::new()).unwrap();
+        let names = registry.names(&["scope:root".into()]);
+
+        assert!(registry.try_acquire(&names).unwrap());
+        assert!(!registry.try_acquire(&names).unwrap());
+        registry.release(&names).unwrap();
+        assert!(registry.try_acquire(&names).unwrap());
+        registry.release(&names).unwrap();
+        registry.close();
     }
 }

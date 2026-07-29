@@ -1,1 +1,1 @@
-{"protocol":"drover.task","version":1,"run_id":"golden-run","task_id":"task:golden","sequence":2,"type":"task.finished","monotonic_ns":300,"payload":{"status":"passed","value":{"ok":true}}}
+{"protocol_version":1,"run_id":"golden-run","task_id":"task:golden","task_kind":"test","scope_id":"scope:golden","ordinal":7,"sequence":3,"type":"task.finished","payload":{"status":"passed","failure":null,"finished_ns":300,"memory_peak_bytes":4096}}

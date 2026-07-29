@@ -29,7 +29,7 @@ final class PcntlScheduler implements Scheduler
     private array $heldPermits = [];
 
     /**
-     * @param  array<string, int>  $scopeConcurrency
+     * @param  array<string, mixed>  $scopeConcurrency
      */
     public function __construct(
         private readonly string $runId,
@@ -50,7 +50,11 @@ final class PcntlScheduler implements Scheduler
             }
         }
 
-        if ($runId === '' || $concurrency < 1 || $defaultTimeoutMs < 1 || $termGraceMs < 1) {
+        if ($runId === ''
+            || $concurrency < 1
+            || $concurrency > 256
+            || $defaultTimeoutMs < 1
+            || $termGraceMs < 1) {
             throw new InvalidArgumentException('Drove received invalid scheduler configuration.');
         }
 
@@ -58,8 +62,8 @@ final class PcntlScheduler implements Scheduler
         $this->pools['@global'] = $this->createPool($concurrency);
 
         foreach ($scopeConcurrency as $scopeId => $limit) {
-            if ($scopeId === '' || $limit < 1) {
-                throw new InvalidArgumentException('Drove scope concurrency limits must be positive.');
+            if ($scopeId === '' || ! is_int($limit) || $limit < 1 || $limit > 256) {
+                throw new InvalidArgumentException('Drove scope concurrency limits must be between 1 and 256.');
             }
 
             $this->pools['scope:'.$scopeId] = $this->createPool($limit);

@@ -9,9 +9,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+base64 = "0.22.1"
 libc = "0.2.174"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.142"
+serde_json = { version = "1.0.142", features = ["preserve_order"] }
 
 [profile.release]
 codegen-units = 1

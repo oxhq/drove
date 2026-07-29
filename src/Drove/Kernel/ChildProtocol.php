@@ -140,6 +140,47 @@ final readonly class ChildProtocol
     }
 
     /**
+     * Validates shared protocol vectors through the same parser used by the
+     * PHP scheduler.
+     *
+     * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
+     * @param  list<string>  $jsonFrames
+     * @return array{frames: list<array<string, mixed>>, stdout: string, stderr: string, value: mixed}
+     */
+    public function validateSequence(array $task, array $jsonFrames): array
+    {
+        $child = [
+            'task' => $task,
+            'frames' => [],
+            'stdout' => '',
+            'stderr' => '',
+            'value_buffer' => '',
+            'protocol_error' => null,
+            'started_ns' => null,
+            'deadline_ns' => null,
+            'finished_ns' => null,
+            'terminal_received_ns' => null,
+            'finished' => null,
+        ];
+
+        foreach ($jsonFrames as $json) {
+            $frame = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+            $this->acceptFrame($child, $frame);
+        }
+
+        if ($child['finished'] === null) {
+            throw new RuntimeException('Drove protocol vectors did not contain a terminal frame.');
+        }
+
+        return [
+            'frames' => $child['frames'],
+            'stdout' => $child['stdout'],
+            'stderr' => $child['stderr'],
+            'value' => $this->value($child),
+        ];
+    }
+
+    /**
      * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -192,8 +233,21 @@ final readonly class ChildProtocol
     {
         $task = $child['task'];
         $sequence = count($child['frames']);
+        $keys = [
+            'protocol_version',
+            'run_id',
+            'task_id',
+            'task_kind',
+            'scope_id',
+            'ordinal',
+            'sequence',
+            'type',
+            'payload',
+        ];
 
         if (! is_array($frame)
+            || count($frame) !== count($keys)
+            || array_diff(array_keys($frame), $keys) !== []
             || ($frame['protocol_version'] ?? null) !== self::VERSION
             || ($frame['run_id'] ?? null) !== $this->runId
             || ($frame['task_id'] ?? null) !== $task['id']
@@ -209,11 +263,13 @@ final readonly class ChildProtocol
         $type = $frame['type'] ?? null;
 
         if ($sequence === 0) {
-            if ($type !== 'task.started' || ! is_int($frame['payload']['started_ns'] ?? null)) {
+            $startedNs = $frame['payload']['started_ns'] ?? null;
+
+            if ($type !== 'task.started' || ! is_int($startedNs) || $startedNs < 0) {
                 throw new RuntimeException('Drove received an invalid child start.');
             }
 
-            $child['started_ns'] = $frame['payload']['started_ns'];
+            $child['started_ns'] = $startedNs;
             $child['deadline_ns'] = $child['started_ns'] + $task['timeout_ms'] * 1_000_000;
         } elseif (in_array($type, ['task.stdout', 'task.stderr', 'task.value'], true)) {
             $this->acceptChunk($child, $type, $frame['payload']);
@@ -271,7 +327,8 @@ final readonly class ChildProtocol
 
         if (! in_array($status, ['passed', 'failed'], true)
             || ! is_int($finishedNs)
-            || ($memoryPeakBytes !== null && ! is_int($memoryPeakBytes))
+            || $finishedNs < 0
+            || ($memoryPeakBytes !== null && (! is_int($memoryPeakBytes) || $memoryPeakBytes < 0))
             || ($status === 'passed' && $failure !== null)
             || ($status === 'failed' && ! $this->validFailure($failure))) {
             throw new RuntimeException('Drove received an invalid terminal child event.');

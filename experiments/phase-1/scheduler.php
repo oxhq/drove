@@ -22,6 +22,26 @@ $task = static fn (string $id, string $kind = 'test', int $timeout = 1_000, bool
     'permit' => $permit,
 ];
 
+$rejectsInvalidConfiguration = static function (Closure $create): bool {
+    try {
+        $create();
+    } catch (InvalidArgumentException) {
+        return true;
+    }
+
+    return false;
+};
+$assert(
+    $rejectsInvalidConfiguration(static fn (): PcntlScheduler => new PcntlScheduler('scheduler-global-bound', 257)),
+    'The PHP scheduler accepted global concurrency above 256.',
+);
+$assert(
+    $rejectsInvalidConfiguration(
+        static fn (): PcntlScheduler => new PcntlScheduler('scheduler-scope-bound', 1, ['root' => 257]),
+    ),
+    'The PHP scheduler accepted scope concurrency above 256.',
+);
+
 $parentPid = getmypid();
 $bounded = new PcntlScheduler('scheduler-bounded', 1);
 $boundedRun = $bounded->map(
