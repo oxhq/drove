@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e42d1a824456ff956c9127d1fc78ef14",
+    "content-hash": "23f2462ff020c1647624b4b5df5c42a9",
     "packages": [
         {
             "name": "brianium/paratest",
@@ -2967,7 +2967,7 @@
             "version": "0.4.0-alpha.1",
             "dist": {
                 "type": "path",
-                "url": "/drove"
+                "url": "../.."
             },
             "require": {
                 "brianium/paratest": "^7.23.0",
@@ -3143,7 +3143,7 @@
             },
             "transport-options": {
                 "symlink": false,
-                "relative": false
+                "relative": true
             }
         },
         {
@@ -3151,7 +3151,7 @@
             "version": "0.4.0-alpha.1",
             "dist": {
                 "type": "path",
-                "url": "/drove/packages/drove-laravel"
+                "url": "../../packages/drove-laravel"
             },
             "require": {
                 "laravel/framework": "^13.0",
@@ -3192,7 +3192,7 @@
             },
             "transport-options": {
                 "symlink": false,
-                "relative": false
+                "relative": true
             }
         },
         {

@@ -6,7 +6,7 @@
     "repositories": [
         {
             "type": "path",
-            "url": "/drove",
+            "url": "../..",
             "options": {
                 "reference": "none",
                 "symlink": false,
@@ -17,7 +17,7 @@
         },
         {
             "type": "path",
-            "url": "/drove/packages/drove-laravel",
+            "url": "../../packages/drove-laravel",
             "options": {
                 "reference": "none",
                 "symlink": false,

@@ -81,7 +81,6 @@ jobs:
         COMPOSER_ROOT_VERSION: 0.4.0-alpha.1
       run: |
         set -euo pipefail
-        sudo ln -s "$GITHUB_WORKSPACE" /drove
         composer --working-dir=experiments/phase-3-laravel install \
           --no-interaction --no-progress --ansi
         composer --working-dir=experiments/phase-3-laravel validate --strict
