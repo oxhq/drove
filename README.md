@@ -1,12 +1,13 @@
 # Drove
 
-Drove is an experimental fork of Pest exploring hierarchical prepared-state
-snapshots and native parallel execution.
+Drove is an experimental hard fork of Pest used to validate hierarchical
+prepared-state testing and native parallel execution. Its intended destination
+is an independent framework with a Pest-compatible frontend, not a permanent
+downstream fork.
 
-The current `refactor/phase-2` branch is a source-built Linux compatibility
-alpha. Supported Pest syntax is compiled into Drove's independent Scope IR,
-executed by the lifecycle kernel, and scheduled through the Rust-backed Drover
-engine.
+This repository currently contains a source-built Linux compatibility alpha.
+Supported Pest syntax is compiled into Drove's independent Scope IR, executed
+by the lifecycle kernel, and scheduled through the Rust-backed Drover engine.
 
 The proven compatibility surface includes:
 
