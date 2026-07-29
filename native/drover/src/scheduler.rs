@@ -441,6 +441,24 @@ impl ActiveTask {
             if read > 0 {
                 self.buffer.extend_from_slice(&chunk[..read as usize]);
 
+                match decode_available(&mut self.buffer, &mut self.validator) {
+                    Ok(frames) => {
+                        for frame in frames {
+                            if let Err(error) = self.accept_frame(frame) {
+                                self.protocol_error = Some(error);
+                                break;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.protocol_error = Some(error.to_string());
+                    }
+                }
+
+                if self.protocol_error.is_some() {
+                    break;
+                }
+
                 if self.buffer.len() > MAX_BUFFER_BYTES {
                     self.protocol_error
                         .get_or_insert_with(|| "Drove child buffer exceeded the v1 limit.".into());
@@ -468,22 +486,6 @@ impl ActiveTask {
             self.protocol_error
                 .get_or_insert_with(|| format!("Drover could not read a child channel: {error}."));
             break;
-        }
-
-        if self.protocol_error.is_none() {
-            match decode_available(&mut self.buffer, &mut self.validator) {
-                Ok(frames) => {
-                    for frame in frames {
-                        if let Err(error) = self.accept_frame(frame) {
-                            self.protocol_error = Some(error);
-                            break;
-                        }
-                    }
-                }
-                Err(error) => {
-                    self.protocol_error = Some(error.to_string());
-                }
-            }
         }
 
         if self.eof && !self.buffer.is_empty() {
@@ -586,6 +588,7 @@ impl ActiveTask {
 
     fn normalize_terminal_consistency(&mut self) {
         if !self.reaped
+            || !self.eof
             || self.timed_out
             || self.interrupted_signal.is_some()
             || self.protocol_error.is_some()
@@ -724,16 +727,6 @@ impl ActiveTask {
             );
         }
 
-        if self.cleanup_failed {
-            return failed_result(
-                self.task,
-                "blocked_descendant",
-                "A Drove descendant kept the task channel open after forced cleanup.".into(),
-                telemetry,
-                self.frames,
-            );
-        }
-
         if let Some(signal) = signal {
             return failed_result(
                 self.task,
@@ -749,6 +742,16 @@ impl ActiveTask {
                 self.task,
                 "child_protocol_failure",
                 error,
+                telemetry,
+                self.frames,
+            );
+        }
+
+        if self.cleanup_failed {
+            return failed_result(
+                self.task,
+                "blocked_descendant",
+                "A Drove descendant kept the task channel open after forced cleanup.".into(),
                 telemetry,
                 self.frames,
             );
@@ -1149,8 +1152,8 @@ impl Scheduler {
 
             active.read_available();
             active.reap(now_ns);
-            active.enforce(now_ns, self.grace_ns);
             active.read_available();
+            active.enforce(now_ns, self.grace_ns);
 
             if active.ready() {
                 ready.push(pid);
@@ -1490,6 +1493,94 @@ impl From<ProtocolError> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Seek, SeekFrom, Write};
+    use std::os::fd::AsRawFd;
+
+    #[test]
+    fn drains_multiframe_result_after_reap() {
+        let run_id = "multiframe-run";
+        let task = Task {
+            ordinal: 0,
+            id: "task:multiframe".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1_000,
+            permit_names: Vec::new(),
+        };
+        let path = std::env::temp_dir().join(format!(
+            "drover-multiframe-{}-{}",
+            std::process::id(),
+            monotonic_ns().unwrap()
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        {
+            let mut write = |sequence, event_type: &str, payload| {
+                let frame = Frame::new(
+                    run_id.into(),
+                    task.id.clone(),
+                    task.kind.clone(),
+                    task.scope_id.clone(),
+                    task.ordinal,
+                    sequence,
+                    event_type.into(),
+                    payload,
+                )
+                .unwrap();
+                file.write_all(&crate::protocol::encode_frame(&frame).unwrap())
+                    .unwrap();
+            };
+            let data = STANDARD.encode(vec![b'x'; 524_288]);
+            write(
+                0,
+                "task.started",
+                json!({ "started_ns": monotonic_ns().unwrap() }),
+            );
+
+            for sequence in 1..=4 {
+                write(
+                    sequence,
+                    "task.stdout",
+                    json!({ "encoding": "base64", "data": data }),
+                );
+            }
+
+            write(
+                5,
+                "task.value",
+                json!({ "encoding": "base64", "data": STANDARD.encode(b"null") }),
+            );
+            write(
+                6,
+                "task.finished",
+                json!({
+                    "status": "passed",
+                    "failure": null,
+                    "finished_ns": monotonic_ns().unwrap(),
+                    "memory_peak_bytes": null
+                }),
+            );
+        }
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut active = ActiveTask::new(task, 42, file.as_raw_fd(), run_id);
+        active.reaped = true;
+        active.wait_status = Some(0);
+        active.normalize_terminal_consistency();
+        assert!(active.protocol_error.is_none());
+
+        active.read_available();
+        assert!(active.eof);
+        assert!(active.protocol_error.is_none());
+        assert_eq!(active.stdout.len(), 2_097_152);
+        assert!(active.terminal.is_some());
+
+        drop(file);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn rejects_work_beyond_the_pending_queue_capacity() {
