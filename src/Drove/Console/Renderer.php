@@ -77,7 +77,11 @@ final class Renderer
             $lines[] = sprintf(' %s %s', $failures === [] ? '✓' : '⨯', $id);
 
             foreach ($failures as $failure) {
-                if (! is_array($failure) || ! is_string($failure['message'] ?? null)) {
+                if (! is_array($failure)) {
+                    continue;
+                }
+
+                if (! is_string($failure['message'] ?? null)) {
                     continue;
                 }
 
