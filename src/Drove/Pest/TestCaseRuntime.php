@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drove\Pest;
 
 use Closure;
+use Drove\Coverage\Aggregator as CoverageAggregator;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\SkipScope;
 use Drove\Kernel\TestOutcome;
@@ -51,6 +52,7 @@ final class TestCaseRuntime
         private readonly ?Closure $prepareCase,
         private readonly bool $reportUselessTests,
         private readonly bool $capturePhpunitWarnings,
+        private readonly ?CoverageAggregator $coverage,
     ) {
         //
     }
@@ -64,8 +66,14 @@ final class TestCaseRuntime
         ?Closure $prepareCase = null,
         bool $reportUselessTests = true,
         bool $capturePhpunitWarnings = false,
+        ?CoverageAggregator $coverage = null,
     ): self {
-        $runtime = new self($prepareCase, $reportUselessTests, $capturePhpunitWarnings);
+        $runtime = new self(
+            $prepareCase,
+            $reportUselessTests,
+            $capturePhpunitWarnings,
+            $coverage,
+        );
         $pestFiles = $compiler->files();
         $casesByFile = [];
         $classLifecycles = [];
@@ -201,6 +209,7 @@ final class TestCaseRuntime
         $this->ran[$id] = true;
         Assert::resetCount();
         $errorHandlerEnabled = false;
+        $coverageCapture = null;
         $phpunitWarningsBefore = $this->capturePhpunitWarnings
             ? TestResultFacade::result()->numberOfPhpunitWarnings()
             : 0;
@@ -222,9 +231,12 @@ final class TestCaseRuntime
                 $errorHandlerEnabled = true;
             }
 
+            $coverageCapture = $this->coverage?->start($case);
             $case->runBare();
         } catch (Throwable $throwable) {
             if ($case->status()->isUnknown()) {
+                $this->coverage?->abort($coverageCapture);
+
                 throw $throwable;
             }
 
@@ -265,6 +277,11 @@ final class TestCaseRuntime
             $phpunitStatus->isRisky() => 'risky',
             default => 'failed',
         };
+        $this->coverage?->finish(
+            $case,
+            $coverageCapture,
+            ! in_array($status, ['skipped', 'todo', 'incomplete', 'risky'], true),
+        );
 
         return [
             'id' => $id,

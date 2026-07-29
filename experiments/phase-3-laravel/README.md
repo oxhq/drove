@@ -26,6 +26,7 @@ Run from the repository root:
 ```bash
 docker build -f experiments/phase-3-laravel/Dockerfile -t drove-phase-three-laravel .
 docker run --rm drove-phase-three-laravel
+docker run --rm drove-phase-three-laravel php proof-state-capabilities.php
 docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
 docker run --rm drove-phase-three-laravel php proof-testbench.php
 docker run --rm drove-phase-three-laravel php proof-data-provider.php

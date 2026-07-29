@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Drove\Laravel;
 
-use Closure;
+use Drove\Environment\CoordinationGuarantee;
+use Drove\Environment\EnvironmentPlan;
+use Drove\Environment\EnvironmentRuntime;
+use Drove\Environment\ResourceKind;
+use Drove\Environment\ResourcePlan;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Drove\Laravel\Contracts\DatabaseStateAdapter;
@@ -18,66 +22,12 @@ use Illuminate\Foundation\Testing\TestCase as LaravelTestCase;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\TestSuite;
-use ReflectionClass;
-use ReflectionMethod;
 use ReflectionProperty;
 use Throwable;
 
-final class LaravelRuntime
+final class LaravelRuntime implements EnvironmentRuntime
 {
     public const string ROOT_PID_BINDING = 'drove.laravel.root_pid';
-
-    private const string TESTBENCH_TEST_CASE = 'Orchestra\\Testbench\\TestCase';
-
-    private const string TESTBENCH_ATTRIBUTE_NAMESPACE = 'Orchestra\\Testbench\\Attributes\\';
-
-    private const string TESTBENCH_CONCERN_NAMESPACE = 'Orchestra\\Testbench\\Concerns\\';
-
-    /** @var list<string> */
-    private const array TESTBENCH_APPLICATION_PROPERTIES = [
-        'enablesPackageDiscoveries',
-        'loadEnvironmentVariables',
-    ];
-
-    /** @var list<string> */
-    private const array TESTBENCH_APPLICATION_MUTATORS = [
-        'applicationConsoleKernelUsingWorkbench',
-        'applicationExceptionHandlerUsingWorkbench',
-        'applicationHttpKernelUsingWorkbench',
-        'createApplication',
-        'defineDatabaseMigrations',
-        'defineEnvironment',
-        'defineRoutes',
-        'defineWebRoutes',
-        'getApplicationAliases',
-        'getApplicationBasePath',
-        'getApplicationBootstrapFile',
-        'getApplicationProviders',
-        'getApplicationTimezone',
-        'getEnvironmentSetUp',
-        'getPackageAliases',
-        'getPackageBootstrappers',
-        'getPackageProviders',
-        'hasCustomApplicationKernels',
-        'ignorePackageDiscoveriesFrom',
-        'overrideApplicationAliases',
-        'overrideApplicationBindings',
-        'overrideApplicationProviders',
-        'resolveApplication',
-        'resolveApplicationBootstrappers',
-        'resolveApplicationConfiguration',
-        'resolveApplicationConsoleKernel',
-        'resolveApplicationCore',
-        'resolveApplicationEnvironmentVariables',
-        'resolveApplicationExceptionHandler',
-        'resolveApplicationFacades',
-        'resolveApplicationHttpKernel',
-        'resolveApplicationHttpMiddlewares',
-        'resolveApplicationRateLimiting',
-        'resolveApplicationResolvingCallback',
-        'setUpApplicationRoutes',
-        'usesTestbenchDefaultSkeleton',
-    ];
 
     /** @var list<string> */
     private const array RUNTIME_MODES = [
@@ -89,6 +39,8 @@ final class LaravelRuntime
     private static ?self $active = null;
 
     private readonly ScopeContext $scope;
+
+    private readonly EnvironmentPlan $environment;
 
     /** @var resource|null */
     private mixed $testbenchDuskFileLock = null;
@@ -103,12 +55,43 @@ final class LaravelRuntime
         private readonly DatabaseStateAdapter $state,
         private readonly ?string $testbenchProfile = null,
     ) {
+        $this->environment = new EnvironmentPlan(
+            [
+                $state->resourcePlan(),
+                new ResourcePlan(
+                    ResourceKind::Filesystem,
+                    null,
+                    [],
+                    ['Filesystem state is unmanaged in this alpha.'],
+                ),
+                new ResourcePlan(
+                    ResourceKind::Cache,
+                    null,
+                    [],
+                    ['Cache state is unmanaged in this alpha.'],
+                ),
+                new ResourcePlan(
+                    ResourceKind::Queue,
+                    null,
+                    [],
+                    ['Queue state is unmanaged in this alpha.'],
+                ),
+                new ResourcePlan(
+                    ResourceKind::ObjectStorage,
+                    null,
+                    [],
+                    ['Object-storage state is unmanaged in this alpha.'],
+                ),
+            ],
+            CoordinationGuarantee::BestEffort,
+        );
         $this->scope = new ScopeContext(
             application: $application,
             values: ['drove.laravel.runtime' => $this],
             metadata: [
                 'framework' => 'laravel',
                 'state_adapter' => $state->name(),
+                'environment_plan' => $this->environment->toArray(),
             ],
         );
     }
@@ -192,9 +175,8 @@ final class LaravelRuntime
                 continue;
             }
 
-            if (is_a($case, self::TESTBENCH_TEST_CASE)) {
-                self::assertNoTestbenchAttributes($case);
-                self::assertNoTestbenchSetupCallback($case);
+            if (TestbenchBridge::isTestCase($case)) {
+                TestbenchBridge::inspect($case);
                 $testbenchCases[] = $case;
 
                 continue;
@@ -234,7 +216,7 @@ final class LaravelRuntime
         $profiles = [];
 
         foreach ($testbenchCases as $case) {
-            $profile = self::testbenchProfile($case);
+            $profile = TestbenchBridge::profile($case);
             $profiles[$profile] = $case;
         }
 
@@ -270,14 +252,7 @@ final class LaravelRuntime
         self::preflightTestbenchState($suite, $state);
         $representative = $profiles[$profile];
 
-        $application = (new ReflectionMethod($representative, 'createApplication'))
-            ->invoke($representative);
-
-        if (! $application instanceof Application) {
-            throw new StateAdapterException(
-                'Orchestra Testbench createApplication() did not return an Application.',
-            );
-        }
+        $application = TestbenchBridge::createApplication($representative);
 
         if (! $application->providerIsLoaded(DroveLaravelServiceProvider::class)) {
             $application->register(DroveLaravelServiceProvider::class);
@@ -349,11 +324,24 @@ final class LaravelRuntime
         return $this->state;
     }
 
+    public function environmentPlan(): EnvironmentPlan
+    {
+        return $this->environment;
+    }
+
+    /**
+     * @param  array<string, mixed>  $suitePlan
+     */
+    public function assertPlanSupported(array $suitePlan): void
+    {
+        $this->environment->assertSuiteSupported($suitePlan);
+    }
+
     public function bindTestCase(TestCase $case, ScopeContext $scope): void
     {
         $this->assertScope($scope);
 
-        if (is_a($case, 'Orchestra\\Testbench\\TestCase')) {
+        if (TestbenchBridge::isTestCase($case)) {
             $this->bindTestbenchTestCase($case);
 
             return;
@@ -386,66 +374,11 @@ final class LaravelRuntime
             );
         }
 
-        $profile = self::testbenchProfile($case);
-
-        if ($profile !== $this->testbenchProfile) {
-            throw new StateAdapterException(sprintf(
-                'Drove Laravel cannot bind Orchestra Testbench application profile %s to %s.',
-                $profile,
-                $this->testbenchProfile,
-            ));
-        }
-
         $this->state->assertTestCaseSupported($case);
-        $app = new ReflectionProperty($case, 'app');
-        $app->setAccessible(true);
-        $bound = $app->getValue($case);
-
-        if ($bound !== null && $bound !== $this->application) {
-            throw new StateAdapterException(sprintf(
-                'Orchestra Testbench TestCase %s is already bound to another application.',
-                $case::class,
-            ));
-        }
-
-        $callback = new ReflectionProperty($case, 'testCaseSetUpCallback');
-        $callback->setAccessible(true);
-
-        $application = $this->application;
-        (new ReflectionMethod($case, 'setUpTheEnvironmentUsing'))->invoke(
+        TestbenchBridge::bind(
             $case,
-            static function (Closure $setUp) use (
-                $app,
-                $application,
-                $case,
-            ): void {
-                $prepared = false;
-                $preparedSetUp = static function () use (
-                    &$prepared,
-                    $app,
-                    $application,
-                    $case,
-                    $setUp,
-                ): void {
-                    if ($prepared) {
-                        return;
-                    }
-
-                    $prepared = true;
-                    $app->setValue($case, $application);
-                    (new ReflectionMethod(
-                        $case,
-                        'setUpTheTestEnvironmentUsingTestCase',
-                    ))->invoke($case);
-                    (new ReflectionMethod(
-                        $case,
-                        'setUpParallelTestingCallbacks',
-                    ))->invoke($case);
-                    $setUp();
-                };
-
-                $preparedSetUp();
-            },
+            $this->application,
+            $this->testbenchProfile,
         );
     }
 
@@ -455,6 +388,7 @@ final class LaravelRuntime
     public function beforeDispatch(ScopeContext $scope, array $tasks): void
     {
         $this->assertScope($scope);
+        $this->environment->assertDispatchSupported($tasks);
         $this->state->beforeDispatch($scope, $tasks);
     }
 
@@ -514,7 +448,7 @@ final class LaravelRuntime
         foreach ($suite->collect() as $case) {
             if ($case instanceof LaravelTestCase
                 || ($case instanceof TestCase
-                    && is_a($case, self::TESTBENCH_TEST_CASE))) {
+                    && TestbenchBridge::isTestCase($case))) {
                 $this->state->assertTestCaseSupported($case);
             }
         }
@@ -546,7 +480,7 @@ final class LaravelRuntime
 
         foreach ($suite->collect() as $case) {
             if ($case instanceof TestCase
-                && is_a($case, self::TESTBENCH_TEST_CASE)) {
+                && TestbenchBridge::isTestCase($case)) {
                 $state->preflightTestCase($case);
             }
         }
@@ -645,11 +579,7 @@ final class LaravelRuntime
     private function isTestbenchDuskFileScope(array $task): bool
     {
         return $this->testbenchProfile !== null
-            && is_a(
-                $this->testbenchProfile,
-                'Orchestra\\Testbench\\Dusk\\TestCase',
-                true,
-            )
+            && TestbenchBridge::isDuskProfile($this->testbenchProfile)
             && ($task['kind'] ?? null) === 'scope'
             && is_string($task['id'] ?? null)
             && str_starts_with($task['id'], 'file:');
@@ -715,9 +645,10 @@ final class LaravelRuntime
 
     private static function assertRuntimeRequirements(): void
     {
-        if (PHP_OS_FAMILY !== 'Linux' || ! function_exists('pcntl_fork')) {
+        if (! in_array(PHP_OS_FAMILY, ['Darwin', 'Linux'], true)
+            || ! function_exists('pcntl_fork')) {
             throw new StateAdapterException(
-                'Drove Laravel requires Linux and the pcntl extension.',
+                'Drove Laravel requires Linux or macOS and the pcntl extension.',
             );
         }
 
@@ -752,162 +683,5 @@ final class LaravelRuntime
         }
 
         return $mode;
-    }
-
-    /**
-     * @return class-string
-     */
-    private static function testbenchProfile(TestCase $case): string
-    {
-        $class = self::testbenchCaseClass($case);
-        $ancestry = [];
-
-        while ($class !== self::TESTBENCH_TEST_CASE) {
-            $ancestry[] = $class;
-            $class = get_parent_class($class);
-
-            if (! is_string($class)) {
-                throw new StateAdapterException(sprintf(
-                    'Drove Laravel could not resolve the Orchestra Testbench profile for %s.',
-                    $case::class,
-                ));
-            }
-        }
-
-        $custom = array_values(array_filter(
-            $ancestry,
-            static fn (string $candidate): bool => ! str_starts_with(
-                $candidate,
-                'Orchestra\\Testbench\\',
-            ),
-        ));
-        $profile = end($custom);
-
-        if (! is_string($profile)) {
-            throw new StateAdapterException(sprintf(
-                'Drove Laravel could not resolve the Orchestra Testbench profile for %s.',
-                $case::class,
-            ));
-        }
-
-        foreach ($custom as $candidate) {
-            if ($candidate === $profile) {
-                continue;
-            }
-
-            $reflection = new ReflectionClass($candidate);
-
-            foreach (self::TESTBENCH_APPLICATION_MUTATORS as $method) {
-                if ($reflection->hasMethod($method)
-                    && $reflection->getMethod($method)
-                        ->getDeclaringClass()
-                        ->getName() === $candidate) {
-                    return self::testbenchCaseClass($case);
-                }
-            }
-
-            foreach (self::TESTBENCH_APPLICATION_PROPERTIES as $property) {
-                if ($reflection->hasProperty($property)
-                    && $reflection->getProperty($property)
-                        ->getDeclaringClass()
-                        ->getName() === $candidate) {
-                    return self::testbenchCaseClass($case);
-                }
-            }
-
-            foreach (class_uses($candidate) ?: [] as $trait) {
-                if (str_starts_with(
-                    $trait,
-                    self::TESTBENCH_CONCERN_NAMESPACE,
-                )) {
-                    return self::testbenchCaseClass($case);
-                }
-            }
-        }
-
-        return $profile;
-    }
-
-    /**
-     * @return class-string<TestCase>
-     */
-    private static function testbenchCaseClass(TestCase $case): string
-    {
-        $class = $case::class;
-
-        if (is_a($case, 'Pest\\Contracts\\HasPrintableTestCaseName')) {
-            $class = get_parent_class($case);
-        }
-
-        if (! is_string($class)
-            || ! is_a($class, self::TESTBENCH_TEST_CASE, true)) {
-            throw new StateAdapterException(sprintf(
-                'Drove Laravel could not resolve the concrete Orchestra Testbench TestCase for %s.',
-                $case::class,
-            ));
-        }
-
-        return $class;
-    }
-
-    private static function assertNoTestbenchAttributes(TestCase $case): void
-    {
-        $class = self::testbenchCaseClass($case);
-        $reflection = new ReflectionClass($class);
-
-        while (! str_starts_with(
-            $reflection->getName(),
-            'Orchestra\\Testbench\\',
-        )) {
-            foreach ($reflection->getAttributes() as $attribute) {
-                if (str_starts_with(
-                    $attribute->getName(),
-                    self::TESTBENCH_ATTRIBUTE_NAMESPACE,
-                )) {
-                    throw new StateAdapterException(sprintf(
-                        'Drove Laravel does not support Orchestra Testbench attribute %s on class %s.',
-                        $attribute->getName(),
-                        $reflection->getName(),
-                    ));
-                }
-            }
-
-            $parent = $reflection->getParentClass();
-
-            if (! $parent instanceof ReflectionClass) {
-                break;
-            }
-
-            $reflection = $parent;
-        }
-
-        $method = new ReflectionMethod($case, $case->name());
-
-        foreach ($method->getAttributes() as $attribute) {
-            if (str_starts_with(
-                $attribute->getName(),
-                self::TESTBENCH_ATTRIBUTE_NAMESPACE,
-            )) {
-                throw new StateAdapterException(sprintf(
-                    'Drove Laravel does not support Orchestra Testbench attribute %s on %s::%s().',
-                    $attribute->getName(),
-                    self::testbenchCaseClass($case),
-                    $method->getName(),
-                ));
-            }
-        }
-    }
-
-    private static function assertNoTestbenchSetupCallback(TestCase $case): void
-    {
-        $callback = new ReflectionProperty($case, 'testCaseSetUpCallback');
-        $callback->setAccessible(true);
-
-        if ($callback->getValue($case) !== null) {
-            throw new StateAdapterException(sprintf(
-                'Drove Laravel does not support a pre-existing Orchestra Testbench setup callback on %s.',
-                self::testbenchCaseClass($case),
-            ));
-        }
     }
 }

@@ -336,6 +336,7 @@ pub struct Telemetry {
     pub duration_ms: Option<f64>,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
+    pub interrupted_signal: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -705,6 +706,7 @@ impl ActiveTask {
             self.finished_ns,
             exit_code,
             signal,
+            self.interrupted_signal,
         );
 
         if let Some(interrupted) = self.interrupted_signal {
@@ -967,7 +969,7 @@ impl Scheduler {
                 task,
                 "user_interruption",
                 format!("The Drove run was interrupted by signal {signal}."),
-                empty_telemetry(),
+                empty_telemetry(Some(signal)),
                 Vec::new(),
             ));
         }
@@ -1028,31 +1030,21 @@ impl Scheduler {
     }
 
     fn spawn(&mut self, task: Task) -> Result<Step, String> {
-        let mut sockets = [0_i32; 2];
-        let socket_result = unsafe {
-            libc::socketpair(
-                libc::AF_UNIX,
-                libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
-                0,
-                sockets.as_mut_ptr(),
-            )
+        let sockets = match socket_pair() {
+            Ok(sockets) => sockets,
+            Err(error) => {
+                self.registry.release(&task.permit_names)?;
+                self.completed.push_back(failed_result(
+                    task,
+                    "fork_failure",
+                    format!("Unable to create a Drove child channel: {error}."),
+                    empty_telemetry(None),
+                    Vec::new(),
+                ));
+
+                return Ok(Step::Progress);
+            }
         };
-
-        if socket_result != 0 {
-            self.registry.release(&task.permit_names)?;
-            self.completed.push_back(failed_result(
-                task,
-                "fork_failure",
-                format!(
-                    "Unable to create a Drove child channel: {}.",
-                    io::Error::last_os_error()
-                ),
-                empty_telemetry(),
-                Vec::new(),
-            ));
-
-            return Ok(Step::Progress);
-        }
 
         let pid = unsafe { libc::fork() };
 
@@ -1069,7 +1061,7 @@ impl Scheduler {
                     "Unable to fork a Drove task: {}.",
                     io::Error::last_os_error()
                 ),
-                empty_telemetry(),
+                empty_telemetry(None),
                 Vec::new(),
             ));
 
@@ -1120,7 +1112,7 @@ impl Scheduler {
                 task,
                 "fork_failure",
                 error,
-                empty_telemetry(),
+                empty_telemetry(None),
                 Vec::new(),
             ));
 
@@ -1247,38 +1239,18 @@ fn validate_scopes(scopes: &[String]) -> Result<(), String> {
 }
 
 fn create_pool(limit: usize) -> Result<PermitPool, String> {
-    let mut sockets = [0_i32; 2];
-
-    if unsafe {
-        libc::socketpair(
-            libc::AF_UNIX,
-            libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
-            0,
-            sockets.as_mut_ptr(),
-        )
-    } != 0
-    {
-        return Err(format!(
-            "Drover could not create a concurrency permit pool: {}.",
-            io::Error::last_os_error()
-        ));
-    }
+    let sockets = socket_pair()
+        .map_err(|error| format!("Drover could not create a concurrency permit pool: {error}."))?;
 
     if let Err(error) = set_nonblocking(sockets[0]) {
-        unsafe {
-            libc::close(sockets[0]);
-            libc::close(sockets[1]);
-        }
+        close_descriptors(sockets);
 
         return Err(error);
     }
 
     for _ in 0..limit {
         if let Err(error) = write_byte(sockets[1]) {
-            unsafe {
-                libc::close(sockets[0]);
-                libc::close(sockets[1]);
-            }
+            close_descriptors(sockets);
 
             return Err(error);
         }
@@ -1288,6 +1260,36 @@ fn create_pool(limit: usize) -> Result<PermitPool, String> {
         read: sockets[0],
         write: sockets[1],
     })
+}
+
+fn socket_pair() -> Result<[RawFd; 2], io::Error> {
+    let mut sockets = [0_i32; 2];
+
+    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, sockets.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    for fd in sockets {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1
+        {
+            let error = io::Error::last_os_error();
+            close_descriptors(sockets);
+
+            return Err(error);
+        }
+    }
+
+    Ok(sockets)
+}
+
+fn close_descriptors(descriptors: [RawFd; 2]) {
+    for descriptor in descriptors {
+        unsafe {
+            libc::close(descriptor);
+        }
+    }
 }
 
 fn close_pools(pools: &HashMap<String, PermitPool>) {
@@ -1380,6 +1382,7 @@ fn telemetry(
     finished_ns: Option<u64>,
     exit_code: Option<i32>,
     signal: Option<i32>,
+    interrupted_signal: Option<i32>,
 ) -> Telemetry {
     let duration_ms = started_ns.zip(finished_ns).map(|(started, finished)| {
         let duration = finished.saturating_sub(started) as f64 / 1_000_000.0;
@@ -1395,11 +1398,12 @@ fn telemetry(
         duration_ms,
         exit_code,
         signal,
+        interrupted_signal,
     }
 }
 
-fn empty_telemetry() -> Telemetry {
-    telemetry(None, None, None, None, None)
+fn empty_telemetry(interrupted_signal: Option<i32>) -> Telemetry {
+    telemetry(None, None, None, None, None, interrupted_signal)
 }
 
 fn scheduler_failure(kind: &str, message: String) -> Value {
@@ -1617,6 +1621,36 @@ mod tests {
             )
             .unwrap_err()
             .contains("reached its 1 task capacity"));
+    }
+
+    #[test]
+    fn records_the_requested_interruption_signal_separately() {
+        let engine = Engine::new(
+            "interrupted-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:pending".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                10,
+                true,
+            )
+            .unwrap();
+
+        scheduler.interrupt(libc::SIGINT).unwrap();
+
+        let Step::Result(result) = scheduler.step().unwrap() else {
+            panic!("interrupted pending work must produce a result");
+        };
+        assert_eq!(result.telemetry.interrupted_signal, Some(libc::SIGINT));
+        assert_eq!(result.telemetry.signal, None);
     }
 
     #[test]

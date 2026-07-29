@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0 AS native-builder
+FROM rust:1.88-bullseye@sha256:b315f988b86912bafa7afd39a6ded0a497bf850ec36578ca9a3bdd6a14d5db4e AS native-builder
 
 WORKDIR /build
 
@@ -6,16 +6,18 @@ COPY native/drover/Cargo.toml native/drover/Cargo.lock ./
 COPY native/drover/src ./src
 COPY native/drover/protocol ./protocol
 
-RUN rustup component add clippy
+RUN rustup component add clippy rustfmt
+RUN cargo fmt --check
 RUN cargo test --locked
 RUN cargo clippy --locked --all-targets -- -D warnings
 RUN cargo build --release --locked
 
-FROM php:8.4-cli@sha256:3a70cc45c4b03b691f04ea3c032030613a5ff6ee61053127aadb8a93b39cc7c3
+FROM php:8.4-cli-bullseye@sha256:aa9ca431aa35219492184f73202359109e172e33710e7d9928ee7da600b60cb7
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libffi-dev \
     && docker-php-ext-install ffi \
+    && test "$(getconf GNU_LIBC_VERSION)" = "glibc 2.31" \
     && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 

@@ -5,11 +5,22 @@ prepared-state execution. It began as a Pest hard fork, but the intended
 product is a framework with a Pest-compatible frontend—not a permanent
 downstream branch.
 
-This repository currently contains a source-built Linux compatibility alpha.
 Supported Pest syntax is compiled into Drove's independent Scope IR, executed
 by the lifecycle kernel, and scheduled through the Rust-backed Drover engine.
-The Composer package is now `oxhq/drove`; it replaces Pest 5.0.1 only to keep
-the compatible plugin surface installable during the extraction.
+The Composer package is `oxhq/drove`; it replaces Pest 5.0.1 only to keep the
+compatible plugin surface installable during the extraction.
+
+> **Experimental alpha:** `v0.4.0-alpha.1` is not a stable compatibility
+> promise. Use the live authorities below to verify package availability,
+> native assets, and hosted evidence for an exact release.
+
+| Public artifact | Live authority |
+| --- | --- |
+| `oxhq/drove` | [Packagist](https://packagist.org/packages/oxhq/drove) |
+| `oxhq/drove-laravel` | [Packagist](https://packagist.org/packages/oxhq/drove-laravel) |
+| Linux and macOS native archives | [GitHub Releases](https://github.com/oxhq/drove/releases) |
+| Hosted external corpus | [External Corpus workflow](https://github.com/oxhq/drove/actions/workflows/corpus.yml) |
+| External design partners | [`docs/design-partner-validation.md`](docs/design-partner-validation.md) |
 
 The proven compatibility surface includes:
 
@@ -20,12 +31,55 @@ The proven compatibility surface includes:
 - one native PHPUnit `TestCase` class per file, including datasets, groups,
   class lifecycle, and mixed Pest/PHPUnit suites;
 - skips, todos, filters, groups, excluded groups, and test suites;
+- fork-local code-coverage aggregation into PHPUnit's report generators;
+- explicit per-test deadlines, signal/crash classification, and diagnostic
+  replay metadata;
+- an observer-only Drove plugin API and machine-readable compatibility
+  registry;
+- a general `EnvironmentPlan` and resource-capability contract, currently
+  implemented by the three Laravel database providers;
 - deterministic test and scope failure/output rendering;
 - identical installed-runner output at concurrency 1 and 8.
 
+## Install the alpha
+
+Install the tagged packages from Packagist:
+
+```bash
+composer config --no-plugins allow-plugins.pestphp/pest-plugin true
+composer require --dev oxhq/drove:^0.4@alpha
+vendor/bin/drove-install-native
+vendor/bin/drove --version
+vendor/bin/drove --compatibility
+```
+
+The explicit Composer opt-in trusts the inherited Pest plugin-discovery
+package used by this alpha. Consumer projects do not inherit Drove's own
+`allow-plugins` setting, so noninteractive installation fails closed without
+that command.
+
+`drove-install-native` is explicit: Composer does not download executable
+artifacts during install. It selects GNU/Linux (glibc 2.31 or newer) or macOS
+and x86_64 or aarch64, downloads the matching archive from the exact Drove
+release tag, verifies its SHA-256 file, and installs the library inside the
+package. Alpine and other musl-based Linux distributions are unsupported. Set
+`DROVER_LIBRARY=/absolute/path/to/libdrover.so` (or `.dylib`) to use a
+source-built or separately managed library instead.
+
+The native installer requires PHP's OpenSSL, Phar, and zlib extensions in
+addition to the runtime FFI, PCNTL, and POSIX extensions declared by the
+package.
+
+Laravel/Testbench users will also install the matching alpha:
+
+```bash
+composer require --dev oxhq/drove-laravel:^0.4@alpha
+```
+
 ## Run the compatibility gate
 
-Docker is the reproducible path:
+Docker is the reproducible path in a tagged source checkout. The Composer
+archive intentionally excludes these development fixtures:
 
 ```bash
 docker build --file experiments/phase-2/Dockerfile --tag drove-phase-two .
@@ -75,32 +129,70 @@ execution because they can commit schema changes outside the adapter
 transaction.
 
 The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
-All four rungs are proven, ending with Filament's 677-case nonserial cohort at
-1, 2, 4, and 8 Drove processes plus its 28-case filesystem-sensitive cohort at
-1. Nucleus is deliberately excluded because its Docker/MySQL suite is not part
-of this portable corpus. See
-[`benchmarks/corpus`](benchmarks/corpus/README.md) for revisions, selections,
-dependency overlays, and observed results.
+The pinned ladder covers all four rungs, ending with Filament's 677-case
+nonserial cohort at 1, 2, 4, and 8 Drove processes plus its 28-case
+filesystem-sensitive cohort at 1. A release requires a successful exact-SHA
+hosted full-ladder run; inspect the workflow authority above for its result and
+artifacts. Nucleus is deliberately excluded because its Docker/MySQL suite is
+not part of this portable corpus. The tagged
+[corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.1/benchmarks/corpus)
+records revisions, selections, dependency overlays, and normalization rules.
+
+## Coverage, interruption, and replay
+
+Drove can merge coverage collected independently in forked test processes and
+then use PHPUnit's standard `--coverage-clover`, `--coverage-cobertura`,
+`--coverage-crap4j`, `--coverage-html`, `--coverage-php`, `--coverage-text`,
+and `--coverage-xml` report generators. A supported coverage driver such as
+PCOV or Xdebug is still required. Strict coverage metadata/contribution modes
+and the ambiguous bare `--coverage` option remain explicit rejections.
+
+`--drove-timeout-ms=N` assigns one positive default deadline to every selected
+test; omitting it leaves deadlines disabled. On timeout, SIGINT, or SIGTERM,
+Drover stops scheduling new work, terminates active process groups, escalates
+when needed, and reports a stable failure classification.
+
+`--replay=path.json` writes one no-overwrite diagnostic artifact.
+`--replay-on-failure=path.json` writes only for a nonzero run. The artifact
+contains version/platform data, redacted arguments, a plan hash, status counts,
+failure kinds, completion order, and observed concurrency. It excludes test
+output, values, environment variables, and failure messages, but should still
+be inspected before sharing. It is metadata for reproducing a run; Drove does
+not yet consume it to rerun the suite.
+
+## Plugin and compatibility boundary
+
+`vendor/bin/drove --compatibility` prints the versioned JSON registry shipped
+with the package. Drove plugins may implement
+`Drove\Contracts\Plugins\Bootable`, `InspectsPlan`, or `ReportsRun`. These alpha
+hooks can observe boot, the immutable plan, and the completed run. They cannot
+mutate scheduling, results, rendering, or exit policy through the by-value
+arguments. Observer exceptions fail the run with exit 1 and crash replay
+metadata; Drove does not silently discard broken telemetry. Pest plugins that
+depend on runner internals are unsupported unless the registry says otherwise.
 
 ## Current boundary
 
-This branch is not a released package or a broad Pest/PHPUnit replacement. It
-is Linux only and uses FFI as the native bridge. Multiple native PHPUnit
-classes in one file, test dependencies, process isolation, PHPUnit
+This alpha is not a broad Pest/PHPUnit replacement. It uses FFI plus POSIX
+process semantics. Windows is unsupported.
+GNU/Linux with glibc 2.31 or newer is the proven platform; musl is unsupported.
+macOS x86_64/aarch64 remains a beta distribution target.
+Multiple native PHPUnit classes in one file, test
+dependencies, process isolation, PHPUnit
 `failOnIncomplete`, other unsupported `failOn*` policies, `stopOn*`, strict
 global-state/coverage/output modes, conflicting coverage metadata, PHPUnit
-extensions, non-default execution order, profiling, multiple Testbench application
-profiles, Testbench attributes, multiple database connections, Redis/queue
-isolation, and the wider plugin ecosystem are outside the declared alpha
-surface.
+extensions, non-default execution order, profiling, alternate printers,
+multiple Testbench application profiles, Testbench attributes, multiple
+database connections, Redis/queue/object-storage isolation, and plugins that
+mutate runner internals are outside the declared alpha surface.
 
 Drove uses exit 1 for any test failure or runtime error and exit 2 for invalid
 or explicitly unsupported input. It does not preserve PHPUnit's separate
 runtime-error exit code.
 
-Neither Drove package has been published to Packagist. Installation is
-source/path based until the native bridge is distributed and a tagged
-experimental release exists.
+Packagist, GitHub Releases, and the hosted workflows above are the live
+publication and proof authorities; a source branch alone is not release
+evidence.
 
 ## Attribution
 

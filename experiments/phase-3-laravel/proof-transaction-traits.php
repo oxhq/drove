@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Drove\Environment\ResourceCapability;
 use Drove\Kernel\StateAdapterException;
 use Drove\Laravel\LaravelRuntime;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
@@ -72,6 +73,43 @@ foreach ($cases as $trait => $case) {
     }
 }
 
+$unsupportedPlan = [
+    'type' => 'suite',
+    'id' => 'suite:transaction-topology',
+    'tests' => [],
+    'children' => [
+        [
+            'type' => 'file',
+            'id' => 'file:first',
+            'tests' => [],
+            'children' => [],
+        ],
+        [
+            'type' => 'file',
+            'id' => 'file:second',
+            'tests' => [],
+            'children' => [],
+        ],
+    ],
+];
+$planFailure = null;
+$runtimeGuardFailure = null;
+
+try {
+    $runtime->assertPlanSupported($unsupportedPlan);
+} catch (InvalidArgumentException $exception) {
+    $planFailure = $exception->getMessage();
+}
+
+try {
+    $runtime->beforeDispatch($scope, [
+        ['id' => 'file:first', 'kind' => 'scope'],
+        ['id' => 'file:second', 'kind' => 'scope'],
+    ]);
+} catch (InvalidArgumentException $exception) {
+    $runtimeGuardFailure = $exception->getMessage();
+}
+
 $connection = $runtime->application()->make('db')->connection('mysql');
 $connection->statement('DROP TABLE IF EXISTS drove_non_transactional_guard');
 $connection->statement(
@@ -91,6 +129,12 @@ try {
 }
 
 $passed = count($rejections) === count($cases)
+    && $runtime->stateAdapter()->resourcePlan()->capabilities() === [
+        ResourceCapability::LeafIsolated,
+    ]
+    && $planFailure
+        === 'Environment resource database (transaction) cannot isolate sibling or mixed scope dispatches.'
+    && $runtimeGuardFailure === $planFailure
     && $engineFailure
         === 'Drove Laravel transaction mode requires InnoDB tables; received drove_non_transactional_guard (MyISAM).';
 
@@ -103,6 +147,9 @@ foreach (array_keys($cases) as $trait) {
 fwrite(STDOUT, json_encode([
     'status' => $passed ? 'passed' : 'failed',
     'rejections' => $rejections,
+    'resource' => $runtime->stateAdapter()->resourcePlan(),
+    'plan_failure' => $planFailure,
+    'runtime_guard_failure' => $runtimeGuardFailure,
     'non_transactional_engine_failure' => $engineFailure,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);
 

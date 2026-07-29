@@ -15,6 +15,9 @@ $assert = static function (bool $condition, string $message): void {
     }
 };
 
+$library = $argv[1]
+    ?? (getenv('DROVER_LIBRARY') ?: null)
+    ?? '/usr/local/lib/'.(PHP_OS_FAMILY === 'Darwin' ? 'libdrover.dylib' : 'libdrover.so');
 $ffi = FFI::cdef(<<<'C'
     typedef struct {
         int32_t role;
@@ -42,6 +45,8 @@ $ffi = FFI::cdef(<<<'C'
         const char *scope_limits_json,
         uint64_t term_grace_ms
     );
+    int32_t drover_engine_acquire(void *engine, const char *scopes_json);
+    int32_t drover_engine_release(void *engine, const char *scopes_json);
     void drover_engine_free(void *engine);
     void *drover_map_new(void *engine, uint32_t queue_capacity);
     int32_t drover_map_submit(
@@ -54,6 +59,7 @@ $ffi = FFI::cdef(<<<'C'
         int32_t permit
     );
     int32_t drover_map_step(void *map, DroverAction *action);
+    int32_t drover_map_interrupt(void *map, int32_t signal);
     size_t drover_map_last_result_len(void *map);
     int32_t drover_map_copy_last_result(void *map, char *destination, size_t capacity);
     uint32_t drover_map_max_active(void *map);
@@ -79,7 +85,7 @@ $ffi = FFI::cdef(<<<'C'
         uint32_t expected_sequence,
         const char *frame_json
     );
-C, '/usr/local/lib/libdrover.so');
+C, $library);
 
 $assert($ffi->drover_protocol_version() === 1, 'The native protocol version drifted.');
 $assert($ffi->drover_protocol_max_frame_bytes() === 1_048_576, 'The native frame limit drifted.');
@@ -315,6 +321,114 @@ $assert($results['task:timeout-tree']['failure']['kind'] === 'timeout', 'Timeout
 usleep(1_200_000);
 $assert(! file_exists($escapedPath), 'A timed-out descendant escaped its process group.');
 
+$interruptionReady = '/tmp/drover-active-interruption-'.getmypid().'.ready';
+$interruptionDescendantReady = '/tmp/drover-active-interruption-'.getmypid().'.descendant-ready';
+$interruptionEscaped = '/tmp/drover-active-interruption-'.getmypid().'.escaped';
+@unlink($interruptionReady);
+@unlink($interruptionDescendantReady);
+@unlink($interruptionEscaped);
+$interruptionEngine = $ffi->drover_engine_new('native-active-interruption', 1, '{}', 50);
+$assert(! FFI::isNull($interruptionEngine), 'Drover could not initialize its interruption engine.');
+$interruptionMap = $ffi->drover_map_new($interruptionEngine, 1);
+$assert(! FFI::isNull($interruptionMap), 'Drover could not initialize its interruption map.');
+$assert(
+    $ffi->drover_map_submit(
+        $interruptionMap,
+        'task:active-interruption',
+        'test',
+        'scope:root',
+        '["scope:root"]',
+        0,
+        1,
+    ) === 0,
+    'Drover rejected its active interruption task.',
+);
+$interruptionAction = $ffi->new('DroverAction');
+$interruptionSent = false;
+$interruptionResult = null;
+$interruptionSignal = defined('SIGINT') ? constant('SIGINT') : 2;
+$interruptionDeadline = hrtime(true) + 5_000_000_000;
+
+try {
+    while (hrtime(true) < $interruptionDeadline) {
+        if (! $interruptionSent && file_exists($interruptionReady)) {
+            $assert(
+                $ffi->drover_map_interrupt($interruptionMap, $interruptionSignal) === 0,
+                'Drover rejected an active interruption.',
+            );
+            $interruptionSent = true;
+        }
+
+        $role = $ffi->drover_map_step($interruptionMap, FFI::addr($interruptionAction));
+
+        if ($role === DROVER_ROLE_PROGRESS) {
+            continue;
+        }
+
+        if ($role === DROVER_ROLE_CHILD) {
+            $script = 'trap "" TERM; printf ready > '
+                .escapeshellarg($interruptionDescendantReady)
+                .'; sleep 0.8; printf escaped > '
+                .escapeshellarg($interruptionEscaped)
+                .'; while :; do sleep 1; done';
+            exec('sh -c '.escapeshellarg($script).' >/dev/null 2>&1 &');
+            $readyDeadline = hrtime(true) + 1_000_000_000;
+
+            while (! file_exists($interruptionDescendantReady) && hrtime(true) < $readyDeadline) {
+                usleep(1_000);
+            }
+
+            file_put_contents($interruptionReady, 'ready');
+
+            while (true) {
+                usleep(10_000);
+            }
+        }
+
+        if ($role === DROVER_ROLE_RESULT) {
+            $length = $ffi->drover_map_last_result_len($interruptionMap);
+            $buffer = $ffi->new(sprintf('char[%d]', $length + 1));
+            $assert(
+                $ffi->drover_map_copy_last_result($interruptionMap, $buffer, $length + 1) === 0,
+                'Drover could not copy its interruption result.',
+            );
+            $interruptionResult = json_decode(
+                FFI::string($buffer, $length),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+
+            continue;
+        }
+
+        if ($role === DROVER_ROLE_DONE) {
+            break;
+        }
+
+        throw new RuntimeException('Drover failed its active interruption proof.');
+    }
+} finally {
+    $ffi->drover_map_free($interruptionMap);
+}
+
+$assert($interruptionSent, 'Drover never activated its interruption task.');
+$assert(is_array($interruptionResult), 'Drover did not finish its active interruption.');
+$assert(
+    ($interruptionResult['failure']['kind'] ?? null) === 'user_interruption'
+        && ($interruptionResult['telemetry']['interrupted_signal'] ?? null) === $interruptionSignal,
+    'Drover did not preserve active interruption identity.',
+);
+$assert(
+    $ffi->drover_engine_acquire($interruptionEngine, '[]') === 0
+        && $ffi->drover_engine_release($interruptionEngine, '[]') === 0,
+    'An active interruption leaked its concurrency permit.',
+);
+$ffi->drover_engine_free($interruptionEngine);
+usleep(1_000_000);
+$assert(! file_exists($interruptionEscaped), 'An actively interrupted descendant escaped its process group.');
+@unlink($interruptionReady);
+@unlink($interruptionDescendantReady);
+
 fwrite(STDOUT, json_encode([
     'status' => 'passed',
     'gate' => 'native-abi-smoke',
@@ -327,4 +441,5 @@ fwrite(STDOUT, json_encode([
         $results,
     ))),
     'descendant_escaped' => file_exists($escapedPath),
+    'active_interruption' => $interruptionResult['failure']['kind'] ?? null,
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL);

@@ -6,6 +6,17 @@ use Symfony\Component\Process\Process;
 
 require __DIR__.'/vendor/autoload.php';
 
+$configuredProcesses = getenv('DROVE_PROOF_PROCESSES');
+$processes = filter_var(
+    $configuredProcesses === false ? '2' : $configuredProcesses,
+    FILTER_VALIDATE_INT,
+    ['options' => ['min_range' => 1, 'max_range' => 8]],
+);
+
+if (! is_int($processes)) {
+    throw new RuntimeException('DROVE_PROOF_PROCESSES must be between 1 and 8.');
+}
+
 $proofDirectory = __DIR__.'/storage/framework/drove-proof-testbench';
 $guardDirectory = __DIR__.'/storage/framework/drove-proof-testbench-guard';
 
@@ -31,7 +42,7 @@ $command = [
     __DIR__.'/vendor/bin/drove',
     '--configuration=phpunit.testbench.xml',
     '--parallel',
-    '--processes=2',
+    '--processes='.$processes,
     'tests/Testbench/LivewirePreparedStateTest.php',
 ];
 $environment = [
@@ -140,6 +151,7 @@ $passed = $exitCode === 0
 fwrite(STDOUT, json_encode([
     'status' => $passed ? 'passed' : 'failed',
     'exit_code' => $exitCode,
+    'processes' => $processes,
     'runtime_mode' => 'testbench',
     'prepared_schema_guard' => [
         'status' => $guardPassed ? 'passed' : 'failed',

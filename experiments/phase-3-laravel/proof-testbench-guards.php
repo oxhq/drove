@@ -50,6 +50,16 @@ final class WorkbenchProfileGuardTest extends ProfileGuardTestCase
     use WithWorkbench;
 }
 
+trait NestedWorkbenchProfile
+{
+    use WithWorkbench;
+}
+
+final class NestedWorkbenchProfileGuardTest extends ProfileGuardTestCase
+{
+    use NestedWorkbenchProfile;
+}
+
 final class PlainProfileGuardTest extends ProfileGuardTestCase {}
 
 final class MethodAttributeGuardTest extends ProfileGuardTestCase
@@ -97,6 +107,11 @@ $traitProfiles->addTest(new WorkbenchProfileGuardTest('placeholder'));
 $traitProfiles->addTest(new PlainProfileGuardTest('placeholder'));
 $traitProfileFailure = $failure($traitProfiles);
 
+$nestedTraitProfiles = TestSuite::empty('nested trait profile guard');
+$nestedTraitProfiles->addTest(new NestedWorkbenchProfileGuardTest('placeholder'));
+$nestedTraitProfiles->addTest(new PlainProfileGuardTest('placeholder'));
+$nestedTraitProfileFailure = $failure($nestedTraitProfiles);
+
 $methodAttribute = TestSuite::empty('method attribute guard');
 $methodAttribute->addTest(new MethodAttributeGuardTest('mutatesApplication'));
 $methodAttributeFailure = $failure($methodAttribute);
@@ -128,6 +143,10 @@ $passed = str_contains(
         'requires one Orchestra Testbench application profile',
     )
     && str_contains(
+        (string) $nestedTraitProfileFailure,
+        'requires one Orchestra Testbench application profile',
+    )
+    && str_contains(
         (string) $methodAttributeFailure,
         'WithConfig on MethodAttributeGuardTest::mutatesApplication()',
     )
@@ -145,6 +164,7 @@ fwrite(STDOUT, json_encode([
     'profile_failure' => $profileFailure,
     'property_profile_failure' => $propertyProfileFailure,
     'trait_profile_failure' => $traitProfileFailure,
+    'nested_trait_profile_failure' => $nestedTraitProfileFailure,
     'method_attribute_failure' => $methodAttributeFailure,
     'class_attribute_failure' => $classAttributeFailure,
     'callback_failure' => $callbackFailure,

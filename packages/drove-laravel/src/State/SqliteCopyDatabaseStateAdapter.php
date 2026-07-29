@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Drove\Laravel\State;
 
+use Drove\Environment\ResourceCapability;
+use Drove\Environment\ResourceKind;
+use Drove\Environment\ResourcePlan;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Database\Connection;
@@ -84,6 +87,19 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
     public function name(): string
     {
         return 'sqlite-copy';
+    }
+
+    public function resourcePlan(): ResourcePlan
+    {
+        return new ResourcePlan(
+            ResourceKind::Database,
+            $this->name(),
+            [
+                ResourceCapability::Branchable,
+                ResourceCapability::ScopeIsolated,
+            ],
+            $this->limitations(),
+        );
     }
 
     public function assertTestCaseSupported(TestCase $testCase): void

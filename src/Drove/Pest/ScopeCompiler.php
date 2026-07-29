@@ -387,7 +387,7 @@ final class ScopeCompiler
 
     /**
      * @param  array<int, mixed>  $filenames
-     * @param  array{name?: string, scope_concurrency?: array<string, int>, test_timeouts?: array<string, int>}  $configuration
+     * @param  array{name?: string, scope_concurrency?: array<string, int>, test_timeouts?: array<string, int>, default_test_timeout_ms?: int}  $configuration
      * @return array<string, mixed>
      */
     public function suitePlan(array $filenames, array $configuration = []): array
@@ -740,7 +740,9 @@ final class ScopeCompiler
             ));
             $runtimeTests[] = $test + [
                 'source' => $source['source'],
-                'timeout_ms' => $configuration['test_timeouts'][$test['id']] ?? 0,
+                'timeout_ms' => $configuration['test_timeouts'][$test['id']]
+                    ?? $configuration['default_test_timeout_ms']
+                    ?? 0,
             ];
         }
 

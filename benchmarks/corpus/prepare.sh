@@ -3,6 +3,7 @@ set -eu
 
 target=${1:-}
 drove_source=${DROVE_SOURCE:-}
+lock_root=${CORPUS_LOCK_ROOT:-$drove_source/benchmarks/corpus/locks}
 
 case "$target" in
     invoiceshelf|livewire|filament) ;;
@@ -14,46 +15,87 @@ if [ -z "$drove_source" ] || [ ! -f "$drove_source/composer.json" ]; then
     exit 2
 fi
 
-drove_repository=$(printf '{"type":"path","url":"%s","options":{"symlink":false,"versions":{"oxhq/drove":"0.1.x-dev"}}}' "$drove_source")
-laravel_repository=$(printf '{"type":"path","url":"%s/packages/drove-laravel","options":{"symlink":false,"versions":{"oxhq/drove-laravel":"1.0.x-dev"}}}' "$drove_source")
+if [ -n "$(git status --porcelain)" ]; then
+    echo "corpus checkout must be clean before applying the dependency overlay" >&2
+    exit 2
+fi
+
+sh "$drove_source/benchmarks/corpus/select.sh" "$target" . >/dev/null
+
+drove_repository=$(printf '{"type":"path","url":"%s","options":{"symlink":false,"reference":"none","versions":{"oxhq/drove":"0.4.0-alpha.1"}}}' "$drove_source")
+laravel_repository=$(printf '{"type":"path","url":"%s/packages/drove-laravel","options":{"symlink":false,"reference":"none","versions":{"oxhq/drove-laravel":"0.4.0-alpha.1"}}}' "$drove_source")
 
 composer config --json repositories.drove "$drove_repository"
 composer config --json repositories.drove-laravel "$laravel_repository"
+composer config allow-plugins.pestphp/pest-plugin true
 
 if [ "$target" = livewire ]; then
     composer require --dev --no-update --no-interaction \
         laravel/framework:'13.23.0' \
-        oxhq/drove:'0.1.x-dev' \
-        oxhq/drove-laravel:'1.0.x-dev' \
+        oxhq/drove:'0.4.0-alpha.1' \
+        oxhq/drove-laravel:'0.4.0-alpha.1' \
         phpunit/phpunit:'13.2.4'
-    composer update oxhq/drove oxhq/drove-laravel laravel/framework \
-        orchestra/testbench orchestra/testbench-core phpunit/phpunit \
-        --with-all-dependencies --no-scripts --no-interaction --no-progress
-    composer dump-autoload --no-interaction --optimize
-    exit 0
+else
+    composer remove --dev pestphp/pest --no-update --no-interaction
+    composer require --dev --no-update --no-interaction \
+        oxhq/drove:'0.4.0-alpha.1' \
+        oxhq/drove-laravel:'0.4.0-alpha.1' \
+        pestphp/pest-plugin-laravel:'5.0.0' \
+        phpunit/phpunit:'13.2.4'
+
+    case "$target" in
+        invoiceshelf)
+            composer require --no-update --no-interaction laravel/framework:'13.23.0'
+            composer require --dev --no-update --no-interaction pestphp/pest-plugin-faker:'5.0.0'
+            ;;
+        filament)
+            support_repository='{"type":"path","url":"packages/support","options":{"symlink":true,"versions":{"filament/support":"4.x-dev"}}}'
+            composer config --json repositories.filament-support "$support_repository"
+            composer require --dev --no-update --no-interaction pestphp/pest-plugin-browser:'5.0.0'
+            composer require --dev --no-update --no-interaction filament/support:'4.x-dev'
+            ;;
+    esac
 fi
 
-composer remove --dev pestphp/pest --no-update --no-interaction
-composer require --dev --no-update --no-interaction \
-    oxhq/drove:'0.1.x-dev' \
-    oxhq/drove-laravel:'1.0.x-dev' \
-    pestphp/pest-plugin-laravel:'5.0.0' \
-    phpunit/phpunit:'13.2.4'
+lock="$lock_root/$target.lock"
 
-case "$target" in
-    invoiceshelf)
-        composer require --no-update --no-interaction laravel/framework:'13.23.0'
-        composer require --dev --no-update --no-interaction pestphp/pest-plugin-faker:'5.0.0'
-        composer update oxhq/drove oxhq/drove-laravel laravel/framework \
-            pestphp/pest-plugin-laravel pestphp/pest-plugin-faker phpunit/phpunit \
-            --with-all-dependencies --no-scripts --no-interaction --no-progress
-        ;;
-    filament)
-        composer require --dev --no-update --no-interaction pestphp/pest-plugin-browser:'5.0.0'
-        composer update oxhq/drove oxhq/drove-laravel pestphp/pest-plugin-browser \
-            pestphp/pest-plugin-laravel phpunit/phpunit \
-            --with-all-dependencies --no-scripts --no-interaction --no-progress
-        ;;
-esac
+if [ "${CORPUS_UPDATE_LOCK:-0}" = 1 ]; then
+    case "$target" in
+        invoiceshelf)
+            set -- oxhq/drove oxhq/drove-laravel laravel/framework \
+                pestphp/pest-plugin-laravel pestphp/pest-plugin-faker phpunit/phpunit
+            ;;
+        livewire)
+            # Livewire does not commit a root lock, so the calibration refresh
+            # must resolve the complete graph once. Normal gates install our lock.
+            set --
+            ;;
+        filament)
+            set -- filament/support oxhq/drove oxhq/drove-laravel \
+                orchestra/testbench orchestra/testbench-core \
+                pestphp/pest-plugin-browser pestphp/pest-plugin-laravel phpunit/phpunit
+            ;;
+    esac
+
+    composer update "$@" \
+        --with-all-dependencies --no-install --no-scripts --no-interaction --no-progress
+    mkdir -p "$(dirname "$lock")"
+    cp composer.lock "$lock"
+    exit 0
+else
+    if [ ! -f "$lock" ]; then
+        echo "missing pinned corpus lock: $lock" >&2
+        exit 2
+    fi
+
+    cp "$lock" composer.lock
+    composer validate --no-check-publish --no-interaction
+
+    if [ "${CORPUS_VALIDATE_LOCK_ONLY:-0}" = 1 ]; then
+        exit 0
+    fi
+
+    composer install --no-scripts --no-interaction --no-progress --prefer-dist
+fi
 
 composer dump-autoload --no-interaction --optimize

@@ -16,8 +16,9 @@ final class DroveCommand extends Command
 
     public function handle(): int
     {
-        if (PHP_OS_FAMILY !== 'Linux') {
-            $this->components->error('Drove currently requires Linux process semantics.');
+        if (! in_array(PHP_OS_FAMILY, ['Darwin', 'Linux'], true)
+            || ! function_exists('pcntl_fork')) {
+            $this->components->error('Drove requires Linux or macOS and the pcntl extension.');
 
             return self::INVALID;
         }

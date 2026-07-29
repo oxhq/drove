@@ -133,7 +133,7 @@ final class DroverScheduler implements Scheduler
             }
         }
 
-        $library ??= getenv('DROVER_LIBRARY') ?: '/usr/local/lib/libdrover.so';
+        $library = NativeLibrary::resolve($library);
 
         try {
             $this->ffi = $this->loadFfi($library);
@@ -216,8 +216,12 @@ final class DroverScheduler implements Scheduler
             SIGINT => pcntl_signal_get_handler(SIGINT),
             SIGTERM => pcntl_signal_get_handler(SIGTERM),
         ];
-        $interrupt = static function (int $signal) use (&$interruptedSignal): void {
+        $interrupt = function (int $signal) use (&$interruptedSignal): void {
             $interruptedSignal ??= $signal;
+
+            if ($this->ancestorSockets !== []) {
+                $this->exitInterruptedChild($signal);
+            }
         };
         pcntl_signal(SIGINT, $interrupt);
         pcntl_signal(SIGTERM, $interrupt);
@@ -394,10 +398,7 @@ final class DroverScheduler implements Scheduler
 
         if ($task['kind'] === 'scope') {
             pcntl_signal(SIGTERM, function (): never {
-                $this->terminateActiveMaps();
-                $this->releaseHeldPermits();
-
-                $this->childExit(128 + SIGTERM);
+                $this->exitInterruptedChild(SIGTERM);
             });
         }
 
@@ -538,6 +539,14 @@ final class DroverScheduler implements Scheduler
         $this->ffi->drover_child_exit($status);
 
         throw new RuntimeException('Native Drover child exit returned unexpectedly.');
+    }
+
+    private function exitInterruptedChild(int $signal): never
+    {
+        $this->terminateActiveMaps();
+        $this->releaseHeldPermits();
+
+        $this->childExit(128 + $signal);
     }
 
     /**

@@ -1,0 +1,339 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Composer\InstalledVersions;
+use Drove\Kernel\NativeLibrary;
+
+$proxyAutoload = $GLOBALS['_composer_autoload_path'] ?? null;
+$installedAutoload = dirname(__DIR__, 4).'/vendor/autoload.php';
+$localAutoload = dirname(__DIR__).'/vendor/autoload.php';
+$autoload = is_string($proxyAutoload) && file_exists($proxyAutoload)
+    ? $proxyAutoload
+    : (file_exists($installedAutoload) ? $installedAutoload : $localAutoload);
+
+if (! file_exists($autoload)) {
+    fwrite(STDERR, "Drove could not find Composer's autoloader.".PHP_EOL);
+
+    exit(2);
+}
+
+require_once $autoload;
+
+const DROVE_NATIVE_MAX_ARCHIVE_BYTES = 67_108_864;
+const DROVE_NATIVE_MAX_CHECKSUM_BYTES = 8_192;
+
+/**
+ * @param  list<string>  $arguments
+ * @return array{version: ?string, base_url: string, help: bool}
+ */
+function droveNativeOptions(array $arguments): array
+{
+    $options = [
+        'version' => null,
+        'base_url' => 'https://github.com/oxhq/drove/releases/download',
+        'help' => false,
+    ];
+
+    for ($index = 1; $index < count($arguments); $index++) {
+        $argument = $arguments[$index];
+
+        if ($argument === '--help' || $argument === '-h') {
+            $options['help'] = true;
+
+            continue;
+        }
+
+        foreach (['version' => '--version', 'base_url' => '--base-url'] as $key => $name) {
+            if ($argument === $name) {
+                $value = $arguments[++$index] ?? null;
+
+                if (! is_string($value) || $value === '') {
+                    throw new RuntimeException(sprintf('%s requires a value.', $name));
+                }
+
+                $options[$key] = $value;
+
+                continue 2;
+            }
+
+            if (str_starts_with($argument, $name.'=')) {
+                $value = substr($argument, strlen($name) + 1);
+
+                if ($value === '') {
+                    throw new RuntimeException(sprintf('%s requires a value.', $name));
+                }
+
+                $options[$key] = $value;
+
+                continue 2;
+            }
+        }
+
+        throw new RuntimeException(sprintf('Unknown option %s.', $argument));
+    }
+
+    return $options;
+}
+
+function droveNativeReleaseVersion(?string $configured): string
+{
+    $version = $configured ?: (getenv('DROVE_RELEASE_VERSION') ?: null);
+
+    if ($version === null && InstalledVersions::isInstalled('oxhq/drove')) {
+        $version = InstalledVersions::getPrettyVersion('oxhq/drove');
+    }
+
+    if (! is_string($version)
+        || preg_match('/^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/D', $version) !== 1) {
+        throw new RuntimeException(
+            'Drove could not determine a release tag. Pass --version=v0.4.0-alpha.1.',
+        );
+    }
+
+    return str_starts_with($version, 'v') ? $version : 'v'.$version;
+}
+
+function droveNativeBaseUrl(string $configured): string
+{
+    $url = rtrim($configured, '/');
+    $parts = parse_url($url);
+
+    if (! is_array($parts)
+        || ($parts['scheme'] ?? null) !== 'https'
+        || ! isset($parts['host'])
+        || isset($parts['user'])
+        || isset($parts['pass'])
+        || isset($parts['query'])
+        || isset($parts['fragment'])) {
+        throw new RuntimeException('Drove native downloads require an HTTPS base URL without credentials, query, or fragment.');
+    }
+
+    return $url;
+}
+
+/**
+ * @return resource
+ */
+function droveNativeOpenHttps(string $url, int $redirects = 5)
+{
+    $parts = parse_url($url);
+
+    if (! is_array($parts) || ($parts['scheme'] ?? null) !== 'https' || ! isset($parts['host'])) {
+        throw new RuntimeException('Drove refused a non-HTTPS native download.');
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'follow_location' => 0,
+            'ignore_errors' => true,
+            'timeout' => 30,
+            'user_agent' => 'Drove native installer',
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+        ],
+    ]);
+    $stream = @fopen($url, 'rb', false, $context);
+
+    if ($stream === false) {
+        throw new RuntimeException(sprintf('Drove could not download %s.', $url));
+    }
+
+    $headers = stream_get_meta_data($stream)['wrapper_data'] ?? [];
+    $status = null;
+    $location = null;
+
+    foreach (is_array($headers) ? $headers : [] as $header) {
+        if (preg_match('/^HTTP\/\S+\s+([0-9]{3})\b/i', $header, $matches) === 1) {
+            $status = (int) $matches[1];
+        }
+
+        if (str_starts_with(strtolower($header), 'location:')) {
+            $location = trim(substr($header, strlen('location:')));
+        }
+    }
+
+    if ($status === 200) {
+        return $stream;
+    }
+
+    fclose($stream);
+
+    if ($status !== null
+        && $status >= 300
+        && $status < 400
+        && $redirects > 0
+        && is_string($location)
+        && $location !== '') {
+        return droveNativeOpenHttps($location, $redirects - 1);
+    }
+
+    throw new RuntimeException(sprintf(
+        'Drove native download failed with HTTP %s.',
+        $status === null ? 'unknown' : (string) $status,
+    ));
+}
+
+function droveNativeDownload(string $url, string $destination, int $maximumBytes): void
+{
+    $source = droveNativeOpenHttps($url);
+    $target = @fopen($destination, 'xb');
+
+    if ($target === false) {
+        fclose($source);
+
+        throw new RuntimeException('Drove could not create a temporary download.');
+    }
+
+    try {
+        $copied = stream_copy_to_stream($source, $target, $maximumBytes + 1);
+
+        if ($copied === false || $copied > $maximumBytes) {
+            throw new RuntimeException('Drove native download exceeded its size limit.');
+        }
+
+        if (! fflush($target)) {
+            throw new RuntimeException('Drove could not flush a temporary download.');
+        }
+    } catch (Throwable $throwable) {
+        @unlink($destination);
+
+        throw $throwable;
+    } finally {
+        fclose($source);
+        fclose($target);
+    }
+}
+
+function droveNativeExpectedChecksum(string $contents, string $asset): string
+{
+    if (preg_match('/\A([0-9a-f]{64})[ \t]+[* ]?([^\r\n]+)\r?\n?\z/i', $contents, $matches) !== 1
+        || $matches[2] !== $asset) {
+        throw new RuntimeException('Drove received an invalid native checksum file.');
+    }
+
+    return strtolower($matches[1]);
+}
+
+function droveNativeLibraryBytes(string $archive, string $entry, string $target): string
+{
+    if (! class_exists(PharData::class)) {
+        throw new RuntimeException('Drove requires the PHP Phar extension to install its native archive.');
+    }
+
+    try {
+        $package = new PharData($archive);
+        $file = $package[$entry] ?? null;
+        $size = $file?->getSize();
+        $contents = is_int($size)
+            && $size > 0
+            && $size <= DROVE_NATIVE_MAX_ARCHIVE_BYTES
+            ? $file->getContent()
+            : null;
+    } catch (Throwable $throwable) {
+        throw new RuntimeException('Drove could not read its native archive: '.$throwable->getMessage(), 0, $throwable);
+    }
+
+    if (! is_string($contents) || $contents === '' || strlen($contents) > DROVE_NATIVE_MAX_ARCHIVE_BYTES) {
+        throw new RuntimeException('Drove native archive did not contain the expected library.');
+    }
+
+    $validMagic = str_starts_with($target, 'linux-')
+        ? str_starts_with($contents, "\x7fELF")
+        : in_array(bin2hex(substr($contents, 0, 4)), ['cffaedfe', 'feedfacf'], true);
+
+    if (! $validMagic) {
+        throw new RuntimeException('Drove native archive contained a library for the wrong platform.');
+    }
+
+    return $contents;
+}
+
+function droveNativeInstallAtomically(string $destination, string $contents): void
+{
+    $directory = dirname($destination);
+
+    if (! is_dir($directory) && ! mkdir($directory, 0755, true) && ! is_dir($directory)) {
+        throw new RuntimeException('Drove could not create its native library directory.');
+    }
+
+    $temporary = tempnam($directory, '.libdrover-');
+
+    if ($temporary === false) {
+        throw new RuntimeException('Drove could not create a temporary native library.');
+    }
+
+    try {
+        if (file_put_contents($temporary, $contents, LOCK_EX) !== strlen($contents)
+            || ! chmod($temporary, 0644)
+            || ! rename($temporary, $destination)) {
+            throw new RuntimeException('Drove could not install its native library atomically.');
+        }
+    } finally {
+        if (file_exists($temporary)) {
+            @unlink($temporary);
+        }
+    }
+}
+
+try {
+    $options = droveNativeOptions($_SERVER['argv']);
+
+    if ($options['help']) {
+        fwrite(STDOUT, <<<'HELP'
+Install the native Drover library for this Composer package.
+
+Usage:
+  drove-install-native [--version=v0.4.0-alpha.1] [--base-url=https://...]
+
+The installer accepts only HTTPS downloads and verifies the release archive's
+SHA-256 checksum before atomically replacing the package-local library.
+HELP.PHP_EOL);
+
+        exit(0);
+    }
+
+    $target = NativeLibrary::target();
+    $version = droveNativeReleaseVersion($options['version']);
+    $baseUrl = droveNativeBaseUrl($options['base_url']);
+    $asset = 'drove-native-'.$target.'.tar.gz';
+    $releaseUrl = $baseUrl.'/'.rawurlencode($version).'/';
+    $temporaryBase = sys_get_temp_dir().DIRECTORY_SEPARATOR.'drove-native-'.bin2hex(random_bytes(8));
+    $checksumFile = $temporaryBase.'.sha256';
+    $archiveFile = $temporaryBase.'.tar.gz';
+
+    try {
+        droveNativeDownload($releaseUrl.$asset.'.sha256', $checksumFile, DROVE_NATIVE_MAX_CHECKSUM_BYTES);
+        $expected = droveNativeExpectedChecksum((string) file_get_contents($checksumFile), $asset);
+        droveNativeDownload($releaseUrl.$asset, $archiveFile, DROVE_NATIVE_MAX_ARCHIVE_BYTES);
+        $actual = hash_file('sha256', $archiveFile);
+
+        if (! is_string($actual) || ! hash_equals($expected, $actual)) {
+            throw new RuntimeException('Drove native archive failed SHA-256 verification.');
+        }
+
+        $entry = 'native/drover/prebuilt/'.$target.'/'.NativeLibrary::filename($target);
+        $contents = droveNativeLibraryBytes($archiveFile, $entry, $target);
+        $destination = NativeLibrary::bundledPath($target);
+        droveNativeInstallAtomically($destination, $contents);
+    } finally {
+        @unlink($checksumFile);
+        @unlink($archiveFile);
+    }
+
+    fwrite(STDOUT, sprintf('Installed %s for %s.%s', $destination, $version, PHP_EOL));
+
+    if (! extension_loaded('ffi') || ! in_array(strtolower((string) ini_get('ffi.enable')), ['1', 'on', 'true'], true)) {
+        fwrite(
+            STDERR,
+            'Warning: PHP FFI is unavailable or disabled; run Drove with ffi.enable=true.'.PHP_EOL,
+        );
+    }
+} catch (Throwable $throwable) {
+    fwrite(STDERR, $throwable->getMessage().PHP_EOL);
+
+    exit(2);
+}

@@ -56,6 +56,12 @@ final class Configuration implements HandlesArguments, Terminable
         $doc = new DOMDocument;
         $doc->load(self::BASE_PHPUNIT_FILE);
 
+        $autoload = $GLOBALS['_composer_autoload_path'] ?? null;
+
+        if (is_string($autoload) && file_exists($autoload)) {
+            $doc->documentElement?->setAttribute('bootstrap', $autoload);
+        }
+
         $contents = $doc->saveXML();
 
         assert(is_int(file_put_contents($path, $contents)));

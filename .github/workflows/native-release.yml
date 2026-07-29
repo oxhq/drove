@@ -1,0 +1,288 @@
+name: Native release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: drove-native-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-gnu-x86_64
+            library: target/release/libdrover.so
+          - runner: ubuntu-24.04-arm
+            target: linux-gnu-aarch64
+            library: target/release/libdrover.so
+          - runner: macos-15-intel
+            target: macos-x86_64
+            library: target/release/libdrover.dylib
+          - runner: macos-14
+            target: macos-aarch64
+            library: target/release/libdrover.dylib
+
+    steps:
+      - name: Checkout exact tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact checkout and release tag
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
+          git fetch --no-tags origin \
+            refs/heads/develop:refs/remotes/origin/develop
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+              echo "Native releases require a v0.x.y-alpha.n tag." >&2
+              exit 1
+            fi
+            if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+              echo "Native releases require an annotated tag." >&2
+              exit 1
+            fi
+            test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
+          fi
+
+      - name: Install Rust 1.88
+        if: startsWith(matrix.target, 'macos-')
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.88.0
+
+      - name: Install PHP 8.4 with FFI
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # v2.37.0
+        with:
+          php-version: '8.4'
+          extensions: ffi
+          coverage: none
+
+      - name: Test and build Drover on glibc 2.31
+        if: startsWith(matrix.target, 'linux-gnu-')
+        env:
+          NATIVE_IMAGE: drove-native-${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          docker build \
+            --file native/drover/Dockerfile \
+            --tag "$NATIVE_IMAGE" \
+            .
+          test "$(
+            docker run --rm --entrypoint getconf "$NATIVE_IMAGE" GNU_LIBC_VERSION
+          )" = "glibc 2.31"
+          docker run --rm "$NATIVE_IMAGE"
+          container="$(docker create "$NATIVE_IMAGE")"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          mkdir -p native/drover/target/release
+          docker cp \
+            "$container:/usr/local/lib/libdrover.so" \
+            native/drover/target/release/libdrover.so
+
+      - name: Test and build Drover on macOS
+        if: startsWith(matrix.target, 'macos-')
+        working-directory: native/drover
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo build --release --locked
+
+      - name: Package checksummed overlay
+        env:
+          DROVER_TARGET: ${{ matrix.target }}
+          DROVER_LIBRARY: ${{ matrix.library }}
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/native"
+          bash scripts/package-native.sh \
+            "$DROVER_TARGET" \
+            "native/drover/$DROVER_LIBRARY" \
+            "$output"
+          cd "$output"
+          shasum -a 256 --check "drove-native-$DROVER_TARGET.tar.gz.sha256"
+
+      - name: Verify archive, resolver, and ABI
+        env:
+          DROVER_EXPECT_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          asset="$RUNNER_TEMP/native/drove-native-$DROVER_EXPECT_TARGET.tar.gz"
+          tar -xzf "$asset" -C "$GITHUB_WORKSPACE"
+          if [[ "$DROVER_EXPECT_TARGET" == macos-* ]]; then
+            filename="libdrover.dylib"
+          else
+            filename="libdrover.so"
+          fi
+          expected="native/drover/prebuilt/$DROVER_EXPECT_TARGET/$filename"
+          test "$(tar -tzf "$asset" | sed '/\/$/d')" = "$expected"
+          library="$GITHUB_WORKSPACE/native/drover/prebuilt/$DROVER_EXPECT_TARGET/$filename"
+          DROVER_EXPECT_LIBRARY="$library" \
+            php -d ffi.enable=true native/drover/resolver-proof.php
+          DROVER_LIBRARY="$library" \
+            php -d ffi.enable=true native/drover/proof.php
+          cc native/drover/abi-smoke.c \
+            "$library" \
+            "-Wl,-rpath,$(dirname "$library")" \
+            -o "$RUNNER_TEMP/drover-abi-smoke"
+          "$RUNNER_TEMP/drover-abi-smoke"
+
+      - name: Upload native package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drove-native-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish native release assets
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Checkout exact annotated tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release tag
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
+          git fetch --no-tags origin \
+            refs/heads/develop:refs/remotes/origin/develop
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "Native releases require a v0.x.y-alpha.n tag." >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "Native releases require an annotated tag." >&2
+            exit 1
+          fi
+          test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
+
+      - name: Require successful full corpus at release SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          artifact_name="corpus-full-$release_sha"
+          run_id="$(
+            gh api "repos/$GH_REPO/actions/artifacts?name=$artifact_name&per_page=100" \
+              --jq "[.artifacts[] | select(.name == \"$artifact_name\" and .expired == false and .workflow_run.head_sha == \"$release_sha\")][0].workflow_run.id // empty"
+          )"
+          test -n "$run_id"
+          run="$(
+            gh api "repos/$GH_REPO/actions/runs/$run_id" \
+              --jq '[.conclusion, .event, .path, .head_sha] | @tsv'
+          )"
+          test "$run" = "success	workflow_dispatch	.github/workflows/corpus.yml	$release_sha"
+          echo "Full corpus release gate: run $run_id"
+
+      - name: Require successful develop workflows at release SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          workflows=(
+            static.yml
+            tests.yml
+            phase-one.yml
+            release-gates.yml
+          )
+          for workflow in "${workflows[@]}"; do
+            details="$(
+              gh api "repos/$GH_REPO/actions/workflows/$workflow/runs?branch=develop&event=push&head_sha=$release_sha&status=success&per_page=1" \
+                --jq '.workflow_runs[0] | [.id, .conclusion, .event, .path, .head_sha] | @tsv'
+            )"
+            IFS=$'\t' read -r run_id conclusion event path head_sha <<<"$details"
+            test -n "$run_id"
+            test "$conclusion" = success
+            test "$event" = push
+            test "$path" = ".github/workflows/$workflow"
+            test "$head_sha" = "$release_sha"
+            echo "$workflow release gate: run $run_id"
+          done
+
+      - name: Download native packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: drove-native-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify and publish immutable experimental release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd release
+          targets=(
+            linux-gnu-x86_64
+            linux-gnu-aarch64
+            macos-x86_64
+            macos-aarch64
+          )
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
+          for target in "${targets[@]}"; do
+            archive="drove-native-$target.tar.gz"
+            checksum="$archive.sha256"
+            test -f "$archive"
+            test -f "$checksum"
+            shasum -a 256 --check "$checksum"
+          done
+          cat ./*.tar.gz.sha256 | LC_ALL=C sort > SHA256SUMS
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; refusing to replace its assets." >&2
+            exit 1
+          fi
+          notes="$RUNNER_TEMP/drove-native-release-notes.md"
+          {
+            echo "# Drove $GITHUB_REF_NAME"
+            echo
+            echo "Experimental alpha release of the independent Drove prepared-state test runner."
+            echo
+            echo "The four attached native Drover archives target glibc 2.31+ Linux and macOS on x86_64 and ARM64. Alpine and other musl systems are not supported."
+            echo
+            echo "Historical repository tags through v5.0.1 belong to the Pest lineage and are not prior Drove releases."
+          } > "$notes"
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --prerelease \
+            --title "Drove $GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            ./*.tar.gz \
+            ./*.tar.gz.sha256 \
+            SHA256SUMS

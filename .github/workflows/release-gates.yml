@@ -1,0 +1,226 @@
+name: Release Gates
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: release-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos-native-laravel:
+    name: macOS ${{ matrix.arch }} native and Laravel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: macos-15-intel
+          arch: x86_64
+          target: macos-x86_64
+        - os: macos-15
+          arch: arm64
+          target: macos-aarch64
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout and architecture
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        EXPECTED_ARCH: ${{ matrix.arch }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        test "$(uname -m)" = "$EXPECTED_ARCH"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: '8.4'
+        tools: composer:v2
+        coverage: none
+        extensions: ffi, pcntl, pdo_mysql, pdo_sqlite, posix, sockets
+
+    - name: Build local native library
+      working-directory: native/drover
+      run: |
+        set -euo pipefail
+        rustup toolchain install 1.88.0 --profile minimal
+        cargo +1.88.0 build --release --locked
+        test "$(lipo -archs target/release/libdrover.dylib)" = "${{ matrix.arch }}"
+
+    - name: Install and validate root package
+      env:
+        COMPOSER_ROOT_VERSION: 0.4.x-dev
+        DROVER_EXPECT_LIBRARY: ${{ github.workspace }}/native/drover/target/release/libdrover.dylib
+        DROVER_EXPECT_TARGET: ${{ matrix.target }}
+        DROVER_LIBRARY: ${{ github.workspace }}/native/drover/target/release/libdrover.dylib
+      run: |
+        set -euo pipefail
+        composer install --no-interaction --no-progress --ansi
+        composer validate --strict
+        composer check-platform-reqs
+        php native/drover/resolver-proof.php
+        php -d ffi.enable=true native/drover/proof.php
+        php -d ffi.enable=true vendor/bin/drove --version
+
+    - name: Install Laravel and Testbench proof
+      env:
+        COMPOSER_ROOT_VERSION: 0.4.0-alpha.1
+      run: |
+        set -euo pipefail
+        sudo ln -s "$GITHUB_WORKSPACE" /drove
+        composer --working-dir=experiments/phase-3-laravel install \
+          --no-interaction --no-progress --ansi
+        composer --working-dir=experiments/phase-3-laravel validate --strict
+        composer --working-dir=experiments/phase-3-laravel check-platform-reqs
+
+    - name: Prove resource capabilities and Testbench at every width
+      env:
+        DROVER_LIBRARY: ${{ github.workspace }}/native/drover/target/release/libdrover.dylib
+      working-directory: experiments/phase-3-laravel
+      run: |
+        set -euo pipefail
+        php proof-state-capabilities.php
+        php proof-testbench-guards.php
+        for processes in 1 2 4 8
+        do
+          DROVE_PROOF_PROCESSES="$processes" php proof-testbench.php
+        done
+
+  composer-archive:
+    name: Composer archive contents
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: '8.4'
+        tools: composer:v2
+        coverage: none
+        extensions: ffi, pcntl, posix
+
+    - name: Prove installable archive contents
+      run: |
+        set -euo pipefail
+        archive_directory="$RUNNER_TEMP/drove-archive"
+        contents="$RUNNER_TEMP/drove-archive-contents.txt"
+        top_level="$RUNNER_TEMP/drove-archive-top-level.txt"
+        expected_top_level="$RUNNER_TEMP/drove-archive-expected-top-level.txt"
+
+        composer validate --strict
+        composer archive --format=tar --dir="$archive_directory" \
+          --file=drove --no-interaction
+        tar -tf "$archive_directory/drove.tar" \
+          | sed '/\/$/d; /^$/d' \
+          | LC_ALL=C sort -u > "$contents"
+        cut -d/ -f1 "$contents" | LC_ALL=C sort -u > "$top_level"
+
+        cat > "$expected_top_level" <<'EOF'
+        LICENSE.md
+        README.md
+        bin
+        composer.json
+        docs
+        native
+        overrides
+        resources
+        src
+        stubs
+        EOF
+        diff -u "$expected_top_level" "$top_level"
+
+        for required in \
+          LICENSE.md \
+          README.md \
+          bin/drove \
+          bin/drove-install-native \
+          bin/pest \
+          composer.json \
+          docs/design-partner-validation.md \
+          docs/migration-from-pest.md \
+          native/drover/README.md \
+          resources/drove-compatibility.json \
+          src/Drove/Kernel/DroverScheduler.php \
+          src/Drove/Kernel/NativeLibrary.php
+        do
+          grep -Fqx "$required" "$contents"
+        done
+
+        test "$(grep '^native/' "$contents")" = "native/drover/README.md"
+        sha256sum "$archive_directory/drove.tar" "$contents"
+
+        package="$RUNNER_TEMP/drove-package"
+        consumer="$RUNNER_TEMP/drove-consumer"
+        mkdir -p "$package" "$consumer"
+        tar -xf "$archive_directory/drove.tar" -C "$package"
+        cat > "$consumer/composer.json" <<JSON
+        {
+          "name": "drove/archive-consumer",
+          "type": "project",
+          "repositories": [
+            {
+              "type": "path",
+              "url": "$package",
+              "options": {
+                "symlink": false,
+                "versions": {
+                  "oxhq/drove": "0.4.0-alpha.1"
+                }
+              }
+            }
+          ],
+          "require-dev": {
+            "oxhq/drove": "0.4.0-alpha.1"
+          },
+          "config": {
+            "allow-plugins": {
+              "pestphp/pest-plugin": true
+            }
+          }
+        }
+        JSON
+        composer --working-dir="$consumer" install \
+          --no-interaction --no-progress --prefer-dist --optimize-autoloader
+        test ! -L "$consumer/vendor/oxhq/drove"
+        test "$("$consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.1"
+        "$consumer/vendor/bin/drove" --compatibility \
+          > "$consumer/compatibility.json"
+        php -r '
+          $registry = json_decode(
+              file_get_contents($argv[1]),
+              true,
+              flags: JSON_THROW_ON_ERROR,
+          );
+          exit(
+              ($registry["schema"] ?? null) === 1
+              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.1"
+                  ? 0
+                  : 1,
+          );
+        ' "$consumer/compatibility.json"

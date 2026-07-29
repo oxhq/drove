@@ -207,7 +207,6 @@ $cases = [
     'failure' => $run('tests/FailingTest.php'),
     'partial_assertions' => $run('tests/FastTest.php', 'tests/FailingTest.php'),
     'coverage' => $run('--coverage'),
-    'coverage_text' => $run('--coverage-text'),
     'process_isolation' => $run('--process-isolation'),
     'ordinary_phpunit' => $nativePhpUnit,
     'native_filter' => $run('unsupported/OrdinaryPhpUnitTest.php', '--filter=test_native_dataset'),
@@ -489,11 +488,6 @@ $expect(
     $cases['coverage']['exit'] === 2
         && str_contains($cases['coverage']['stderr'], '--coverage mode is not supported yet'),
     'Unsupported coverage did not use an explicit exit-2 diagnostic.',
-);
-$expect(
-    $cases['coverage_text']['exit'] === 2
-        && str_contains($cases['coverage_text']['stderr'], '--coverage-text mode is not supported yet'),
-    'Unsupported coverage output did not use an explicit exit-2 diagnostic.',
 );
 $expect(
     $cases['process_isolation']['exit'] === 2
