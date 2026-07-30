@@ -861,6 +861,8 @@ final class DroverScheduler implements Scheduler
             'telemetry' => [
                 'pid' => null,
                 'pgid' => null,
+                'dispatched_ns' => null,
+                'scheduler_completed_ns' => null,
                 'started_ns' => null,
                 'finished_ns' => null,
                 'duration_ms' => null,

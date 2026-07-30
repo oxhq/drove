@@ -64,10 +64,12 @@ rejects:
   95% after an explicitly recorded idempotent codemod;
 - a manifest that does not keep Filament in the final position.
 
-Passing local scripts is local proof. The workflow is only hosted proof after
-GitHub Actions completes successfully. `manifest.json` therefore keeps every
-rung at `CURATED_PROVEN_FULL_SUITE_PENDING`; this change does not fabricate a
-hosted Phase 6 result.
+Passing local scripts is local proof. `manifest.json` deliberately keeps every
+rung at `CURATED_PROVEN_FULL_SUITE_PENDING` because repository metadata cannot
+self-certify a hosted result. That sentinel does not erase accepted evidence:
+[Full corpus #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071)
+accepted the ladder at `ea090fb928bf2344ccf8c1cbe30c6b4ee8336303`; every new
+release revision still requires its own exact-SHA full artifact.
 
 ## Full-suite classification boundary
 
@@ -124,11 +126,11 @@ execution result remains `selection.mode=curated` and
   order and Filament's complete serial/parallel cohort evidence.
 
 The hosted runner is pinned to `ubuntu-24.04`. The uploaded artifact name
-includes the exact Drove commit; `evidence-metadata.json` repeats that identity
-plus the workflow run, attempt, image, and tier. `SHA256SUMS` seals every
-uploaded file. A full artifact also contains `benchmark-report.md`; its renderer
-revalidates the sealed raw result matrix with `verify.php --complete` before
-emitting the diagnostic table.
+includes the exact Drove commit and workflow attempt;
+`evidence-metadata.json` repeats that identity plus the workflow run, attempt,
+image, and tier. `SHA256SUMS` seals every uploaded file. A full artifact also
+contains `benchmark-report.md`; its renderer revalidates the sealed raw result
+matrix with `verify.php --complete` before emitting the diagnostic table.
 
 Selected hosted reports are promoted permanently under
 [`benchmarks/results/`](../results/); each snapshot links its source workflow,

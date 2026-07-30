@@ -5,9 +5,9 @@ use crate::protocol::{
     validate_standalone, write_frame, Frame, ERR_JSON, ERR_NULL, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use crate::scheduler::{Engine, Scheduler, Step, TaskResult};
-use libc::{c_char, c_int, c_void};
+use libc::{c_int, c_void};
 use std::collections::HashMap;
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 use std::ptr;
 use std::time::Duration;
 
@@ -765,7 +765,7 @@ mod tests {
         );
 
         let length = unsafe { drover_engine_error_len(engine) };
-        let mut error = vec![0_i8; length + 1];
+        let mut error: Vec<c_char> = vec![0; length + 1];
         assert!(length > 0);
         assert_eq!(
             unsafe { drover_engine_copy_error(engine, error.as_mut_ptr(), error.len()) },

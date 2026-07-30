@@ -155,7 +155,8 @@ try {
         }
 
         nativePhaseFiveAssert(
-            is_array($measurementSources)
+            ($telemetry['schema'] ?? null) === 2
+                && is_array($measurementSources)
                 && ($measurementSources['topology'] ?? null) === 'kernel'
                 && ($measurementSources['timings'] ?? null) === 'harness'
                 && ($measurementSources['queue_wait'] ?? null) === 'harness'
@@ -255,6 +256,7 @@ try {
                 nativePhaseFiveAssert(
                     ($summary['fixture'] ?? null) === $fixture
                         && ($summary['runner'] ?? null) === $runner
+                        && ($summary['telemetry']['schema'] ?? null) === 2
                         && ($summary['processes'] ?? null) === 1
                         && ($summary['repetition'] ?? null) === $repetition
                         && ($summary['test_count'] ?? null) === 300
@@ -305,6 +307,9 @@ try {
     $independent = [];
     $independentRawIdleRatios = [];
     $independentSteadyStateIdleRatios = [];
+    $independentSteadyStateIdleMedians = [];
+    $independentBodyLaneUnoccupiedRatios = [];
+    $independentSteadyStateBodyLaneUnoccupiedRatios = [];
     $independentSemanticHashes = [];
 
     foreach ([1, 16, 30] as $processCount) {
@@ -316,9 +321,12 @@ try {
             $semanticHash = $summary['semantic_hash'] ?? null;
             $rawIdleRatio = $summary['telemetry']['scheduler']['scheduler_idle_lane_ratio'] ?? null;
             $steadyStateIdleRatio = $summary['telemetry']['scheduler']['scheduler_steady_state_idle_lane_ratio'] ?? null;
+            $bodyLaneUnoccupiedRatio = $summary['telemetry']['scheduler']['body_lane_unoccupied_ratio'] ?? null;
+            $steadyStateBodyLaneUnoccupiedRatio = $summary['telemetry']['scheduler']['steady_state_body_lane_unoccupied_ratio'] ?? null;
             nativePhaseFiveAssert(
                 ($summary['fixture'] ?? null) === 'independent'
                     && ($summary['processes'] ?? null) === $processCount
+                    && ($summary['telemetry']['schema'] ?? null) === 2
                     && ($summary['repetition'] ?? null) === $repetition
                     && ($summary['test_count'] ?? null) === 300
                     && is_string($semanticHash)
@@ -326,6 +334,8 @@ try {
                     && ($summary['telemetry']['scheduler']['observed_process_lanes'] ?? null)
                         === $processCount
                     && ($summary['telemetry']['scheduler']['observed_body_lanes'] ?? null)
+                        === $processCount
+                    && ($summary['telemetry']['scheduler']['observed_scheduler_lanes'] ?? null)
                         === $processCount
                     && (is_int($executionMs) || is_float($executionMs))
                     && $executionMs > 0
@@ -337,12 +347,21 @@ try {
                     && $rawIdleRatio <= 1
                     && (is_int($steadyStateIdleRatio) || is_float($steadyStateIdleRatio))
                     && $steadyStateIdleRatio >= 0
-                    && $steadyStateIdleRatio < 0.05,
+                    && $steadyStateIdleRatio <= 1
+                    && (is_int($bodyLaneUnoccupiedRatio) || is_float($bodyLaneUnoccupiedRatio))
+                    && $bodyLaneUnoccupiedRatio >= 0
+                    && $bodyLaneUnoccupiedRatio <= 1
+                    && (is_int($steadyStateBodyLaneUnoccupiedRatio) || is_float($steadyStateBodyLaneUnoccupiedRatio))
+                    && $steadyStateBodyLaneUnoccupiedRatio >= 0
+                    && $steadyStateBodyLaneUnoccupiedRatio <= 1,
                 'Native Phase 5 independent-work utilization gate failed.',
             );
             $independent[$processCount][] = $summary;
             $independentRawIdleRatios[] = (float) $rawIdleRatio;
             $independentSteadyStateIdleRatios[] = (float) $steadyStateIdleRatio;
+            $independentBodyLaneUnoccupiedRatios[] = (float) $bodyLaneUnoccupiedRatio;
+            $independentSteadyStateBodyLaneUnoccupiedRatios[] =
+                (float) $steadyStateBodyLaneUnoccupiedRatio;
             $independentSemanticHashes[] = $semanticHash;
             $all[] = $summary;
         }
@@ -360,6 +379,18 @@ try {
             static fn (array $summary): float => (float) $summary['telemetry']['timings_ms']['execution'],
             $samples,
         ));
+        $independentSteadyStateIdleMedians[$processCount] = nativePhaseFiveMedian(array_map(
+            static fn (array $summary): float => (float) $summary['telemetry']['scheduler']['scheduler_steady_state_idle_lane_ratio'],
+            $samples,
+        ));
+        nativePhaseFiveAssert(
+            $independentSteadyStateIdleMedians[$processCount] < 0.05,
+            sprintf(
+                'Native Phase 5 C%d median steady-state idle ratio %.6f reached 0.05.',
+                $processCount,
+                $independentSteadyStateIdleMedians[$processCount],
+            ),
+        );
     }
 
     $speedup = $independentMedians[1] / $independentMedians[30];
@@ -732,7 +763,7 @@ try {
 
     ksort($artifactHashes, SORT_STRING);
     $comparison = [
-        'schema' => 1,
+        'schema' => 2,
         'ok' => true,
         'revision' => array_values($revisions)[0],
         'platform' => $all[0]['runtime_platform'],
@@ -745,7 +776,9 @@ try {
             'procfs_process_population' => 'root-plus-all-descendants',
             'phase_timings' => 'instrumented-harness',
             'performance_timing' => 'observer-free-harness-no-procfs-monitor',
-            'steady_state_idle' => 'cth-body-start-through-first-finish-leaving-fewer-than-c',
+            'scheduler_idle' => 'native-dispatch-through-scheduler-completion-with-runnable-work',
+            'steady_state_idle' => 'cth-native-dispatch-through-first-scheduler-completion-leaving-fewer-than-c',
+            'body_lane_unoccupied' => 'executor-body-interval-gaps-including-pipeline-and-os-scheduling',
             'aggregate_memory' => 'linux-procfs-rss-and-smaps-rollup-pss',
             'stable_process_snapshot' => 'shared-phase-lock-and-identical-pid-set-before-after',
             'inactive_scope_memory_gate' => 'three-pair-median-raw-peak-population-pss',
@@ -784,8 +817,15 @@ try {
             'independent_median_ms' => $independentMedians,
             'independent_c1_c30_speedup' => round($speedup, 6),
             'independent_raw_idle_lane_ratio_max' => max($independentRawIdleRatios),
+            'independent_steady_state_idle_lane_ratio_median' => $independentSteadyStateIdleMedians,
             'independent_steady_state_idle_lane_ratio_max' => max(
                 $independentSteadyStateIdleRatios,
+            ),
+            'independent_body_lane_unoccupied_ratio_max' => max(
+                $independentBodyLaneUnoccupiedRatios,
+            ),
+            'independent_steady_state_body_lane_unoccupied_ratio_max' => max(
+                $independentSteadyStateBodyLaneUnoccupiedRatios,
             ),
             'independent_procfs_monitor_absent' => true,
             'dsl_stress_10000_256m_unsharded' => true,

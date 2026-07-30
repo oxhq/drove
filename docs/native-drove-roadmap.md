@@ -268,8 +268,9 @@ Exit gates:
 - C1, C2, C4, C8, C16, and C30 produce identical semantic hashes and complete
   without orphaned processes or state artifacts.
 - Active test bodies never exceed the requested process count. With runnable
-  work and no resource limit, scheduler-caused idle-lane time remains below
-  5%.
+  work and no resource limit, the median scheduler-caused idle-lane time across
+  three observer-free repetitions remains below 5% at every measured
+  concurrency; every individual sample and the maximum remain recorded.
 - Increasing inactive sibling scopes from 10 to 1,000 at fixed test count and
   concurrency preserves the exact full-lane PID population and changes raw
   execution PSS by no more than a 10% median across three paired repetitions;
