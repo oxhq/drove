@@ -69,6 +69,17 @@ jobs:
           docker run --rm drove-corpus \
             php /drove/benchmarks/corpus/verify.php --manifest-only
 
+      - name: Prove Phase 6 bridges and migration
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          docker run --rm \
+            --env "DROVE_EXPECTED_REVISION=$EXPECTED_SHA" \
+            drove-corpus \
+            php /drove/experiments/native-phase-6-bridges/proof.php \
+            | tee results/phase-6-bridges.json
+          php -r '$d = json_decode(file_get_contents("results/phase-6-bridges.json"), true, 512, JSON_THROW_ON_ERROR); if (($d["schema"] ?? null) !== 1 || ($d["revision"] ?? null) !== getenv("EXPECTED_SHA")) { throw new RuntimeException("Phase 6 proof metadata mismatch."); }'
+
       - name: Clone pinned Pest and InvoiceShelf corpora
         run: |
           set -euo pipefail
@@ -682,7 +693,7 @@ jobs:
             sudo chown -R "$(id -u):$(id -g)" results
           fi
 
-      - name: Seal exact corpus evidence
+      - name: Seal and render exact corpus evidence
         if: always()
         run: |
           set -euo pipefail
@@ -693,8 +704,9 @@ jobs:
             tier=full
           fi
 
-          printf '{"schema_version":1,"drove_revision":"%s","hosted_image":"%s","tier":"%s"}\n' \
+          printf '{"schema_version":1,"drove_revision":"%s","hosted_image":"%s","tier":"%s","repository":"%s","run_id":%s,"run_attempt":%s}\n' \
             "$EXPECTED_SHA" "$CORPUS_HOSTED_IMAGE" "$tier" \
+            "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             >results/evidence-metadata.json
           (
             cd results
@@ -703,6 +715,20 @@ jobs:
               xargs -0 sha256sum >SHA256SUMS
             test -s SHA256SUMS
           )
+
+          if [ "$RUN_FULL" = true ]; then
+            summary="$RUNNER_TEMP/drove-corpus-benchmark-report.md"
+            php benchmarks/results/render-corpus.php results "$EXPECTED_SHA" \
+              >"$summary"
+            mv "$summary" results/benchmark-report.md
+            (
+              cd results
+              find . -type f ! -name SHA256SUMS -print0 |
+                sort -z |
+                xargs -0 sha256sum >SHA256SUMS
+              test -s SHA256SUMS
+            )
+          fi
 
       - name: Upload normalized corpus evidence
         if: always()

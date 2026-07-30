@@ -27,6 +27,13 @@ $assert = static function (bool $condition, string $message): void {
     }
 };
 
+$revision = getenv('DROVE_EXPECTED_REVISION');
+$revision = $revision === false || $revision === '' ? null : $revision;
+$assert(
+    $revision === null || preg_match('/^[0-9a-f]{40}$/D', $revision) === 1,
+    'The Phase 6 evidence revision is not an exact Git commit.',
+);
+
 final class PhaseSixPhpUnitCase extends TestCase
 {
     public function test_bridge_lowering(): void
@@ -593,6 +600,12 @@ $assert(
 
 $summary = [
     'schema' => 1,
+    'revision' => $revision,
+    'platform' => [
+        'os_family' => PHP_OS_FAMILY,
+        'architecture' => php_uname('m'),
+        'php' => PHP_VERSION,
+    ],
     'registry' => [
         'version' => $manifest['registry_version'],
         'hash' => $registry->hash(),

@@ -125,11 +125,20 @@ execution result remains `selection.mode=curated` and
 
 The hosted runner is pinned to `ubuntu-24.04`. The uploaded artifact name
 includes the exact Drove commit; `evidence-metadata.json` repeats that identity
-and `SHA256SUMS` seals every uploaded file.
+plus the workflow run, attempt, image, and tier. `SHA256SUMS` seals every
+uploaded file. A full artifact also contains `benchmark-report.md`; its renderer
+revalidates the sealed raw result matrix with `verify.php --complete` before
+emitting the diagnostic table.
 
 Selected hosted reports are promoted permanently under
 [`benchmarks/results/`](../results/); each snapshot links its source workflow,
 artifact, revision, and report hash.
+
+To re-render a downloaded full artifact:
+
+```bash
+php benchmarks/results/render-corpus.php /path/to/artifact <exact-drove-sha>
+```
 
 ## Pinned dependencies
 
