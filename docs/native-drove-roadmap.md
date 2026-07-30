@@ -377,9 +377,9 @@ Exit gates:
 - Public release notes distinguish native guarantees, bridge compatibility,
   known unsupported surfaces, and evidence that remains local or experimental.
 
-The technical evaluation release
-[`v0.4.0-alpha.2`](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2)
-is published on GitHub and Packagist.
+The technical evaluation release `v0.4.0-alpha.2` is published on
+[GitHub](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) and
+Packagist.
 [Native release #30588903021](https://github.com/oxhq/drove/actions/runs/30588903021)
 built, attested, and published all four native targets from the annotated tag.
 [Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
