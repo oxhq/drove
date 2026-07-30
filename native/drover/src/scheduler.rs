@@ -182,7 +182,7 @@ impl NestedGroupChannel {
         let written = loop {
             match send_socket(self.write, &bytes) {
                 Ok(written) => break written,
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(error) if socket_send_would_block(&error) => {
                     wait_socket_writable_until(self.write, deadline_ns).map_err(|error| {
                         format!("Drover could not publish a nested-group record: {error}.")
                     })?;
@@ -2997,6 +2997,10 @@ fn send_socket(fd: RawFd, bytes: &[u8]) -> Result<usize, io::Error> {
     }
 }
 
+fn socket_send_would_block(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock || error.raw_os_error() == Some(libc::ENOBUFS)
+}
+
 fn wait_socket_writable_until(fd: RawFd, deadline_ns: u64) -> Result<(), io::Error> {
     loop {
         let now_ns = monotonic_ns().map_err(|error| io::Error::other(error.to_string()))?;
@@ -3707,7 +3711,7 @@ mod tests {
                     assert_eq!(written, bytes.len());
                     sent += 1;
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) if socket_send_would_block(&error) => break,
                 Err(error) => panic!("could not saturate nested-group channel: {error}"),
             }
         }
@@ -4122,6 +4126,19 @@ mod tests {
             .contains("corrupt"));
 
         channel.close();
+    }
+
+    #[test]
+    fn socket_buffer_exhaustion_is_backpressure() {
+        assert!(socket_send_would_block(&io::Error::from(
+            io::ErrorKind::WouldBlock
+        )));
+        assert!(socket_send_would_block(&io::Error::from_raw_os_error(
+            libc::ENOBUFS
+        )));
+        assert!(!socket_send_would_block(&io::Error::from_raw_os_error(
+            libc::EBADF
+        )));
     }
 
     #[test]
