@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Drove\Bridge\CompatibilityRegistry;
+use Drove\Bridge\CompatibilityStatus;
 use Drove\Migration\Finding;
 use Drove\Migration\Migrator;
 use Drove\Migration\Scanner;
@@ -272,6 +273,23 @@ foreach ($discovery['cohorts'] as $cohort => $contract) {
     }
 }
 
+foreach ($sourceContract['dynamic_includes'] as $path => $includes) {
+    if (! isset($runtimeContractPaths[$path])
+        && ! isset($sourceContract['always_loaded_files'][$path])) {
+        continue;
+    }
+
+    $include = $includes[0];
+
+    fail(sprintf(
+        'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE: runtime source %s:%d:%d '
+            .'contains a non-deterministic include expression',
+        $path,
+        $include['line'],
+        $include['column'],
+    ));
+}
+
 $directInputs = [];
 
 foreach (array_keys($sourcePaths) as $path) {
@@ -287,7 +305,23 @@ foreach (array_keys($sourcePaths) as $path) {
         fail("$corpusId source input cannot be read: $path");
     }
 
-    $findings = $scanner->scan($source, $path);
+    $dynamicIncludeFindings = array_map(
+        static fn (array $include): Finding => new Finding(
+            'corpus.dynamic-include',
+            CompatibilityStatus::Unsupported,
+            'dynamic include expression',
+            $path,
+            $include['line'],
+            $include['column'],
+            'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE',
+            null,
+        ),
+        $sourceContract['dynamic_includes'][$path] ?? [],
+    );
+    $findings = [
+        ...$scanner->scan($source, $path),
+        ...$dynamicIncludeFindings,
+    ];
     $first = $migrator->migrate($source, $path);
     $second = $migrator->migrate($first->source, $path);
     $idempotent = ! $second->changed() && $second->source === $first->source;
@@ -298,7 +332,10 @@ foreach (array_keys($sourcePaths) as $path) {
             $findings,
         ),
     ]);
-    $afterFindings = $scanner->scan($first->source, $path);
+    $afterFindings = [
+        ...$scanner->scan($first->source, $path),
+        ...$dynamicIncludeFindings,
+    ];
     $afterStatus = restrictiveStatus([
         ...array_column($caseSurfaces, 'status'),
         ...array_map(
@@ -662,6 +699,8 @@ function decodeJsonFile(string $path): array
  *     roots: list<string>,
  *     files: array<string, true>,
  *     dependencies: array<string, list<string>>,
+ *     dynamic_includes: array<string, list<array{line: int, column: int}>>,
+ *     always_loaded_files: array<string, true>,
  *     external_dependencies: list<array{
  *         path: string,
  *         lock: string,
@@ -685,6 +724,7 @@ function sourceContract(
     $roots = [];
     $files = [];
     $excludes = [];
+    $alwaysLoadedRoots = [];
 
     foreach ($xpath->query('//*[local-name()="testsuite"]/*[local-name()="exclude"]') ?: [] as $node) {
         $excludes[] = configuredRelativePath(
@@ -794,6 +834,7 @@ function sourceContract(
             true,
         );
         $files[$bootstrap] = true;
+        $alwaysLoadedRoots[$bootstrap] = true;
     }
 
     $composerPath = "$checkout/composer.json";
@@ -816,11 +857,13 @@ function sourceContract(
                 true,
             );
             $files[$path] = true;
+            $alwaysLoadedRoots[$path] = true;
         }
     }
 
     $externalDependencies = [];
     $dependencies = [];
+    $dynamicIncludes = [];
 
     foreach (array_keys($files) as $path) {
         if (! str_starts_with($path, 'vendor/')) {
@@ -844,7 +887,16 @@ function sourceContract(
         $visited[$entrypoint] = true;
         $dependencies[$entrypoint] = [];
 
-        foreach (staticRequiredFiles("$checkout/$entrypoint", $checkout) as $required) {
+        $requiredFiles = staticRequiredFiles(
+            "$checkout/$entrypoint",
+            $checkout,
+        );
+
+        if ($requiredFiles['dynamic_includes'] !== []) {
+            $dynamicIncludes[$entrypoint] = $requiredFiles['dynamic_includes'];
+        }
+
+        foreach ($requiredFiles['files'] as $required) {
             if (str_starts_with($required, 'vendor/')) {
                 $externalDependencies[$required] = vendorDependency(
                     $required,
@@ -872,7 +924,23 @@ function sourceContract(
     sort($roots, SORT_STRING);
     ksort($files, SORT_STRING);
     ksort($dependencies, SORT_STRING);
+    ksort($dynamicIncludes, SORT_STRING);
     ksort($externalDependencies, SORT_STRING);
+    $alwaysLoadedFiles = [];
+
+    foreach (array_keys($alwaysLoadedRoots) as $path) {
+        if (! isset($files[$path])) {
+            continue;
+        }
+
+        $alwaysLoadedFiles[$path] = true;
+
+        foreach (transitiveDependencies($path, $dependencies) as $dependency) {
+            $alwaysLoadedFiles[$dependency] = true;
+        }
+    }
+
+    ksort($alwaysLoadedFiles, SORT_STRING);
 
     if ($roots === [] || $files === []) {
         fail('full-suite source contract is empty');
@@ -882,6 +950,8 @@ function sourceContract(
         'roots' => $roots,
         'files' => $files,
         'dependencies' => $dependencies,
+        'dynamic_includes' => $dynamicIncludes,
+        'always_loaded_files' => $alwaysLoadedFiles,
         'external_dependencies' => array_values($externalDependencies),
     ];
 }
@@ -1466,7 +1536,10 @@ function realSourcePath(string $path, string $checkout): ?string
 }
 
 /**
- * @return list<string>
+ * @return array{
+ *     files: list<string>,
+ *     dynamic_includes: list<array{line: int, column: int}>
+ * }
  */
 function staticRequiredFiles(string $path, string $checkout): array
 {
@@ -1478,6 +1551,7 @@ function staticRequiredFiles(string $path, string $checkout): array
 
     $tokens = array_values(PhpToken::tokenize($source));
     $required = [];
+    $dynamicIncludes = [];
 
     foreach ($tokens as $index => $token) {
         if (! $token->is([T_REQUIRE, T_REQUIRE_ONCE, T_INCLUDE, T_INCLUDE_ONCE])) {
@@ -1501,6 +1575,16 @@ function staticRequiredFiles(string $path, string $checkout): array
 
         $expression = trim(substr($source, $start, $end - $start));
         $candidate = staticIncludeExpression($expression, $path);
+
+        if ($candidate === null) {
+            $dynamicIncludes[] = [
+                'line' => $token->line,
+                'column' => tokenColumn($source, $token->pos),
+            ];
+
+            continue;
+        }
+
         $relative = configuredRelativePath(
             $candidate,
             dirname($path),
@@ -1512,11 +1596,16 @@ function staticRequiredFiles(string $path, string $checkout): array
 
     ksort($required, SORT_STRING);
 
-    return array_keys($required);
+    return [
+        'files' => array_keys($required),
+        'dynamic_includes' => $dynamicIncludes,
+    ];
 }
 
-function staticIncludeExpression(string $expression, string $owner): string
-{
+function staticIncludeExpression(
+    string $expression,
+    string $owner,
+): ?string {
     while (str_starts_with($expression, '(')
         && str_ends_with($expression, ')')) {
         $expression = trim(substr($expression, 1, -1));
@@ -1562,11 +1651,14 @@ function staticIncludeExpression(string $expression, string $owner): string
         );
     }
 
-    fail(
-        'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE: '
-        ."$owner contains a non-deterministic include expression: "
-        .$expression,
-    );
+    return null;
+}
+
+function tokenColumn(string $source, int $offset): int
+{
+    $lineStart = strrpos(substr($source, 0, $offset), "\n");
+
+    return $lineStart === false ? $offset + 1 : $offset - $lineStart;
 }
 
 function decodePhpString(string $quote, string $contents): string

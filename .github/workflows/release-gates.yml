@@ -325,6 +325,7 @@ jobs:
         composer --working-dir="$bridge_consumer" install \
           --no-interaction --no-progress --prefer-dist --optimize-autoloader
         test ! -L "$bridge_consumer/vendor/oxhq/drove"
+        test ! -e "$bridge_consumer/vendor/oxhq/drove/.temp"
         cat > "$bridge_consumer/bridge-boundary.php" <<'PHP'
         <?php
 
@@ -351,7 +352,14 @@ jobs:
             expect(class_exists(Drove\Bridge\Pest\Bridge::class))->toBeTrue();
         });
         PHP
+        cache_directory="$(
+          cd "$bridge_consumer"
+          php -r 'echo sys_get_temp_dir().DIRECTORY_SEPARATOR."drove-pest-".hash("sha256", (string) getcwd());'
+        )"
+        test ! -e "$cache_directory"
         (
           cd "$bridge_consumer"
           vendor/bin/pest --colors=never --compact
         )
+        test -d "$cache_directory"
+        test "$(stat -c '%a' "$cache_directory")" = 700

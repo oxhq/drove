@@ -45,8 +45,22 @@ final class Cache implements HandlesArguments
             }
 
             if (! $xmlConfiguration->phpunit()->hasCacheDirectory()) {
+                $cacheDirectory = realpath(self::TEMPORARY_FOLDER);
+
+                if (! is_string($cacheDirectory)) {
+                    $cacheDirectory = sys_get_temp_dir()
+                        .DIRECTORY_SEPARATOR
+                        .'drove-pest-'.hash('sha256', (string) getcwd());
+
+                    if (! is_dir($cacheDirectory)
+                        && ! @mkdir($cacheDirectory, 0700, true)
+                        && ! is_dir($cacheDirectory)) {
+                        throw new \RuntimeException('Drove could not create the Pest bridge cache directory.');
+                    }
+                }
+
                 $arguments = $this->pushArgument('--cache-directory', $arguments);
-                $arguments = $this->pushArgument((string) realpath(self::TEMPORARY_FOLDER), $arguments);
+                $arguments = $this->pushArgument($cacheDirectory, $arguments);
             }
         }
 

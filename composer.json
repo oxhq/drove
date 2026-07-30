@@ -91,7 +91,7 @@
         "pestphp/pest-plugin-profanity": "^5.0.0",
         "pestphp/pest-plugin-rector": "^5.0.0",
         "pestphp/pest-plugin-type-coverage": "^5.0.0",
-        "phpunit/phpunit": "^13.2.4",
+        "phpunit/phpunit": "13.2.4",
         "psy/psysh": "^0.12.24",
         "symfony/process": "^8.1.0"
     },

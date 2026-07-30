@@ -1354,7 +1354,9 @@ impl ActiveTask {
         let protocol_stopped_ns = self.terminal_received_ns.or(self.eof_ns);
 
         if !self.exited
-            && protocol_stopped_ns.is_some_and(|stopped| now_ns.saturating_sub(stopped) >= grace_ns)
+            && protocol_stopped_ns.is_some_and(|stopped| {
+                now_ns.saturating_sub(stopped) >= grace_ns.max(PROCESS_BOUNDARY_TIMEOUT_NS)
+            })
         {
             self.protocol_error.get_or_insert_with(|| {
                 "The Drove child stopped its result protocol without exiting.".into()
@@ -1385,9 +1387,9 @@ impl ActiveTask {
         }
 
         if !self.eof
-            && self
-                .kill_ns
-                .is_some_and(|killed| now_ns.saturating_sub(killed) >= grace_ns)
+            && self.kill_ns.is_some_and(|killed| {
+                now_ns.saturating_sub(killed) >= grace_ns.max(PROCESS_BOUNDARY_TIMEOUT_NS)
+            })
         {
             self.cleanup_failed = true;
             self.eof = true;
@@ -2356,11 +2358,11 @@ impl Scheduler {
 
         for active in self.active.values() {
             let target = if let Some(kill_ns) = active.kill_ns {
-                kill_ns.saturating_add(self.grace_ns)
+                kill_ns.saturating_add(self.grace_ns.max(PROCESS_BOUNDARY_TIMEOUT_NS))
             } else if let Some(term_ns) = active.term_ns.or(active.cleanup_term_ns) {
                 term_ns.saturating_add(self.grace_ns)
             } else if let Some(stopped_ns) = active.terminal_received_ns.or(active.eof_ns) {
-                stopped_ns.saturating_add(self.grace_ns)
+                stopped_ns.saturating_add(self.grace_ns.max(PROCESS_BOUNDARY_TIMEOUT_NS))
             } else if let Some(deadline_ns) = active.deadline_ns {
                 deadline_ns.max(
                     active
@@ -3848,7 +3850,7 @@ mod tests {
     }
 
     #[test]
-    fn latches_a_blocked_channel_after_forced_cleanup() {
+    fn gives_terminal_and_forced_cleanup_a_process_boundary_before_latching_failure() {
         let task = Task {
             ordinal: 0,
             id: "task:blocked-channel".into(),
@@ -3858,10 +3860,16 @@ mod tests {
             permit_names: Vec::new(),
         };
         let mut active = ActiveTask::new(task, 41, 42, -1, 0, "blocked-channel-run", false);
-        active.kill_ns = Some(1);
+        active.terminal_received_ns = Some(0);
+        active.kill_ns = Some(0);
 
-        active.enforce(3, 1);
+        active.enforce(PROCESS_BOUNDARY_TIMEOUT_NS - 1, 1);
+        assert!(active.protocol_error.is_none());
+        assert!(!active.cleanup_failed);
+        assert!(!active.eof);
 
+        active.enforce(PROCESS_BOUNDARY_TIMEOUT_NS, 1);
+        assert!(active.protocol_error.is_some());
         assert!(active.cleanup_failed);
         assert!(active.eof);
     }

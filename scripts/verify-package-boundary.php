@@ -111,6 +111,7 @@ if (! is_array($require)
     )
     || array_intersect(array_keys($require), $bridgePackages) !== []
     || array_diff($bridgePackages, array_keys($requireDev)) !== []
+    || ($requireDev['phpunit/phpunit'] ?? null) !== '13.2.4'
     || array_diff($bridgePackages, array_keys($suggest)) !== []) {
     throw new RuntimeException('DROVE_PACKAGE_BOUNDARY_INVALID: Composer entrypoints no longer match their declared roles.');
 }

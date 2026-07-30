@@ -504,6 +504,104 @@ XML);
         );
     }
 
+    file_put_contents($unsupported, <<<'PHP'
+<?php
+
+$helper = __DIR__.'/Helper.php';
+require $helper;
+
+test('dependency', fn () => expect(true)->toBe(true));
+PHP);
+    $unselectedDynamicFirst = "$directory/classification-dynamic-unselected-first.json";
+    $unselectedDynamicSecond = "$directory/classification-dynamic-unselected-second.json";
+
+    foreach ($environment as $name => $value) {
+        putenv("$name=$value");
+    }
+
+    try {
+        foreach ([
+            $unselectedDynamicFirst,
+            $unselectedDynamicSecond,
+        ] as $output) {
+            [$dynamicReport, $dynamicExit] = runCommand([
+                PHP_BINARY,
+                __DIR__.'/classify.php',
+                'fixture',
+                $directory,
+                $output,
+                '--cohort-root='.$directory,
+                '--discovery-xml='.$discovery,
+            ]);
+
+            if ($dynamicExit !== 0) {
+                throw new RuntimeException(
+                    "Classifier rejected an unselected dynamic include:\n"
+                    .$dynamicReport,
+                );
+            }
+        }
+    } finally {
+        foreach ($previous as $name => $value) {
+            putenv($value === null ? $name : "$name=$value");
+        }
+    }
+
+    $unselectedFirst = (string) file_get_contents($unselectedDynamicFirst);
+    $unselectedSecond = (string) file_get_contents($unselectedDynamicSecond);
+    $unselectedClassification = json_decode(
+        $unselectedFirst,
+        true,
+        flags: JSON_THROW_ON_ERROR,
+    );
+    $unselectedInputs = array_column(
+        $unselectedClassification['inputs'] ?? [],
+        null,
+        'path',
+    );
+    $unselectedCases = array_values(array_filter(
+        $unselectedClassification['cases'] ?? [],
+        static fn (array $case): bool => ($case['source'] ?? null)
+            === 'Unsupported.php',
+    ));
+    $dynamicFindings = array_values(array_filter(
+        $unselectedInputs['Unsupported.php']['findings'] ?? [],
+        static fn (array $finding): bool => ($finding['diagnostic'] ?? null)
+            === 'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE',
+    ));
+
+    if ($unselectedFirst !== $unselectedSecond
+        || ($unselectedInputs['Unsupported.php']['path'] ?? null)
+            !== 'Unsupported.php'
+        || ($unselectedInputs['Unsupported.php']['sha256'] ?? null)
+            !== hash_file('sha256', $unsupported)
+        || ($unselectedInputs['Unsupported.php']['runtime_status'] ?? null)
+            !== 'unsupported'
+        || ($unselectedInputs['Unsupported.php']['runtime_evidence'] ?? null)
+            !== 'static-preflight'
+        || ($unselectedInputs['Unsupported.php']['native_migration']['direct_status']
+            ?? null) !== 'unsupported'
+        || count($dynamicFindings) !== 1
+        || ($dynamicFindings[0]['path'] ?? null) !== 'Unsupported.php'
+        || ($dynamicFindings[0]['status'] ?? null) !== 'unsupported'
+        || ($dynamicFindings[0]['line'] ?? null) !== 4
+        || ($dynamicFindings[0]['column'] ?? null) !== 1
+        || count($unselectedCases) !== 1
+        || ($unselectedCases[0]['status'] ?? null) !== 'unsupported'
+        || ($unselectedCases[0]['runtime_evidence'] ?? null)
+            !== 'static-preflight'
+        || ($unselectedCases[0]['execution_cohorts'] ?? null) !== []
+        || ! in_array(
+            'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE',
+            $unselectedCases[0]['diagnostics'] ?? [],
+            true,
+        )) {
+        throw new RuntimeException(
+            'Classifier did not preserve the unsupported dynamic include '
+            .'diagnostic and source identity.',
+        );
+    }
+
     file_put_contents($portable, <<<'PHP'
 <?php
 
@@ -513,7 +611,7 @@ require $helper;
 test('portable one', fn () => expect(true)->toBe(true));
 test('portable two', fn () => expect(2)->toEqual(2));
 PHP);
-    $dynamicOutput = "$directory/classification-dynamic.json";
+    $dynamicOutput = "$directory/classification-dynamic-selected.json";
 
     foreach ($environment as $name => $value) {
         putenv("$name=$value");
@@ -539,9 +637,13 @@ PHP);
         || ! str_contains(
             $dynamicReport,
             'DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE',
+        )
+        || ! str_contains(
+            $dynamicReport,
+            'Portable.php:4:1',
         )) {
         throw new RuntimeException(
-            'Full-suite classifier omitted a dynamic source include.',
+            'Full-suite classifier did not fail closed on a selected dynamic include.',
         );
     }
 }

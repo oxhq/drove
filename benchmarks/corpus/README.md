@@ -76,9 +76,14 @@ testsuite configuration. It resolves testsuite paths relative to that
 configuration file, scans every PHP input under the versioned suite-support
 roots, the configured bootstrap, root Composer `autoload.files` and
 `autoload-dev.files`, and deterministic local `require`/`include` descendants.
-It fails on a dynamic bootstrap include or when any discovered case cannot be
-mapped back to one scanned source file. Installed vendor behavior is
-classified separately from the committed dependency lock and extension map.
+It fails on a dynamic include in a selected execution source, its static
+dependencies, the bootstrap, or a Composer autoload input. A dynamic include
+in an unselected source is retained as an explicit
+`DROVE_CORPUS_UNSUPPORTED_DYNAMIC_INCLUDE` finding with the source path and
+hash; it is not silently omitted from classification. The classifier also
+fails when any discovered case cannot be mapped back to one scanned source
+file. Installed vendor behavior is classified separately from the committed
+dependency lock and extension map.
 
 Every case, source finding, Composer/Pest plugin, Testbench package, and
 configured PHPUnit extension is assigned exactly one or more registry surfaces

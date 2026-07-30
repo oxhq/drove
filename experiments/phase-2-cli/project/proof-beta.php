@@ -214,7 +214,8 @@ PHP,
             && is_string($successArtifact['plan']['sha256'] ?? null)
             && is_int($successArtifact['memory_peak_bytes'] ?? null)
             && $successArtifact['memory_peak_bytes'] > 0
-            && ($successArtifact['memory_peak_sample_count'] ?? null) === 5
+            && ($successArtifact['memory_peak_sample_count'] ?? null)
+                === 1 + ($successArtifact['plan']['tests'] ?? -1)
             && (fileperms($successReplay) & 0777) === 0600,
         'Plugin observers or the successful replay artifact drifted: '.$success['stderr'],
     );
