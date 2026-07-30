@@ -1753,6 +1753,9 @@ impl Scheduler {
             return Ok(());
         }
 
+        let Some(message) = self.nested_groups.receive()? else {
+            return Ok(());
+        };
         let direct_owners: HashSet<_> = self
             .active
             .iter()
@@ -1766,6 +1769,10 @@ impl Scheduler {
                 .then_some(*pid)
             })
             .collect();
+        self.nested_group_graph
+            .as_mut()
+            .expect("origin scheduler owns its nested-group graph")
+            .apply(message, &self.nested_groups, &direct_owners)?;
 
         while let Some(message) = self.nested_groups.receive()? {
             self.nested_group_graph
