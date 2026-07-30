@@ -2091,7 +2091,7 @@ impl Scheduler {
                 }
             }
 
-            if !write_group_ready(ready_sockets[0], true) {
+            if registered_nested && !write_group_ready(ready_sockets[0], true) {
                 unsafe {
                     libc::_exit(1);
                 }
@@ -2109,13 +2109,18 @@ impl Scheduler {
             }));
         }
 
-        unsafe {
+        let parent_group_error = unsafe {
             libc::close(sockets[1]);
             libc::close(ready_sockets[0]);
-            // Parent and child both attempt this conventional race-free setup.
-            // The child readiness byte below is the authoritative success.
-            libc::setpgid(pid, pid);
-        }
+            // Root executors never exec, so a successful parent setpgid()
+            // establishes their process group without waiting for the child.
+            (libc::setpgid(pid, pid) != 0).then(|| {
+                format!(
+                    "Drover could not create the executor process group: {}.",
+                    io::Error::last_os_error()
+                )
+            })
+        };
         self.forks += 1;
         self.peak_live_pids = self.peak_live_pids.max((self.active.len() + 1) as u32);
 
@@ -2126,10 +2131,16 @@ impl Scheduler {
                 .saturating_mul(1_000_000)
                 .min(PROCESS_BOUNDARY_TIMEOUT_NS)
         };
-        let group_ready = read_group_ready(
-            ready_sockets[1],
-            spawned_ns.saturating_add(readiness_timeout_ns),
-        );
+        let group_ready = if registered_nested {
+            read_group_ready(
+                ready_sockets[1],
+                spawned_ns.saturating_add(readiness_timeout_ns),
+            )
+        } else if let Some(error) = parent_group_error {
+            Err(error)
+        } else {
+            Ok(GroupReadiness::Ready)
+        };
 
         unsafe {
             libc::close(ready_sockets[1]);
@@ -4001,6 +4012,8 @@ mod tests {
         assert_eq!(scheduler.active_count(), 1);
         assert_eq!(scheduler.pending.len(), 1);
         assert_eq!(scheduler.max_active(), 1);
+        let pid = *scheduler.active.keys().next().unwrap();
+        assert_eq!(unsafe { libc::getpgid(pid) }, pid);
 
         let names = engine.registry.names(&["scope:root".into()]);
         assert!(!engine.registry.try_acquire(&names).unwrap());
