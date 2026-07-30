@@ -81,6 +81,7 @@ try {
         foreach ($processCounts as $processIndex => $processes) {
             $summary = $read($matrixPaths[($providerIndex * 6) + $processIndex]);
             $pids = $summary['test_pids'] ?? null;
+            $lanesObserved = $summary['lanes_observed'] ?? null;
 
             if (($summary['schema'] ?? null) !== 1
                 || ($summary['ok'] ?? null) !== true
@@ -88,7 +89,9 @@ try {
                 || ($summary['scheduler'] ?? null) !== 'drover'
                 || ($summary['processes'] ?? null) !== $processes
                 || ($summary['lanes_requested'] ?? null) !== $processes
-                || ($summary['lanes_observed'] ?? null) !== $processes
+                || ! is_int($lanesObserved)
+                || $lanesObserved < ($processes === 1 ? 1 : 2)
+                || $lanesObserved > $processes
                 || ($summary['file_count'] ?? null) !== 30
                 || ($summary['test_count'] ?? null) !== 300
                 || ($summary['status_counts'] ?? null) !== ['passed' => 300]

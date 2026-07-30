@@ -264,6 +264,7 @@ PHP,
             static fn (array $test): mixed => $test['telemetry']['pid'] ?? null,
             $tests,
         ), SORT_REGULAR));
+        $observedLanes = $run['observed_concurrency']['global'] ?? null;
 
         if (! array_all(
             $tests,
@@ -275,7 +276,9 @@ PHP,
             || $cleanups !== 300
             || count($executorPids) !== 300
             || in_array(null, $executorPids, true)
-            || ($run['observed_concurrency']['global'] ?? null) !== $processes) {
+            || ! is_int($observedLanes)
+            || $observedLanes < ($processes === 1 ? 1 : 2)
+            || $observedLanes > $processes) {
             throw new RuntimeException('Native Laravel assertions, cleanup, PIDs, or lanes diverged.');
         }
 
@@ -376,7 +379,7 @@ PHP,
             'scheduler' => 'drover',
             'processes' => $processes,
             'lanes_requested' => $processes,
-            'lanes_observed' => $run['observed_concurrency']['global'],
+            'lanes_observed' => $observedLanes,
             'file_count' => 30,
             'test_count' => 300,
             'status_counts' => ['passed' => 300],

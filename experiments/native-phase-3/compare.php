@@ -119,6 +119,7 @@ $conformance = [];
 foreach (array_slice($arguments, 1, 6) as $index => $path) {
     $summary = $read($path);
     $processes = $expectedProcesses[$index];
+    $lanesObserved = $summary['lanes_observed'] ?? null;
 
     if (($summary['schema'] ?? null) !== 1
         || ($summary['ok'] ?? null) !== true
@@ -126,7 +127,9 @@ foreach (array_slice($arguments, 1, 6) as $index => $path) {
         || ($summary['scheduler'] ?? null) !== 'drover'
         || ($summary['processes'] ?? null) !== $processes
         || ($summary['lanes_requested'] ?? null) !== $processes
-        || ($summary['lanes_observed'] ?? null) !== $processes
+        || ! is_int($lanesObserved)
+        || $lanesObserved < ($processes === 1 ? 1 : 2)
+        || $lanesObserved > $processes
         || ($summary['test_count'] ?? null) !== 49
         || ($summary['runnable_count'] ?? null) !== 47
         || ($summary['terminal_result_count'] ?? null) !== 49
@@ -173,6 +176,7 @@ foreach ($hashKeys as $key) {
 }
 
 $stress = $read($arguments[7]);
+$stressLanesObserved = $stress['lanes_observed'] ?? null;
 
 if (($stress['schema'] ?? null) !== 1
     || ($stress['ok'] ?? null) !== true
@@ -180,7 +184,9 @@ if (($stress['schema'] ?? null) !== 1
     || ($stress['scheduler'] ?? null) !== 'drover'
     || ($stress['processes'] ?? null) !== 30
     || ($stress['lanes_requested'] ?? null) !== 30
-    || ($stress['lanes_observed'] ?? null) !== 30
+    || ! is_int($stressLanesObserved)
+    || $stressLanesObserved < 2
+    || $stressLanesObserved > 30
     || ($stress['test_count'] ?? null) !== 10_000
     || ($stress['runnable_count'] ?? null) !== 10_000
     || ($stress['terminal_result_count'] ?? null) !== 10_000

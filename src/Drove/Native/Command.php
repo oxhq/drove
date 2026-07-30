@@ -350,7 +350,7 @@ final class Command
             ));
 
             foreach ($iterator as $file) {
-                if ($file->isFile() && strtolower($file->getExtension()) === 'php') {
+                if ($file->isFile() && strtolower((string) $file->getExtension()) === 'php') {
                     $resolved = realpath($file->getPathname());
 
                     if ($resolved === false) {

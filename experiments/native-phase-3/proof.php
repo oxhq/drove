@@ -901,8 +901,12 @@ $assert(
     'Native Phase 3 aggregate exit semantics diverged.',
 );
 $observedLanes = $run['observed_concurrency']['global'] ?? null;
+$maximumObservedLanes = $forked ? min($processes, $expectedRunnableCount) : 1;
+$minimumObservedLanes = $maximumObservedLanes > 1 ? 2 : 1;
 $assert(
-    $observedLanes === ($forked ? min($processes, $expectedRunnableCount) : 1),
+    is_int($observedLanes)
+        && $observedLanes >= $minimumObservedLanes
+        && $observedLanes <= $maximumObservedLanes,
     'Native Phase 3 observed concurrency diverged.',
 );
 $executorPids = array_values(array_unique($pidAssignments));

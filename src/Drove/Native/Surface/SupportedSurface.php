@@ -36,10 +36,7 @@ final readonly class SupportedSurface implements JsonSerializable
         try {
             $manifest = json_decode($contents, true, 32, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new UnexpectedValueException(
-                'The Drove native supported-surface manifest is not valid JSON.',
-                previous: $exception,
-            );
+            throw new UnexpectedValueException('The Drove native supported-surface manifest is not valid JSON.', $exception->getCode(), previous: $exception);
         }
 
         if (! is_array($manifest)) {
@@ -477,8 +474,10 @@ final readonly class SupportedSurface implements JsonSerializable
             }
 
             $first = $this->next($tokens, $index);
-
-            if ($first === null || $tokens[$first]->text === '(') {
+            if ($first === null) {
+                continue;
+            }
+            if ($tokens[$first]->text === '(') {
                 continue;
             }
 
@@ -494,8 +493,10 @@ final readonly class SupportedSurface implements JsonSerializable
 
             $functionOnly = $tokens[$first]->is(T_FUNCTION);
             $start = $functionOnly ? $this->next($tokens, $first) : $first;
-
-            if ($start === null || $start >= $end) {
+            if ($start === null) {
+                continue;
+            }
+            if ($start >= $end) {
                 continue;
             }
 
@@ -531,10 +532,12 @@ final readonly class SupportedSurface implements JsonSerializable
                 $specificationEnd,
             ) as $specification) {
                 if ($requiresFunctionMarker) {
-                    if ($specification === [] || ! $specification[0]->is(T_FUNCTION)) {
+                    if ($specification === []) {
                         continue;
                     }
-
+                    if (! $specification[0]->is(T_FUNCTION)) {
+                        continue;
+                    }
                     array_shift($specification);
                 }
 
@@ -591,8 +594,10 @@ final readonly class SupportedSurface implements JsonSerializable
 
         for ($index = $start; $index <= $end; $index++) {
             $token = $tokens[$index] ?? null;
-
-            if (! $token instanceof PhpToken || $token->isIgnorable()) {
+            if (! $token instanceof PhpToken) {
+                continue;
+            }
+            if ($token->isIgnorable()) {
                 continue;
             }
 
@@ -825,7 +830,7 @@ final readonly class SupportedSurface implements JsonSerializable
         $names = [];
 
         foreach ($values as $value) {
-            $names[strtolower($value)] = true;
+            $names[strtolower((string) $value)] = true;
         }
 
         return $names;
@@ -840,7 +845,7 @@ final readonly class SupportedSurface implements JsonSerializable
         $codes = [];
 
         foreach ($values as $construct => $code) {
-            $codes[strtolower($construct)] = $code;
+            $codes[strtolower((string) $construct)] = $code;
         }
 
         return $codes;
@@ -926,7 +931,7 @@ final readonly class SupportedSurface implements JsonSerializable
                 static fn (mixed $item): bool => ! is_string($item)
                     || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $item) !== 1,
             )
-            || count(array_unique(array_map('strtolower', $value))) !== count($value)) {
+            || count(array_unique(array_map(strtolower(...), $value))) !== count($value)) {
             $this->invalid($name);
         }
     }

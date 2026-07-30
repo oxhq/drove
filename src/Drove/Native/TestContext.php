@@ -92,16 +92,12 @@ final class TestContext
 
     private function hookClosure(\Closure $hook, string $phase): \Closure
     {
-        return function () use ($hook, $phase): mixed {
-            return $this->executeHook($hook, $phase);
-        };
+        return fn (): mixed => $this->executeHook($hook, $phase);
     }
 
     public function caseClosure(CaseDefinition $case): \Closure
     {
-        return function () use ($case): TestOutcome {
-            return $this->executeCase($case);
-        };
+        return fn (): TestOutcome => $this->executeCase($case);
     }
 
     /**

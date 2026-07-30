@@ -174,13 +174,18 @@ final class Renderer
         $lines = [];
 
         foreach ($reports as $report) {
-            if (! is_array($report)
-                || ! is_string($report['owner'] ?? null)
-                || ! is_string($report['key'] ?? null)
-                || ! is_string($report['output'] ?? null)) {
+            if (! is_array($report)) {
                 continue;
             }
-
+            if (! is_string($report['owner'] ?? null)) {
+                continue;
+            }
+            if (! is_string($report['key'] ?? null)) {
+                continue;
+            }
+            if (! is_string($report['output'] ?? null)) {
+                continue;
+            }
             $lines[] = sprintf(' [%s:%s]', $report['owner'], $report['key']);
 
             if ($report['output'] === '') {

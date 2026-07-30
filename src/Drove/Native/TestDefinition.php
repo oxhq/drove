@@ -146,7 +146,7 @@ final class TestDefinition
             return $this->materialized;
         }
 
-        $this->materialized = $this->materialize($this->dataset);
+        $this->materialized = self::materialize($this->dataset);
 
         return $this->materialized;
     }

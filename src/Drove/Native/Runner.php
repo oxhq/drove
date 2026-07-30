@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drove\Native;
 
+use Drove\Environment\EnvironmentRuntime;
 use Drove\Extension\RunSummary;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\Scheduler;
@@ -29,7 +30,7 @@ final readonly class Runner
         $plan = $declarations->plan($selection);
         $environment = $declarations->resolveEnvironment();
 
-        if ($environment !== null) {
+        if ($environment instanceof EnvironmentRuntime) {
             $environment->assertPlanSupported($plan);
             $plan['environment'] = $environment->environmentPlan()->toArray();
         }
@@ -49,10 +50,10 @@ final readonly class Runner
                     'runtime' => $context,
                 ];
             },
-            beforeDispatch: $environment === null ? null : $environment->beforeDispatch(...),
-            enterDescendant: $environment === null ? null : $environment->enterDescendant(...),
-            leaveDescendant: $environment === null ? null : $environment->leaveDescendant(...),
-            afterDispatch: $environment === null ? null : $environment->afterDispatch(...),
+            beforeDispatch: $environment instanceof EnvironmentRuntime ? $environment->beforeDispatch(...) : null,
+            enterDescendant: $environment instanceof EnvironmentRuntime ? $environment->enterDescendant(...) : null,
+            leaveDescendant: $environment instanceof EnvironmentRuntime ? $environment->leaveDescendant(...) : null,
+            afterDispatch: $environment instanceof EnvironmentRuntime ? $environment->afterDispatch(...) : null,
         )->run($executionPlan, $environment?->scopeContext());
 
         $byId = [];

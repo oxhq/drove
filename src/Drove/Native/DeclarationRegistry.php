@@ -427,7 +427,7 @@ final class DeclarationRegistry
 
         foreach ($source['tests'] as $testId) {
             foreach ($this->compileDefinition($testId) as $test) {
-                if ($selection === null || $selection->includes($test['name'], $test['groups'])) {
+                if (! $selection instanceof Selection || $selection->includes($test['name'], $test['groups'])) {
                     $tests[] = $test;
                 }
             }
