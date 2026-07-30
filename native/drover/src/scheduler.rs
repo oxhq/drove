@@ -1246,6 +1246,9 @@ impl ActiveTask {
                     .as_u64()
                     .ok_or_else(|| "Drove received an invalid child start.".to_string())?;
                 self.started_ns = Some(started_ns);
+                if let Some(finished_ns) = self.finished_ns.as_mut() {
+                    *finished_ns = (*finished_ns).max(started_ns);
+                }
             }
             "task.stdout" | "task.stderr" | "task.value" => {
                 let encoded = frame.payload["data"]
@@ -1301,7 +1304,7 @@ impl ActiveTask {
         if waited == 0 {
             if unsafe { info.si_pid() } == self.pid {
                 self.exited = true;
-                self.finished_ns.get_or_insert(now_ns);
+                self.record_observed_finish(now_ns);
             }
 
             return;
@@ -1315,9 +1318,16 @@ impl ActiveTask {
 
         self.exited = true;
         self.reaped = true;
-        self.finished_ns.get_or_insert(now_ns);
+        self.record_observed_finish(now_ns);
         self.protocol_error
             .get_or_insert_with(|| format!("waitid() lost the Drove child: {error}."));
+    }
+
+    fn record_observed_finish(&mut self, stale_ns: u64) {
+        let observed_ns = monotonic_ns().unwrap_or(stale_ns);
+        let started_ns = self.started_ns.unwrap_or(observed_ns);
+        let finished_ns = self.finished_ns.get_or_insert(observed_ns);
+        *finished_ns = (*finished_ns).max(started_ns);
     }
 
     fn reap(&mut self, now_ns: u64) {
@@ -1334,7 +1344,7 @@ impl ActiveTask {
         if waited == self.pid {
             self.reaped = true;
             self.wait_status = Some(status);
-            self.finished_ns.get_or_insert(now_ns);
+            self.record_observed_finish(now_ns);
 
             return;
         }
@@ -1347,7 +1357,7 @@ impl ActiveTask {
             }
 
             self.reaped = true;
-            self.finished_ns.get_or_insert(now_ns);
+            self.record_observed_finish(now_ns);
             self.protocol_error
                 .get_or_insert_with(|| format!("waitpid() lost the Drove child: {error}."));
         }
@@ -3819,6 +3829,123 @@ mod tests {
         assert!(active.running());
         assert_eq!(active.deadline_ns, Some(26_000_000));
         assert!(active.owns_task_permits());
+    }
+
+    #[test]
+    fn exit_fallback_is_sampled_after_wait_and_never_precedes_child_start() {
+        let run_id = "stale-exit-sample-run";
+        let task = Task {
+            ordinal: 0,
+            id: "task:stale-exit-sample".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 1_000,
+            permit_names: Vec::new(),
+        };
+        let sockets = socket_pair().unwrap();
+        set_nonblocking(sockets[0]).unwrap();
+        let stale_ns = monotonic_ns().unwrap();
+        let child_task = task.clone();
+        let pid = unsafe { libc::fork() };
+        assert_ne!(pid, -1);
+
+        if pid == 0 {
+            unsafe {
+                libc::close(sockets[0]);
+            }
+            let mut started_ns = monotonic_ns().unwrap_or(stale_ns);
+
+            while started_ns <= stale_ns {
+                started_ns = monotonic_ns().unwrap_or(stale_ns.saturating_add(1));
+            }
+
+            let started = Frame::new(
+                run_id.into(),
+                child_task.id,
+                child_task.kind,
+                child_task.scope_id,
+                child_task.ordinal,
+                0,
+                "task.started".into(),
+                json!({ "started_ns": started_ns }),
+            )
+            .unwrap();
+            let wrote = write_frame(sockets[1], &started).is_ok();
+            unsafe {
+                libc::close(sockets[1]);
+            }
+
+            if !wrote {
+                unsafe {
+                    libc::_exit(2);
+                }
+            }
+
+            unsafe {
+                libc::kill(libc::getpid(), libc::SIGKILL);
+                libc::_exit(3);
+            }
+        }
+
+        unsafe {
+            libc::close(sockets[1]);
+        }
+        let mut active = ActiveTask::new(task, pid, pid, sockets[0], stale_ns, run_id, false);
+        active.mark_started(stale_ns, false);
+        let deadline_ns = monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS;
+
+        while !active.eof || active.started_ns.is_none() {
+            active.read_available();
+            assert!(
+                monotonic_ns().unwrap() < deadline_ns,
+                "child start and EOF were not drained"
+            );
+            std::thread::yield_now();
+        }
+
+        let started_ns = active.started_ns.expect("child start was drained");
+        assert!(started_ns > stale_ns);
+
+        while !active.exited {
+            active.observe_exit(stale_ns);
+            assert!(
+                monotonic_ns().unwrap() < deadline_ns,
+                "child did not become waitable"
+            );
+            std::thread::yield_now();
+        }
+
+        assert!(
+            active.finished_ns.expect("exit fallback was recorded") >= started_ns,
+            "exit fallback reused the stale pre-start scheduler sample"
+        );
+        active.kill_ns = Some(stale_ns);
+
+        while !active.reaped {
+            active.reap(stale_ns);
+            assert!(
+                monotonic_ns().unwrap() < deadline_ns,
+                "child was not reaped"
+            );
+            std::thread::yield_now();
+        }
+
+        unsafe {
+            libc::close(active.fd);
+        }
+        let result = active.into_result();
+        assert_eq!(result.status, "failed");
+        assert_eq!(
+            result.failure.as_ref().unwrap()["kind"],
+            "signal_termination"
+        );
+        assert_eq!(result.telemetry.pid, Some(pid));
+        assert_eq!(result.telemetry.signal, Some(libc::SIGKILL));
+        assert_eq!(result.telemetry.forks, 1);
+        assert_eq!(result.telemetry.scope_workers, 0);
+        assert_eq!(result.telemetry.executor_workers, 1);
+        assert_eq!(result.telemetry.process_anchors, 0);
+        assert!(result.telemetry.finished_ns.unwrap() >= result.telemetry.started_ns.unwrap());
     }
 
     fn assert_group_reaped(pid: libc::pid_t) {

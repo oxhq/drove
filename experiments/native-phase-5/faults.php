@@ -126,6 +126,24 @@ try {
             $telemetry = $result['telemetry'] ?? null;
             $executorStartedNs = is_array($telemetry) ? ($telemetry['started_ns'] ?? null) : null;
             $executorFinishedNs = is_array($telemetry) ? ($telemetry['finished_ns'] ?? null) : null;
+            $resultIdentity = [
+                'id' => $result['id'] ?? null,
+                'expected_failure' => $expectedFailure,
+                'status' => $result['status'] ?? null,
+                'failure_kind' => $result['failure']['kind'] ?? null,
+                'telemetry' => is_array($telemetry)
+                    ? array_intersect_key($telemetry, array_flip([
+                        'pid',
+                        'pgid',
+                        'started_ns',
+                        'finished_ns',
+                        'forks',
+                        'scope_workers',
+                        'executor_workers',
+                        'process_anchors',
+                    ]))
+                    : $telemetry,
+            ];
             nativePhaseFiveAssert(
                 ($result['status'] ?? null) === 'failed'
                     && ($result['failure']['kind'] ?? null) === $expectedFailure
@@ -139,7 +157,8 @@ try {
                     && is_int($executorStartedNs)
                     && is_int($executorFinishedNs)
                     && $executorFinishedNs >= $executorStartedNs,
-                'Native Phase 5 fault result lost failure or topology identity.',
+                'Native Phase 5 fault result lost failure or topology identity: '
+                    .json_encode($resultIdentity, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             );
 
             if ($kind === 'kill') {
