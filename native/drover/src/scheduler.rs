@@ -1580,6 +1580,7 @@ pub struct Scheduler {
     peak_live_pids: u32,
     peak_outstanding_tasks: u32,
     interrupted_signal: Option<i32>,
+    refill_before_collect: bool,
 }
 
 impl Scheduler {
@@ -1621,6 +1622,7 @@ impl Scheduler {
             peak_live_pids: 0,
             peak_outstanding_tasks: 0,
             interrupted_signal: None,
+            refill_before_collect: false,
         })
     }
 
@@ -1736,6 +1738,12 @@ impl Scheduler {
     }
 
     pub fn step(&mut self) -> Result<Step, String> {
+        if std::mem::take(&mut self.refill_before_collect) && self.interrupted_signal.is_none() {
+            if let Some(step) = self.spawn_available()? {
+                return Ok(step);
+            }
+        }
+
         self.collect()?;
 
         if self.interrupted_signal.is_none() {
@@ -1758,6 +1766,7 @@ impl Scheduler {
 
         self.poll_once()?;
         self.collect()?;
+        self.refill_before_collect = true;
 
         // Return to PHP before refilling so pending signals and cancellation
         // requests are dispatched before another task can be forked.
@@ -2254,6 +2263,7 @@ impl Scheduler {
             ),
         );
         self.max_active = self.max_active.max(self.active.len());
+        self.refill_before_collect = true;
 
         Ok(Step::Progress)
     }
@@ -3914,6 +3924,92 @@ mod tests {
         assert_eq!(scheduler.active_count(), 1);
         assert_eq!(scheduler.completed.len(), 1);
         scheduler.cancel().unwrap();
+    }
+
+    #[test]
+    fn armed_refill_latch_does_not_fork_interrupted_pending_work() {
+        let engine = Engine::new(
+            "interrupted-refill-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:pending".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                100,
+                true,
+            )
+            .unwrap();
+        scheduler.refill_before_collect = true;
+        scheduler.interrupted_signal = Some(libc::SIGINT);
+
+        assert!(matches!(scheduler.step().unwrap(), Step::Progress));
+        assert_eq!(scheduler.forks, 0);
+        assert_eq!(scheduler.active_count(), 0);
+        assert_eq!(scheduler.pending.len(), 1);
+        assert_eq!(scheduler.pending.front().unwrap().id, "task:pending");
+
+        scheduler.cancel().unwrap();
+        assert!(scheduler.pending.is_empty());
+    }
+
+    #[test]
+    fn armed_refill_latch_respects_the_global_permit_capacity() {
+        let engine = Engine::new(
+            "capacity-refill-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(2).unwrap();
+
+        for id in ["task:first", "task:second"] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+
+        match scheduler.step().unwrap() {
+            Step::Child(_) => loop {
+                unsafe {
+                    libc::pause();
+                }
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover did not start the first capacity fixture")
+            }
+        }
+
+        assert!(scheduler.refill_before_collect);
+        assert!(matches!(scheduler.step().unwrap(), Step::Progress));
+        assert_eq!(scheduler.forks, 1);
+        assert_eq!(scheduler.active_count(), 1);
+        assert_eq!(scheduler.pending.len(), 1);
+        assert_eq!(scheduler.max_active(), 1);
+
+        let names = engine.registry.names(&["scope:root".into()]);
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+
+        scheduler.cancel().unwrap();
+        assert_eq!(scheduler.active_count(), 0);
+        assert!(scheduler.pending.is_empty());
+        assert!(engine.registry.try_acquire(&names).unwrap());
+        engine.registry.release(&names).unwrap();
     }
 
     #[test]

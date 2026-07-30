@@ -511,7 +511,7 @@
             "selection_mode": "curated",
             "whole_suite": false,
             "execution_configuration": "phpunit.xml.dist",
-            "execution_configuration_sha256": "01ab2c495f6185b45f2b443208c0e608390360a432f02ac2256ced753abb730d",
+            "execution_configuration_sha256": "46f84f1b81da0ff8e89a7ed6364a3c272ccd4237d0ee6822ab5619b9dc82c6f1",
             "runner_identity": {
                 "baseline": {
                     "command": "phpunit",
@@ -556,7 +556,7 @@
                 "mode": "phpunit-list-tests-xml",
                 "runner": "vendor/bin/phpunit",
                 "configuration": "phpunit.xml.dist",
-                "configuration_sha256": "01ab2c495f6185b45f2b443208c0e608390360a432f02ac2256ced753abb730d",
+                "configuration_sha256": "46f84f1b81da0ff8e89a7ed6364a3c272ccd4237d0ee6822ab5619b9dc82c6f1",
                 "input_roots": [
                     "src",
                     "legacy_tests/Browser"
@@ -767,7 +767,7 @@
                 "mode": "phpunit-list-tests-xml",
                 "runner": "vendor/bin/pest",
                 "configuration": "phpunit.xml.dist",
-                "configuration_sha256": "bd05d34df693edb92c7d788c96a81e6f69c3ead9831ab5e6b7b85aab80a9232f",
+                "configuration_sha256": "e904547fc28fdb30c52ed44793281bd07a853097c543f100d4ac1e2a4dc1a78c",
                 "input_roots": [
                     "tests"
                 ],

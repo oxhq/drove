@@ -328,6 +328,8 @@ The manifest pins separate hashes when discovery uses the repository's
 configuration but execution uses Drove's versioned Laravel configuration.
 Neither path can be substituted while retaining a valid classification or
 execution artifact.
+Upstream configuration hashes are calculated from `git show <commit>:<path>`
+bytes, never from a checkout that may have converted line endings.
 
 Every classification cohort publishes its sorted canonical frontend IDs.
 Baseline commands emit JUnit case evidence; Drove replay maps each internal
