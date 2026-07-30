@@ -1759,10 +1759,8 @@ impl Scheduler {
         self.poll_once()?;
         self.collect()?;
 
-        if let Some(result) = self.completed.pop_front() {
-            return Ok(Step::Result(Box::new(result)));
-        }
-
+        // Return to PHP before refilling so pending signals and cancellation
+        // requests are dispatched before another task can be forked.
         Ok(Step::Progress)
     }
 

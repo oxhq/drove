@@ -5,6 +5,7 @@ ARG DROVE_REVISION=unknown
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git libicu-dev \
     && git config --system --add safe.directory /app \
+    && git config --system --add safe.directory /workspace/pest \
     && rm -rf /var/lib/apt/lists/* \
     && docker-php-ext-install intl sockets
 

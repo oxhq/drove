@@ -148,6 +148,7 @@ jobs:
                   --volume "$PWD/results:/results" \
                   --workdir /workspace/pest \
                   --entrypoint sh drove-corpus -lc '
+                    set -eu
                     selection=$(mktemp)
                     sh /drove/benchmarks/corpus/select.sh \
                       "pest-$CORPUS_COHORT" /workspace/pest >"$selection"
@@ -260,6 +261,7 @@ jobs:
                 --volume "$PWD/results:/results" \
                 --workdir /app \
                 --entrypoint sh drove-corpus -lc "
+                  set -eu
                   selection=\$(mktemp)
                   sh /drove/benchmarks/corpus/select.sh invoiceshelf /app >\"\$selection\"
                   set -- \$(cat \"\$selection\")
@@ -368,6 +370,7 @@ jobs:
             --volume "$PWD/results:/results" \
             --workdir /app \
             --entrypoint sh drove-corpus -lc '
+              set -eu
               selection=$(mktemp)
               sh /drove/benchmarks/corpus/select.sh livewire /app >"$selection"
               set -- $(cat "$selection")
@@ -398,6 +401,7 @@ jobs:
             --volume "$PWD/results:/results" \
             --workdir /app \
             --entrypoint sh drove-corpus -lc '
+              set -eu
               selection=$(mktemp)
               sh /drove/benchmarks/corpus/select.sh livewire /app >"$selection"
               set -- $(cat "$selection")
@@ -421,6 +425,7 @@ jobs:
             --volume "$PWD/results:/results" \
             --workdir /app \
             --entrypoint sh drove-corpus -lc '
+              set -eu
               selection=$(mktemp)
               sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >"$selection"
               set -- $(cat "$selection")
@@ -453,6 +458,7 @@ jobs:
               --volume "$PWD/results:/results" \
               --workdir /app \
               --entrypoint sh drove-corpus -lc "
+                set -eu
                 selection=\$(mktemp)
                 sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >\"\$selection\"
                 set -- \$(cat \"\$selection\")
@@ -572,6 +578,7 @@ jobs:
               --volume "$PWD/results:/results" \
               --workdir /app \
               --entrypoint sh drove-corpus -lc "
+                set -eu
                 selection=\$(mktemp)
                 sh /drove/benchmarks/corpus/select.sh filament /app >\"\$selection\"
                 set -- \$(cat \"\$selection\")
