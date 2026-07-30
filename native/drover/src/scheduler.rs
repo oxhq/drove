@@ -19,6 +19,18 @@ const NESTED_GROUP_MAGIC: [u8; 4] = *b"DRPG";
 const NESTED_GROUP_VERSION: u8 = 1;
 const NESTED_GROUP_MESSAGE_BYTES: usize = 32;
 const PROCESS_BOUNDARY_TIMEOUT_NS: u64 = 1_000_000_000;
+#[cfg(target_os = "macos")]
+const MAX_DARWIN_PROCESS_GROUP_PIDS: usize = 65_536;
+
+#[cfg(target_os = "macos")]
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_listpgrppids(
+        pgrpid: libc::pid_t,
+        buffer: *mut libc::c_void,
+        buffersize: libc::c_int,
+    ) -> libc::c_int;
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -502,7 +514,7 @@ fn signal_registered_group(group: &NestedGroup, signal: i32) -> Result<(), Strin
         return Ok(());
     }
 
-    match signal_process_group(group.child_pgid, signal) {
+    match signal_process_group_checked(group.child_pgid, signal) {
         Ok(()) => Ok(()),
         Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
         Err(error) => Err(format!(
@@ -1295,7 +1307,7 @@ impl ActiveTask {
             return;
         }
 
-        if let Err(error) = signal_process_group(self.pgid, signal) {
+        if let Err(error) = signal_process_group_checked(self.pgid, signal) {
             if error.raw_os_error() == Some(libc::ESRCH) && self.exited {
                 // No signalable process remains in the still-reserved group.
                 return;
@@ -1829,6 +1841,18 @@ impl Scheduler {
         children.sort_by_key(|child| child.task.ordinal);
 
         for mut child in children {
+            let had_protocol_error = child.protocol_error.is_some();
+            child.observe_exit(monotonic_ns().unwrap_or_default());
+
+            if child.reaped && !had_protocol_error {
+                if let Some(error) = child.protocol_error.as_ref() {
+                    failures.push(format!(
+                        "executor observation for task {}: {error}",
+                        child.task.id
+                    ));
+                }
+            }
+
             if let Err(error) = self.cleanup_nested_descendants(child.pid) {
                 failures.push(format!(
                     "nested cleanup for task {}: {error}",
@@ -1837,7 +1861,7 @@ impl Scheduler {
             }
 
             if !child.reaped {
-                if let Err(error) = signal_process_group(child.pgid, libc::SIGKILL) {
+                if let Err(error) = signal_process_group_checked(child.pgid, libc::SIGKILL) {
                     if error.raw_os_error() != Some(libc::ESRCH) {
                         failures.push(format!("group cleanup for task {}: {error}", child.task.id));
                     }
@@ -2739,6 +2763,120 @@ fn read_group_ready(fd: RawFd, deadline_ns: u64) -> Result<GroupReadiness, Strin
     Err("The Drove executor exited before its process group was ready.".into())
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn confirm_enumerated_process_group<F>(
+    pgid: libc::pid_t,
+    members: &[libc::pid_t],
+    returned: usize,
+    mut probe_member: F,
+) -> Result<(), String>
+where
+    F: FnMut(libc::pid_t, i32) -> Result<(), io::Error>,
+{
+    if returned == 0 {
+        return Err(format!(
+            "Darwin returned no members for process group {pgid}."
+        ));
+    }
+
+    if returned >= members.len() {
+        return Err(format!(
+            "Darwin returned {returned} PIDs for the {}-PID buffer for process group {pgid}; \
+             enumeration may be truncated.",
+            members.len()
+        ));
+    }
+
+    let listed = &members[..returned];
+
+    if listed.iter().any(|member| *member <= 0) {
+        return Err(format!(
+            "Darwin returned an invalid member for process group {pgid}."
+        ));
+    }
+
+    if !listed.contains(&pgid) {
+        return Err(format!(
+            "Darwin omitted the retained leader from process group {pgid}."
+        ));
+    }
+
+    for member in listed {
+        if let Err(error) = probe_member(*member, 0) {
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                continue;
+            }
+
+            return Err(format!(
+                "Drover could not confirm Darwin process-group member {member}: {error}."
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_darwin_process_group(pgid: libc::pid_t) -> Result<(), String> {
+    let buffer_bytes = MAX_DARWIN_PROCESS_GROUP_PIDS
+        .checked_mul(std::mem::size_of::<libc::pid_t>())
+        .and_then(|bytes| libc::c_int::try_from(bytes).ok())
+        .ok_or_else(|| format!("Darwin process group {pgid} exceeded its buffer bound."))?;
+    let mut members = vec![0; MAX_DARWIN_PROCESS_GROUP_PIDS];
+
+    unsafe {
+        *libc::__error() = 0;
+    }
+    let returned = unsafe {
+        proc_listpgrppids(
+            pgid,
+            members.as_mut_ptr().cast::<libc::c_void>(),
+            buffer_bytes,
+        )
+    };
+    let list_error = io::Error::last_os_error();
+
+    if returned <= 0 {
+        return if list_error.raw_os_error() == Some(0) {
+            Err(format!(
+                "Darwin returned no members for process group {pgid}."
+            ))
+        } else {
+            Err(format!(
+                "Darwin could not enumerate process group {pgid}: {list_error}."
+            ))
+        };
+    }
+
+    confirm_enumerated_process_group(
+        pgid,
+        &members,
+        usize::try_from(returned)
+            .map_err(|_| format!("Darwin returned an invalid count for process group {pgid}."))?,
+        |member, signal| {
+            if unsafe { libc::kill(member, signal) } == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        },
+    )
+}
+
+fn signal_process_group_checked(pgid: libc::pid_t, signal: i32) -> Result<(), io::Error> {
+    let error = match signal_process_group(pgid, signal) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+
+    #[cfg(target_os = "macos")]
+    if signal == libc::SIGKILL && error.raw_os_error() == Some(libc::EPERM) {
+        return confirm_darwin_process_group(pgid).map_err(io::Error::other);
+    }
+
+    Err(error)
+}
+
 fn signal_process_group(pgid: libc::pid_t, signal: i32) -> Result<(), io::Error> {
     if unsafe { libc::kill(-pgid, signal) } == 0 {
         return Ok(());
@@ -3164,6 +3302,12 @@ mod tests {
             .keys()
             .next()
             .expect("cancellation fixture has one active executor");
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+        assert!(libc::WIFSIGNALED(status));
+        assert_eq!(libc::WTERMSIG(status), libc::SIGKILL);
+
         let malformed = [0_u8];
         assert_eq!(
             unsafe {
@@ -3179,6 +3323,12 @@ mod tests {
 
         let error = scheduler.cancel().unwrap_err();
         assert!(error.starts_with("Drover cancellation failed:"));
+        let expected_observation = format!(
+            "executor observation for task task:cancel-failure: \
+             waitid() lost the Drove child: {}.",
+            io::Error::from_raw_os_error(libc::ECHILD)
+        );
+        assert!(error.contains(&expected_observation), "{error}");
         assert!(error.contains("truncated nested-group record"));
         assert_eq!(scheduler.active_count(), 0);
         assert!(scheduler.pending.is_empty());
@@ -3829,6 +3979,77 @@ mod tests {
     fn reports_group_signal_failures() {
         let error = signal_process_group(unsafe { libc::getpgrp() }, i32::MAX).unwrap_err();
         assert!(error.raw_os_error().is_some());
+    }
+
+    #[test]
+    fn darwin_group_confirmation_accepts_authorized_zombies_and_disappeared_members() {
+        let pgid = 40;
+        let members = [pgid, 41, 42, 0];
+        let mut attempted = Vec::new();
+
+        confirm_enumerated_process_group(pgid, &members, 3, |member, signal| {
+            attempted.push((member, signal));
+
+            match member {
+                41 => Err(io::Error::from_raw_os_error(libc::ESRCH)),
+                _ => Ok(()),
+            }
+        })
+        .unwrap();
+
+        assert_eq!(attempted, vec![(40, 0), (41, 0), (42, 0)]);
+    }
+
+    #[test]
+    fn darwin_group_confirmation_rejects_an_unauthorized_member() {
+        let pgid = 40;
+        let members = [pgid, 41, 42, 0];
+        let mut attempted = Vec::new();
+
+        let error = confirm_enumerated_process_group(pgid, &members, 3, |member, signal| {
+            attempted.push((member, signal));
+
+            match member {
+                42 => Err(io::Error::from_raw_os_error(libc::EPERM)),
+                _ => Ok(()),
+            }
+        })
+        .unwrap_err();
+
+        assert_eq!(attempted, vec![(40, 0), (41, 0), (42, 0)]);
+        assert!(error.contains("member 42"));
+    }
+
+    #[test]
+    fn darwin_group_confirmation_rejects_untrusted_enumerations_without_probing() {
+        let pgid = 40;
+        let probes = std::cell::Cell::new(0);
+        let mut probe = |_: libc::pid_t, signal: i32| {
+            assert_eq!(signal, 0);
+            probes.set(probes.get() + 1);
+
+            Ok(())
+        };
+
+        assert!(confirm_enumerated_process_group(pgid, &[0], 0, &mut probe)
+            .unwrap_err()
+            .contains("no members"));
+        assert!(
+            confirm_enumerated_process_group(pgid, &[pgid, 41], 2, &mut probe)
+                .unwrap_err()
+                .contains("may be truncated")
+        );
+        assert!(
+            confirm_enumerated_process_group(pgid, &[41, 42, 0], 2, &mut probe)
+                .unwrap_err()
+                .contains("omitted the retained leader")
+        );
+        assert!(
+            confirm_enumerated_process_group(pgid, &[pgid, 0, 0], 2, &mut probe)
+                .unwrap_err()
+                .contains("invalid member")
+        );
+        assert_eq!(probes.get(), 0);
     }
 
     #[test]

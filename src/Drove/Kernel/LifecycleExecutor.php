@@ -1195,6 +1195,25 @@ final readonly class LifecycleExecutor
     ): array {
         $scopeId = $this->string($node, 'id');
         $hooks = $this->hooks($node);
+        $scopeType = $this->string($node, 'type');
+
+        if (($node['tests'] ?? []) === [] && ($node['children'] ?? []) === []) {
+            return [
+                'jobs' => [],
+                'frames' => [],
+                'tasks' => [],
+                'tree' => [
+                    'scope' => [
+                        'id' => $scopeId,
+                        'type' => $scopeType,
+                        'concurrency' => $node['concurrency'] ?? null,
+                    ],
+                    'tests' => [],
+                    'children' => [],
+                ],
+            ];
+        }
+
         $context = $this->scopeContext($node, $parentContext);
         $scopeIds = [...$ancestorScopeIds, $scopeId];
         $nextLevels = [...$levels, [
@@ -1288,7 +1307,7 @@ final readonly class LifecycleExecutor
             'tree' => [
                 'scope' => [
                     'id' => $scopeId,
-                    'type' => $this->string($node, 'type'),
+                    'type' => $scopeType,
                     'concurrency' => $node['concurrency'] ?? null,
                 ],
                 'tests' => $testIds,

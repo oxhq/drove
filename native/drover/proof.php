@@ -504,7 +504,17 @@ $assert(
     'Drover emitted inconsistent per-task worker topology.',
 );
 $assert($prepared['items'] === ['root'], 'A child mutation escaped into the prepared PHP host.');
-$assert($results['task:slow-a']['value']['after'] === ['root', 'slow-a'], 'Prepared state was not inherited.');
+$slowResult = $results['task:slow-a'] ?? [];
+$slowFailure = $slowResult['failure'] ?? [];
+$assert(
+    ($slowResult['value']['after'] ?? null) === ['root', 'slow-a'],
+    sprintf(
+        'Prepared state was not inherited (status=%s; failure_kind=%s; failure_message=%s).',
+        $slowResult['status'] ?? 'missing',
+        $slowFailure['kind'] ?? 'missing',
+        $slowFailure['message'] ?? 'missing',
+    ),
+);
 $assert($results['task:php-exception']['failure']['kind'] === 'php_exception', 'PHP failure drifted.');
 $timeoutFailure = $results['task:timeout-tree']['failure'] ?? [];
 $assert(

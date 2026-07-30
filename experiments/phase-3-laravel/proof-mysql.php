@@ -126,6 +126,7 @@ $process = new Process([
     'artisan',
     'drove',
     '--',
+    '--pest',
     '--configuration=phpunit.mysql.xml',
     'tests/Feature/TransactionalDatabaseTest.php',
     '--parallel',

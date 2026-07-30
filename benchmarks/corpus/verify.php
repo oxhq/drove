@@ -61,6 +61,18 @@ $surfaceMap = $manifest['extension_surface_map'] ?? null;
 if (! is_array($surfaceMap) || $surfaceMap === []) {
     $errors[] = 'manifest extension surface map is empty';
 } else {
+    $composer = json_decode(
+        (string) file_get_contents(dirname(__DIR__, 2).'/composer.json'),
+        true,
+        flags: JSON_THROW_ON_ERROR,
+    );
+    $packageSurface = 'package:'.($composer['name'] ?? '');
+
+    if (($composer['extra']['pest']['plugins'] ?? []) !== []
+        && ! isset($surfaceMap[$packageSurface])) {
+        $errors[] = "manifest does not classify its own Pest plugin package $packageSurface";
+    }
+
     foreach ($surfaceMap as $id => $surfaces) {
         if (! is_string($id) || ! is_array($surfaces) || $surfaces === []) {
             $errors[] = 'manifest extension surface map contains an invalid entry';

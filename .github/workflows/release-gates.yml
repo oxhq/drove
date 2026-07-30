@@ -76,6 +76,59 @@ jobs:
         php -d ffi.enable=true native/drover/proof.php
         php -d ffi.enable=true bin/drove --version
 
+    - name: Prove exported cache fallback on macOS
+      run: |
+        set -euo pipefail
+        source_temp="$RUNNER_TEMP/drove-source-temp-${{ matrix.arch }}"
+        probe_directory="$RUNNER_TEMP/drove-cache-probe-${{ matrix.arch }}"
+        mv .temp "$source_temp"
+        restore_source_temp() {
+          test ! -e .temp
+          mv "$source_temp" .temp
+        }
+        trap restore_source_temp EXIT
+
+        mkdir -m 700 "$probe_directory"
+        cat > "$probe_directory/cache-boundary.php" <<'PHP'
+        <?php
+
+        require $argv[2];
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        $arguments = (new Pest\Plugins\Cache)->handleArguments([]);
+        $cacheArgument = array_search('--cache-directory', $arguments, true);
+
+        if (! is_int($cacheArgument)
+            || ($arguments[$cacheArgument + 1] ?? null) !== $argv[1]) {
+            throw new RuntimeException('The Pest bridge did not select its private cache directory.');
+        }
+        PHP
+        cache_directory="$(
+          cd "$probe_directory"
+          php -r 'echo sys_get_temp_dir().DIRECTORY_SEPARATOR."drove-pest-".hash("sha256", (string) getcwd());'
+        )"
+        test ! -e "$cache_directory"
+        test ! -L "$cache_directory"
+        (
+          cd "$probe_directory"
+          php cache-boundary.php "$cache_directory" "$GITHUB_WORKSPACE/vendor/autoload.php"
+        )
+        test ! -L "$cache_directory"
+        test -d "$cache_directory"
+        test "$(stat -f '%u' "$cache_directory")" = "$(id -u)"
+        test "$(stat -f '%Lp' "$cache_directory")" = 700
+        cache_inode="$(stat -f '%i' "$cache_directory")"
+        (
+          cd "$probe_directory"
+          php cache-boundary.php "$cache_directory" "$GITHUB_WORKSPACE/vendor/autoload.php"
+        )
+        test "$(stat -f '%i' "$cache_directory")" = "$cache_inode"
+        rmdir "$cache_directory"
+
+        restore_source_temp
+        trap - EXIT
+
     - name: Install Laravel and Testbench proof
       env:
         COMPOSER_ROOT_VERSION: 0.4.0-alpha.1
@@ -352,14 +405,85 @@ jobs:
             expect(class_exists(Drove\Bridge\Pest\Bridge::class))->toBeTrue();
         });
         PHP
+        cat > "$bridge_consumer/cache-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        $arguments = (new Pest\Plugins\Cache)->handleArguments([]);
+        $cacheArgument = array_search('--cache-directory', $arguments, true);
+
+        if (! is_int($cacheArgument)
+            || ($arguments[$cacheArgument + 1] ?? null) !== ($argv[1] ?? null)) {
+            throw new RuntimeException('The Pest bridge did not select its private cache directory.');
+        }
+        PHP
         cache_directory="$(
           cd "$bridge_consumer"
           php -r 'echo sys_get_temp_dir().DIRECTORY_SEPARATOR."drove-pest-".hash("sha256", (string) getcwd());'
         )"
         test ! -e "$cache_directory"
+        test ! -L "$cache_directory"
+
+        expect_cache_rejection() {
+          local case_name="$1"
+          local output="$RUNNER_TEMP/drove-cache-$case_name.txt"
+          set +e
+          (
+            cd "$bridge_consumer"
+            php cache-boundary.php "$cache_directory"
+          ) >"$output" 2>&1
+          local case_exit="$?"
+          set -e
+          test "$case_exit" -ne 0
+          grep -Fq 'DROVE_PEST_CACHE_DIRECTORY_UNSAFE' "$output"
+        }
+
+        cache_decoy="$RUNNER_TEMP/drove-cache-decoy"
+        mkdir -m 700 "$cache_decoy"
+        ln -s "$cache_decoy" "$cache_directory"
+        expect_cache_rejection symlink
+        test -z "$(find "$cache_decoy" -mindepth 1 -maxdepth 1 -print -quit)"
+        unlink "$cache_directory"
+        rmdir "$cache_decoy"
+
+        mkdir -m 755 "$cache_directory"
+        expect_cache_rejection wrong-mode
+        rmdir "$cache_directory"
+
+        sudo install -d -m 700 -o root -g root "$cache_directory"
+        test "$(stat -c '%u' "$cache_directory")" != "$(id -u)"
+        expect_cache_rejection wrong-owner
+        sudo rmdir "$cache_directory"
+
+        (
+          cd "$bridge_consumer"
+          set +e
+          php cache-boundary.php "$cache_directory" \
+            >"$RUNNER_TEMP/drove-cache-race-a.txt" 2>&1 &
+          cache_a_pid="$!"
+          php cache-boundary.php "$cache_directory" \
+            >"$RUNNER_TEMP/drove-cache-race-b.txt" 2>&1 &
+          cache_b_pid="$!"
+          wait "$cache_a_pid"
+          cache_a_exit="$?"
+          wait "$cache_b_pid"
+          cache_b_exit="$?"
+          set -e
+          if test "$cache_a_exit" -ne 0 || test "$cache_b_exit" -ne 0
+          then
+            cat "$RUNNER_TEMP/drove-cache-race-a.txt"
+            cat "$RUNNER_TEMP/drove-cache-race-b.txt"
+            exit 1
+          fi
+        )
+        test ! -L "$cache_directory"
+        test -d "$cache_directory"
+        test "$(stat -c '%u' "$cache_directory")" = "$(id -u)"
+        test "$(stat -c '%a' "$cache_directory")" = 700
         (
           cd "$bridge_consumer"
           vendor/bin/pest --colors=never --compact
         )
-        test -d "$cache_directory"
-        test "$(stat -c '%a' "$cache_directory")" = 700

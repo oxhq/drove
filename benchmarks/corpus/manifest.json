@@ -63,6 +63,9 @@
         "package:laravel/pao": [
             "pest.plugin.cli-interception"
         ],
+        "package:oxhq/drove": [
+            "pest.plugin.runner-internals"
+        ],
         "package:phpunit/phpunit": [
             "phpunit.test-case"
         ],

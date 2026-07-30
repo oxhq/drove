@@ -53,7 +53,7 @@ try {
         'saturation' => [
             'tests' => 60,
             'state_prepare_us' => 0,
-            'body_us' => 50_000,
+            'body_us' => 100_000,
             'cleanup_us' => 0,
             'timeout_ms' => 10_000,
         ],

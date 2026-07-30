@@ -191,7 +191,11 @@ function nativePhaseFiveCancellationCase(string $kind, string $workspace): array
             : is_string($message)
                 && str_starts_with($message, 'Native Drover cancellation failed:')
                 && str_contains($message, 'Drover cancellation failed:')
-                && str_contains($message, 'waitpid() lost Drove child')
+                && str_contains(
+                    $message,
+                    'executor observation for task stateful-scope-host: '
+                        .'waitid() lost the Drove child: No child processes (os error 10).',
+                )
                 && str_contains(
                     $message,
                     'Original map failure: Drove explicit cancellation requested.',
