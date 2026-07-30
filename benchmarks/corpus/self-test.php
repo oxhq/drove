@@ -13,7 +13,7 @@ try {
     testMeasurementWrapper($directory);
     testBridgeModeGuard();
 
-    $summary = "Tests: 71 skipped, 714 passed (785)\nAssertions: 1690\n";
+    $summary = "Tests: 3 skipped, 782 passed (785)\nAssertions: 1800\n";
     $baselinePath = normalizeFixture(
         $directory,
         'baseline',

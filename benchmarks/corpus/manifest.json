@@ -304,16 +304,16 @@
             },
             "baseline": {
                 "runner": "php bin/pest with the selector output as explicit paths",
-                "passed": 726,
+                "passed": 794,
                 "failed": 0,
-                "skipped": 71,
-                "assertions": 1718,
+                "skipped": 3,
+                "assertions": 1828,
                 "exit": 0,
                 "nonserial": {
-                    "passed": 714,
+                    "passed": 782,
                     "failed": 0,
-                    "skipped": 71,
-                    "assertions": 1690,
+                    "skipped": 3,
+                    "assertions": 1800,
                     "exit": 0
                 },
                 "serial": {
@@ -325,16 +325,16 @@
             },
             "drove": {
                 "runner": "php bin/drove --pest --parallel --processes=8 with the same explicit paths",
-                "passed": 726,
+                "passed": 794,
                 "failed": 0,
-                "skipped": 71,
-                "assertions": 1718,
+                "skipped": 3,
+                "assertions": 1828,
                 "exit": 0,
                 "nonserial": {
-                    "passed": 714,
+                    "passed": 782,
                     "failed": 0,
-                    "skipped": 71,
-                    "assertions": 1690,
+                    "skipped": 3,
+                    "assertions": 1800,
                     "exit": 0
                 },
                 "serial": {
@@ -348,7 +348,8 @@
                 "Baseline and Drove execute the same selected source files from the exact pinned Pest v5.0.1 checkout; Drove bind-mounts the complete pinned tests, tests-external, and phpunit.xml surfaces over its runtime tree.",
                 "All 143 selected files are therefore byte-identical to the pinned commit for both runners.",
                 "Three pinned files share /tmp/fake.file and are therefore compared in an explicit one-process cohort; the remaining 140 files run at the declared 1, 2, 4, 8, 16, and 30 process limits.",
-                "Drove and Pest both report 1718 assertions for the selected cases.",
+                "The pinned corpus image supplies Node 22, so both runners execute the 68 ViteDepsHelper cases that Pest skips when Node is absent.",
+                "Drove and Pest both report 1828 assertions for the selected cases.",
                 "The curated selection is not a whole-suite compatibility claim.",
                 "Shared-host measurements are diagnostics only; no performance claim is recorded."
             ]

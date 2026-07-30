@@ -6,14 +6,15 @@ and Filament remains the final, non-skippable proof:
 
 | Rung | Selection | Recorded calibration |
 | --- | --- | --- |
-| Pest 5.0.1 | 143 files, 797 cases | 726 passed, 71 skipped |
+| Pest 5.0.1 | 143 files, 797 cases | 794 passed, 3 skipped |
 | InvoiceShelf | 47 files, 202 cases | 202 passed |
 | Livewire | 20-file serial and 7-file parallel cohorts | 285 passed + 3 incomplete; 36 parallel-safe passed |
 | Filament | 39 files, 705 cases | 677 parallel-safe and 28 serial |
 
-The recorded numbers above are historical evidence from the revision named by
-`initial_proof_revision` in `manifest.json`. The hosted workflow must pass
-before a later revision can claim the same evidence.
+`initial_proof_revision` anchors the original Phase 4 evidence. The current
+calibration includes the pinned Node 22 runtime required by Filament, which
+also executes Pest's 68 Node-backed `ViteDepsHelper` cases. The hosted workflow
+must pass before any revision can claim the recorded calibration.
 
 Nucleus is intentionally excluded. The portable ladder uses Pest,
 InvoiceShelf, Livewire, and finally Filament.
