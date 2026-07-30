@@ -335,6 +335,7 @@ try {
     );
     $branchProbe = new NativePhaseFiveBranchProbe($workspace);
     $testCount = 60;
+    $expectedPopulation = 1 + min($testCount, 2 * $processes);
     $tests = [];
     $children = [];
     $hooks = [];
@@ -483,18 +484,22 @@ try {
     $resolveTest = static function (
         string $id,
         ScopeContext $scope = new ScopeContext,
-    ) use ($fixture): Closure {
+    ) use ($expectedPopulation, $fixture): Closure {
         $scopeId = $scope->metadata()['id'] ?? 'phase5-suite';
         $expected = str_starts_with((string) $scopeId, 'stateful-a')
             ? 11
             : (str_starts_with((string) $scopeId, 'stateful-b') ? 22 : 0);
 
-        return static function () use ($expected, $fixture, $id): string {
+        return static function () use ($expected, $expectedPopulation, $fixture, $id): string {
             if ($fixture === 'stateful') {
                 nativePhaseFiveAssert(
                     NativePhaseFiveScopeState::$value === $expected,
                     'A stateful test did not inherit its scope snapshot.',
                 );
+            }
+
+            if ($fixture === 'inactive') {
+                nativePhaseFiveWaitForPopulationAck($expectedPopulation);
             }
 
             usleep($fixture === 'inactive' ? 250_000 : 20_000);
@@ -515,6 +520,11 @@ try {
     $executionStartedNs = hrtime(true);
     $run = $executor->run($plan, $context);
     $executionMs = round((hrtime(true) - $executionStartedNs) / 1_000_000, 3);
+    $failedTests = array_values(array_filter(
+        $run['tests'] ?? [],
+        static fn (mixed $test): bool => is_array($test)
+            && ($test['status'] ?? null) !== 'passed',
+    ));
     nativePhaseFiveAssert(
         ($run['status'] ?? null) === 'passed'
             && ($run['exit_code'] ?? null) === 0
@@ -524,7 +534,11 @@ try {
                 $run['tests'],
                 static fn (array $test): bool => ($test['status'] ?? null) === 'passed',
             ),
-        'Native Phase 5 scope lifecycle did not return every passing terminal result.',
+        'Native Phase 5 scope lifecycle did not return every passing terminal result: '
+            .json_encode(
+                $failedTests[0] ?? null,
+                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ),
     );
     $expectedScopeIds = nativePhaseFiveScopeIds($plan['root']);
     $reportedScopeIds = [];
@@ -656,6 +670,7 @@ try {
         is_int($observedTestBodyLanes)
             && $observedTestBodyLanes >= 1
             && $observedTestBodyLanes <= $processes
+            && ($fixture !== 'inactive' || $observedTestBodyLanes === $processes)
             && $observedTestBodyLanes === $executorPeak
             && $scopeHostPeak === $expectedScopeWorkers
             && $activePeak === $executorPeak + $scopeHostPeak

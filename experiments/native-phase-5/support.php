@@ -313,6 +313,46 @@ function nativePhaseFiveWriteJson(string $path, array $payload): void
     );
 }
 
+function nativePhaseFiveWaitForPopulationAck(
+    int $expectedPids,
+    int $timeoutMs = 4_000,
+): void {
+    $path = getenv('DROVE_PHASE5_POPULATION_ACK_FILE');
+    nativePhaseFiveAssert(
+        is_string($path) && $path !== '' && $expectedPids > 0 && $timeoutMs > 0,
+        'Native Phase 5 population ACK configuration is invalid.',
+    );
+    $deadlineNs = hrtime(true) + $timeoutMs * 1_000_000;
+    $observed = null;
+
+    do {
+        $contents = @file_get_contents($path);
+        $decoded = is_string($contents)
+            ? json_decode($contents, true)
+            : null;
+
+        if (is_array($decoded) && ! array_is_list($decoded)) {
+            $observed = $decoded;
+
+            if (($decoded['schema'] ?? null) === 1
+                && ($decoded['phase'] ?? null) === 'execution'
+                && ($decoded['live_pids'] ?? null) === $expectedPids
+                && is_int($decoded['stable_sample_count'] ?? null)
+                && $decoded['stable_sample_count'] >= 3) {
+                return;
+            }
+        }
+
+        usleep(500);
+    } while (hrtime(true) < $deadlineNs);
+
+    nativePhaseFiveFail(sprintf(
+        'Native Phase 5 did not receive three stable execution population samples for %d PIDs; last ACK: %s',
+        $expectedPids,
+        json_encode($observed, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+    ));
+}
+
 /**
  * @return list<int>
  */

@@ -88,6 +88,7 @@ try {
     };
     $testCount = $configuration['tests'];
     $barrierPath = $workspace.'/saturation.ready';
+    $expectedPopulation = 1 + min($testCount, 2 * $processes);
     $memoryLimit = ini_get('memory_limit');
 
     if ($fixture === 'stress') {
@@ -150,6 +151,7 @@ try {
         static function (array $task) use (
             $barrierPath,
             $configuration,
+            $expectedPopulation,
             $fixture,
             $preparedDigest,
             $processes,
@@ -198,6 +200,7 @@ try {
                     $readyCount >= $processes,
                     'The native Phase 5 saturation barrier did not fill.',
                 );
+                nativePhaseFiveWaitForPopulationAck($expectedPopulation);
             }
 
             $bodyStartedNs = hrtime(true);
@@ -284,11 +287,18 @@ try {
     ];
 
     foreach ($results as $result) {
+        $resultIdentity = [
+            'id' => $result['id'] ?? null,
+            'status' => $result['status'] ?? null,
+            'failure' => $result['failure'] ?? null,
+            'telemetry' => $result['telemetry'] ?? null,
+        ];
         nativePhaseFiveAssert(
             ($result['status'] ?? null) === 'passed'
                 && is_array($result['value'] ?? null)
                 && is_array($result['telemetry'] ?? null),
-            'Native Phase 5 received a non-passing terminal result.',
+            'Native Phase 5 received a non-passing terminal result: '
+                .json_encode($resultIdentity, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         );
         $value = $result['value'];
         $telemetry = $result['telemetry'];

@@ -384,7 +384,8 @@ try {
                     && ($summary['inactive_scope_count'] ?? null) === $count
                     && ($summary['repetition'] ?? null) === $repetition
                     && ($summary['telemetry']['topology']['scope_workers'] ?? null) === 0
-                    && ($summary['telemetry']['prepared_branches']['enters_by_kind']['scope'] ?? null) === 0,
+                    && ($summary['telemetry']['prepared_branches']['enters_by_kind']['scope'] ?? null) === 0
+                    && ($summary['telemetry']['scheduler']['observed_test_body_lanes'] ?? null) === 30,
                 'Native Phase 5 inactive scope sample is invalid.',
             );
         }

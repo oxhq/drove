@@ -45,7 +45,14 @@ try {
             && file_put_contents($phasePath, 'bootstrap', LOCK_EX) !== false,
         'Could not create the native Phase 5 phase sentinel.',
     );
+    $populationAckPath = $outputPath.'.population-ack.'.getmypid();
+    $populationAckTempPath = $populationAckPath.'.tmp';
+    nativePhaseFiveAssert(
+        ! file_exists($populationAckPath) && ! file_exists($populationAckTempPath),
+        'Native Phase 5 population ACK path already exists.',
+    );
     putenv('DROVE_PHASE5_PHASE_FILE='.$phasePath);
+    putenv('DROVE_PHASE5_POPULATION_ACK_FILE='.$populationAckPath);
     $pipes = [];
     $process = proc_open(
         $command,
@@ -85,6 +92,9 @@ try {
     $cgroupEventsBefore = null;
     $cgroupEventsAfter = null;
     $lastStatus = null;
+    $stableExecutionPopulation = null;
+    $stableExecutionPopulationSamples = 0;
+    $acknowledgedPopulation = 0;
 
     /**
      * @return list<int>
@@ -279,6 +289,33 @@ try {
             && $pidsAfter === $pids
             && $sampledPids === count($pids);
 
+        if (! $stableSample || $phase !== 'execution' || $sampledPids < 1) {
+            $stableExecutionPopulation = null;
+            $stableExecutionPopulationSamples = 0;
+        } else {
+            if ($stableExecutionPopulation === $sampledPids) {
+                $stableExecutionPopulationSamples++;
+            } else {
+                $stableExecutionPopulation = $sampledPids;
+                $stableExecutionPopulationSamples = 1;
+            }
+
+            if ($stableExecutionPopulationSamples === 3
+                && $sampledPids > $acknowledgedPopulation) {
+                nativePhaseFiveWriteJson($populationAckTempPath, [
+                    'schema' => 1,
+                    'phase' => 'execution',
+                    'live_pids' => $sampledPids,
+                    'stable_sample_count' => $stableExecutionPopulationSamples,
+                ]);
+                nativePhaseFiveAssert(
+                    rename($populationAckTempPath, $populationAckPath),
+                    'Could not publish the native Phase 5 population ACK.',
+                );
+                $acknowledgedPopulation = $sampledPids;
+            }
+        }
+
         if (! $stableSample) {
             $global['discarded_unstable_sample_count']++;
         } elseif ($sampledPids > 0) {
@@ -376,6 +413,8 @@ try {
         : $closedExitCode;
     $cgroupEventsAfter = $readCgroupEvents($cgroupPath);
     @unlink($phasePath);
+    @unlink($populationAckPath);
+    @unlink($populationAckTempPath);
     nativePhaseFiveAssert(
         $exitCode === 0 && $stderr === '',
         sprintf(
@@ -433,7 +472,30 @@ try {
     if (isset($phasePath) && is_string($phasePath)) {
         @unlink($phasePath);
     }
+    if (isset($populationAckPath) && is_string($populationAckPath)) {
+        @unlink($populationAckPath);
+    }
+    if (isset($populationAckTempPath) && is_string($populationAckTempPath)) {
+        @unlink($populationAckTempPath);
+    }
 
-    fwrite(STDERR, $throwable::class.': '.$throwable->getMessage().PHP_EOL);
+    $acknowledgement = isset($acknowledgedPopulation)
+        ? sprintf(
+            ' [population_ack current=%s consecutive=%s published=%s]',
+            json_encode(
+                isset($stableExecutionPopulation) ? $stableExecutionPopulation : null,
+            ),
+            json_encode(
+                isset($stableExecutionPopulationSamples)
+                    ? $stableExecutionPopulationSamples
+                    : null,
+            ),
+            json_encode($acknowledgedPopulation),
+        )
+        : '';
+    fwrite(
+        STDERR,
+        $throwable::class.': '.$throwable->getMessage().$acknowledgement.PHP_EOL,
+    );
     exit(1);
 }
