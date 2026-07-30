@@ -66,7 +66,8 @@
         },
         "files": [
             "src/Functions.php",
-            "src/Pest.php"
+            "src/Pest.php",
+            "src/Drove/Native/functions.php"
         ]
     },
     "autoload-dev": {
@@ -119,6 +120,11 @@
         "test:type:coverage": "php -d memory_limit=-1  bin/pest --type-coverage --min=100",
         "test:unit": "php bin/pest --exclude-group=integration --compact",
         "test:inline": "php bin/pest --configuration=phpunit.inline.xml",
+        "test:native-phase-1": "php experiments/native-phase-1/proof.php",
+        "test:native-phase-1:static": [
+            "phpstan analyse src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1/proof.php --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1"
+        ],
         "test:parallel": "php bin/pest --exclude-group=integration --parallel --processes=3",
         "test:integration": "php bin/pest --group=integration -v",
         "update:snapshots": "REBUILD_SNAPSHOTS=true php bin/pest --update-snapshots",

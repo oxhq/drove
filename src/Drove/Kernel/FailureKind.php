@@ -40,7 +40,8 @@ enum FailureKind: string
             return self::TeardownFailure;
         }
 
-        return is_a($throwable, 'PHPUnit\\Framework\\AssertionFailedError')
+        return $throwable instanceof AssertionFailed
+            || is_a($throwable, 'PHPUnit\\Framework\\AssertionFailedError')
             ? self::AssertionFailure
             : self::PhpException;
     }
