@@ -154,11 +154,15 @@ transaction.
 The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
 Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
-nonserial cohort at 1, 2, 4, and 8 Drove processes plus its 28-case
-filesystem-sensitive cohort at 1. A release requires a successful exact-SHA
-hosted full-ladder run; inspect the workflow authority above for its result and
-artifacts. Nucleus is deliberately excluded because its Docker/MySQL suite is
-not part of this portable corpus. The tagged
+nonserial cohort at 1, 2, 4, 8, 16, and 30 Drove processes plus its 28-case
+filesystem-sensitive cohort at 1. The exact-SHA full ladder is accepted in
+[GitHub Actions #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071);
+the stored
+[compatibility benchmark](benchmarks/results/2026-07-30-corpus-2146dd4b.md)
+retains requested/observed lanes, counts, milliseconds, and memory sources as a
+single-sample diagnostic rather than a performance claim. Nucleus is
+deliberately excluded because its Docker/MySQL suite is not part of this
+portable corpus. The tagged
 [corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.2/benchmarks/corpus)
 records revisions, selections, dependency overlays, and normalization rules.
 

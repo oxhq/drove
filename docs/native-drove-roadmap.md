@@ -46,13 +46,13 @@ The following invariants apply to every feature declared supported:
 
 | Phase | Status | Exit proof |
 | --- | --- | --- |
-| 1. Native frontend vertical slice | **IMPLEMENTED — HOSTED GATE PENDING** | Local and Linux C1/C4 proofs pass; required artifacts have not yet been observed and accepted upstream |
-| 2. Typed extension front door | **IMPLEMENTED — HOSTED GATE PENDING** | Local Linux C1–C30 parity passes; required artifacts have not yet been observed and accepted upstream |
-| 3. Native DSL feature surface | **IMPLEMENTED — HOSTED GATE PENDING** | Local Drover C1–C30 parity and repeated 10,000-case C30 stress pass; required hosted artifact has not yet been observed upstream |
-| 4. Native Laravel prepared runtime | **IMPLEMENTED — HOSTED GATE PENDING** | Local Docker C1–C30 matrix, provider faults, preflight, and cleanup proofs pass; exact hosted artifact remains pending |
-| 5. Bounded one-fork execution | **IMPLEMENTED — HOSTED GATE PENDING** | Local topology, telemetry, reliability, cancellation, and controlled performance gates pass; the exact hosted artifact has not yet been observed |
-| 6. Bridges and migration corpus | **IMPLEMENTED — HOSTED GATE PENDING** | Local bridge, migration, source-identity, and exact pinned Pest proofs pass; the required hosted ladder ending with Filament has not yet been observed |
-| 7. Public experimental release | **IMPLEMENTED — PUBLICATION/EVIDENCE GATES PENDING** | The technical evaluation release `v0.4.0-alpha.2` may publish after technical gates; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
+| 1. Native frontend vertical slice | **COMPLETE — HOSTED** | [Tests #30569880707](https://github.com/oxhq/drove/actions/runs/30569880707) accepted the exact C1/C4 native artifacts |
+| 2. Typed extension front door | **COMPLETE — HOSTED** | [Native Extensions #30569880705](https://github.com/oxhq/drove/actions/runs/30569880705) accepted C1–C30 parity and rejection proofs |
+| 3. Native DSL feature surface | **COMPLETE — HOSTED** | [Native DSL #30569880648](https://github.com/oxhq/drove/actions/runs/30569880648) accepted C1–C30 parity and the 10,000-case C30 stress gate |
+| 4. Native Laravel prepared runtime | **COMPLETE — HOSTED** | [Native Laravel #30569880652](https://github.com/oxhq/drove/actions/runs/30569880652) accepted the provider, C1–C30, fault, preflight, and cleanup matrix |
+| 5. Bounded one-fork execution | **COMPLETE — HOSTED** | [Native Topology #30569880771](https://github.com/oxhq/drove/actions/runs/30569880771) accepted topology, telemetry, reliability, cancellation, and controlled performance at `5984beb9` |
+| 6. Bridges and migration corpus | **COMPLETE — HOSTED** | [Full corpus #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071) accepted the pinned ladder ending with Filament |
+| 7. Public experimental release | **TECHNICALLY READY — PUBLICATION/EXTERNAL EVIDENCE PENDING** | The technical evaluation release `v0.4.0-alpha.2` may publish after promotion; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -114,8 +114,8 @@ Exit gates:
   comparison artifact containing revision/platform metadata, plan and semantic
   hashes, lifecycle proof, executor PID/concurrency telemetry, and guard
   results.
-- The same C1/C4 comparison passes in the required Tests workflow. Until those
-  hosted artifacts are green and reviewed, Phase 1 remains in progress.
+- The same C1/C4 comparison passes in the required Tests workflow. The accepted
+  hosted proof is [Tests #30569880707](https://github.com/oxhq/drove/actions/runs/30569880707).
 
 ## Phase 2 — Typed extension front door
 
@@ -187,7 +187,7 @@ Exit gates:
 - CLI help and native documentation contain only behavior covered by the
   conformance matrix.
 
-Current local evidence is diagnostic until the hosted gate runs. At exact
+The original local diagnostic remains useful for calibration. At exact
 revision `2fb74fb404a331f61f3f9dcd32041b682c5b7fd4`, the conformance fixture
 produced 49 terminal results, 47 runnable cases, 46 assertions, and 35 cleanups
 with identical semantic hashes at C1–C30. Two Drover C30 stress runs each
@@ -197,13 +197,15 @@ were 370,257,920 and 370,405,376 bytes, and the maximum executor sample was
 71,303,168 bytes under the explicit 512 MiB stress limit. The complete
 platform, lane, timing, memory, command, and artifact-hash record is stored in
 [`benchmarks/results/2026-07-29-native-phase-3-2fb74fb4.md`](../benchmarks/results/2026-07-29-native-phase-3-2fb74fb4.md).
+The same declared surface and stress gate are accepted upstream by
+[Native DSL #30569880648](https://github.com/oxhq/drove/actions/runs/30569880648).
 
 The same large fixture is not a supported `PcntlScheduler` claim. A flat
 PCNTL run lost three leaf executors to signal 11, and a later frozen sharded
 run still produced a terminal failure. Small PCNTL conformance remains useful
 diagnostic coverage, but Drover's native child `_exit` boundary is the product
-gate. Bounded plan/result memory and PCNTL large-suite teardown remain Phase 5
-work.
+gate. Phase 5 now proves bounded Drover plan/result memory and teardown; no
+large-suite PCNTL product claim is made.
 
 ## Phase 4 — Native Laravel prepared runtime
 
@@ -322,14 +324,18 @@ Exit gates:
 - Filament is the last hosted proof and cannot be skipped by an earlier green
   rung.
 
-Current local evidence is implementation proof, not hosted completion. The
-exact pinned Pest checkout discovers and classifies its complete configured
+The exact pinned Pest checkout discovers and classifies its complete configured
 suite while preserving runtime compatibility and native-migration status as
 separate axes. Its calibrated 785-case parallel and 12-case serial selections
 load unchanged through the Pest bridge and match baseline statuses, assertions,
-and exits locally. Every normalized result is bound to the same commit, tree,
+and exits. Every normalized result is bound to the same commit, tree,
 selected-file bytes, configuration, dependency lock, and prepared Composer
-overlay. The all-corpus hosted ladder remains the exit gate.
+overlay. [Full corpus #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071)
+accepted all four pinned rungs and ended with Filament; artifact
+`corpus-full-ea090fb928bf2344ccf8c1cbe30c6b4ee8336303` contains 184 sealed
+files. The stored single-sample timing and memory diagnostic remains explicitly
+non-claim evidence in
+[`2026-07-30-corpus-2146dd4b.md`](../benchmarks/results/2026-07-30-corpus-2146dd4b.md).
 
 ## Phase 7 — Packaging and public experimental release
 

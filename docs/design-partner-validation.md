@@ -12,17 +12,19 @@ for at least 14 days.
 
 ## Ledger
 
-Status as of 2026-07-29:
+Status as of 2026-07-30:
 
 | Measure | Count |
 | --- | ---: |
 | Target | 10 |
 | Recruited | 0 |
 | Completed evaluations | 0 |
+| Retained migrations (14+ days) | 0 |
 | Public evidence links | 0 |
 
 No adoption, compatibility, or performance claim is inferred from this empty
-ledger.
+ledger. The candidate gate is currently 0 of 3 completed evaluations and 0 of
+2 retained migrations.
 
 The machine-readable source of truth is
 [`design-partner-evidence.json`](design-partner-evidence.json). Counts in this

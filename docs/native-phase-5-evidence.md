@@ -111,6 +111,8 @@ references. Their pinned real-suite measurements remain in
 `benchmarks/results/2026-07-29-d3dec629.md`. The latest native Laravel prepared
 state evidence is recorded separately in
 `benchmarks/results/2026-07-30-native-phase-4-a94740e8.md`.
+The accepted repeated topology and performance gate is recorded in
+[`2026-07-30-native-phase-5-5984beb9.md`](../benchmarks/results/2026-07-30-native-phase-5-5984beb9.md).
 
 ## Reproduction
 
