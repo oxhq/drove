@@ -279,6 +279,8 @@ PHP);
     file_put_contents($generated, <<<'PHP'
 <?php
 
+require 'vendor/autoload.php';
+
 test('generated path', fn () => expect(true)->toBeTrue());
 PHP);
     file_put_contents($vendorAutoload, <<<'PHP'

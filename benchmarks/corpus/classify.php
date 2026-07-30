@@ -1587,7 +1587,7 @@ function staticRequiredFiles(string $path, string $checkout): array
 
         $relative = configuredRelativePath(
             $candidate,
-            dirname($path),
+            $checkout,
             $checkout,
             true,
         );
