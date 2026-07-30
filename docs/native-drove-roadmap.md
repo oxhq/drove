@@ -51,8 +51,8 @@ The following invariants apply to every feature declared supported:
 | 3. Native DSL feature surface | **COMPLETE — HOSTED** | [Native DSL #30569880648](https://github.com/oxhq/drove/actions/runs/30569880648) accepted C1–C30 parity and the 10,000-case C30 stress gate |
 | 4. Native Laravel prepared runtime | **COMPLETE — HOSTED** | [Native Laravel #30569880652](https://github.com/oxhq/drove/actions/runs/30569880652) accepted the provider, C1–C30, fault, preflight, and cleanup matrix |
 | 5. Bounded one-fork execution | **COMPLETE — HOSTED** | [Native Topology #30569880771](https://github.com/oxhq/drove/actions/runs/30569880771) accepted topology, telemetry, reliability, cancellation, and controlled performance at `5984beb9` |
-| 6. Bridges and migration corpus | **COMPLETE — HOSTED** | [Full corpus #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071) accepted the pinned ladder ending with Filament |
-| 7. Public experimental release | **TECHNICALLY READY — PUBLICATION/EXTERNAL EVIDENCE PENDING** | The technical evaluation release `v0.4.0-alpha.2` may publish after promotion; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
+| 6. Bridges and migration corpus | **COMPLETE — HOSTED** | [Full corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130) accepted the release-SHA pinned ladder ending with Filament |
+| 7. Public experimental release | **TECHNICAL RELEASE PUBLISHED — EXTERNAL EVIDENCE PENDING** | [`v0.4.0-alpha.2`](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) is installable and [Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018) passed; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -377,10 +377,15 @@ Exit gates:
 - Public release notes distinguish native guarantees, bridge compatibility,
   known unsupported surfaces, and evidence that remains local or experimental.
 
-The technical evaluation release `v0.4.0-alpha.2` is not yet proven published.
-Its local archive consumers and PCOV bridge matrix pass, so it may publish
-after the technical release gates without claiming external validation. It is
-the installable build that unaffiliated teams evaluate.
+The technical evaluation release `v0.4.0-alpha.2` is published on
+[GitHub](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) and
+Packagist.
+[Native release #30588903021](https://github.com/oxhq/drove/actions/runs/30588903021)
+built, attested, and published all four native targets from the annotated tag.
+[Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
+resolved both tagged Composer packages and passed the installed-consumer gate
+on those four targets. This technical release intentionally makes no external
+validation claim; it is the installable build that unaffiliated teams evaluate.
 
 The candidate `v0.4.0-alpha.3` remains blocked: the external ledger currently
 records 0 of 3 design partners and 0 of 2 retained migrations. Its release path
