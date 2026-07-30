@@ -64,10 +64,12 @@ rejects:
   95% after an explicitly recorded idempotent codemod;
 - a manifest that does not keep Filament in the final position.
 
-Passing local scripts is local proof. The workflow is only hosted proof after
-GitHub Actions completes successfully. `manifest.json` therefore keeps every
-rung at `CURATED_PROVEN_FULL_SUITE_PENDING`; this change does not fabricate a
-hosted Phase 6 result.
+Passing local scripts is local proof. `manifest.json` deliberately keeps every
+rung at `CURATED_PROVEN_FULL_SUITE_PENDING` because repository metadata cannot
+self-certify a hosted result. That sentinel does not erase accepted evidence:
+[Full corpus #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071)
+accepted the ladder at `ea090fb928bf2344ccf8c1cbe30c6b4ee8336303`; every new
+release revision still requires its own exact-SHA full artifact.
 
 ## Full-suite classification boundary
 
