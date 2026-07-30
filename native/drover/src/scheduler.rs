@@ -2489,34 +2489,24 @@ fn create_pool(limit: usize) -> Result<PermitPool, String> {
 }
 
 fn socket_pair() -> Result<[RawFd; 2], io::Error> {
-    let mut sockets = [0_i32; 2];
-
-    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, sockets.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    for fd in sockets {
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-
-        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1
-        {
-            let error = io::Error::last_os_error();
-            close_descriptors(sockets);
-
-            return Err(error);
-        }
-    }
-
-    Ok(sockets)
+    socket_pair_of_type(libc::SOCK_STREAM)
 }
 
 fn datagram_socket_pair() -> Result<[RawFd; 2], io::Error> {
+    socket_pair_of_type(libc::SOCK_DGRAM)
+}
+
+fn socket_pair_of_type(socket_type: libc::c_int) -> Result<[RawFd; 2], io::Error> {
     let mut sockets = [0_i32; 2];
 
-    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sockets.as_mut_ptr()) } != 0 {
+    #[cfg(target_os = "linux")]
+    let socket_type = socket_type | libc::SOCK_CLOEXEC;
+
+    if unsafe { libc::socketpair(libc::AF_UNIX, socket_type, 0, sockets.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
 
+    #[cfg(not(target_os = "linux"))]
     for fd in sockets {
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
 
@@ -3080,6 +3070,16 @@ mod tests {
 
     extern "C" fn readiness_signal_handler(_: libc::c_int) {}
 
+    fn assert_descriptors_close_on_exec(descriptors: [RawFd; 2]) {
+        let flags = descriptors.map(|descriptor| unsafe { libc::fcntl(descriptor, libc::F_GETFD) });
+        close_descriptors(descriptors);
+
+        for flags in flags {
+            assert_ne!(flags, -1);
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        }
+    }
+
     fn nested_message(
         channel: &NestedGroupChannel,
         operation: NestedGroupOperation,
@@ -3133,6 +3133,16 @@ mod tests {
         }
 
         pid
+    }
+
+    #[test]
+    fn stream_socket_pairs_are_close_on_exec() {
+        assert_descriptors_close_on_exec(socket_pair().unwrap());
+    }
+
+    #[test]
+    fn datagram_socket_pairs_are_close_on_exec() {
+        assert_descriptors_close_on_exec(datagram_socket_pair().unwrap());
     }
 
     fn assert_group_reaped(pid: libc::pid_t) {
