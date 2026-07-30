@@ -385,6 +385,7 @@ XML);
                         'sha256',
                         $configuration,
                     ),
+                    'php_memory_limit' => '128M',
                     'input_roots' => [
                         'Portable.php',
                         'Unsupported.php',
@@ -460,6 +461,10 @@ XML);
         || ($classified['full_suite']['source_inputs'] ?? null) !== 6
         || ($classified['full_suite']['discovered_cases'] ?? null) !== 4
         || ($classified['full_suite']['classified_cases'] ?? null) !== 4
+        || ($classified['full_suite']['discovery_runtime']['php_memory_limit']
+            ?? null) !== '128M'
+        || ($classified['full_suite']['discovery_runtime']['node'] ?? null)
+            !== null
         || ($classified['full_suite']['scanner_classification_ratio'] ?? null) != 1.0
         || ($classified['full_suite']['case_status_counts']['bridge-only'] ?? null) !== 3
         || ($classified['full_suite']['case_status_counts']['unsupported'] ?? null) !== 1

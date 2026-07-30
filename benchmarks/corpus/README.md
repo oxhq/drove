@@ -112,6 +112,12 @@ execution result remains `selection.mode=curated` and
   pinned test sources and support configuration.
 - InvoiceShelf, Livewire, and Filament discovery use their exact pinned
   checkouts after installing the committed compatibility locks.
+- Filament's source lock resolves Playwright 1.60.0, while the pinned Pest
+  browser plugin requires 1.61.1 before it can enumerate browser cases. The
+  committed two-package Node overlay installs exactly 1.61.1 with
+  `npm ci --ignore-scripts`; discovery starts only Playwright's protocol server
+  and does not download or launch browser binaries. Its PHP process has an
+  explicit `256M` memory limit recorded in the classification artifact.
 - A green Pest, InvoiceShelf, or Livewire rung cannot substitute for Filament.
   `verify.php --complete` requires all four classification artifacts in ladder
   order and Filament's complete serial/parallel cohort evidence.
@@ -131,6 +137,12 @@ committed classification lock without a Drove overlay. The three application
 corpora use a compatibility overlay with exact `0.4.0-alpha.1` Drove packages
 and their committed locks in `locks/`. Normal gates call `composer install`;
 they do not resolve transitive dependencies.
+
+Filament additionally uses `filament-playwright.json` and
+`filament-playwright.lock`. Their hashes, the pinned checkout's unmodified
+`package.json` and `package-lock.json` hashes, the required Node/Playwright
+versions, the disabled install scripts, and the no-browser-download policy are
+all part of `full_suite_discovery.node_runtime` in the manifest.
 
 To intentionally recalibrate one lock from a clean pinned checkout:
 

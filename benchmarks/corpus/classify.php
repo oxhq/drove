@@ -116,6 +116,88 @@ if (! is_array($discovery)
     fail("$corpusId has an invalid full-suite discovery contract");
 }
 
+$phpMemoryLimit = $discovery['php_memory_limit'] ?? null;
+
+if ($phpMemoryLimit !== null
+    && (! is_string($phpMemoryLimit)
+        || preg_match('/^(?:-1|[1-9][0-9]*[KMG])$/D', $phpMemoryLimit) !== 1)) {
+    fail("$corpusId has an invalid discovery PHP memory limit");
+}
+
+$nodeRuntime = $discovery['node_runtime'] ?? null;
+$nodeRuntimeEvidence = null;
+
+if ($nodeRuntime !== null) {
+    if (! is_array($nodeRuntime)
+        || ! is_string($nodeRuntime['minimum_version'] ?? null)
+        || ! is_string($nodeRuntime['source_playwright'] ?? null)
+        || ! is_string($nodeRuntime['playwright'] ?? null)
+        || ($nodeRuntime['install'] ?? null) !== 'npm-ci-ignore-scripts'
+        || ($nodeRuntime['browser_download'] ?? null) !== false) {
+        fail("$corpusId has an invalid discovery Node runtime contract");
+    }
+
+    $identityFiles = [
+        "$checkout/package.json" => $nodeRuntime['source_package_sha256'] ?? null,
+        "$checkout/package-lock.json" => $nodeRuntime['source_lock_sha256'] ?? null,
+    ];
+
+    foreach (['overlay_package', 'overlay_lock'] as $field) {
+        $path = normalizePath((string) ($nodeRuntime[$field] ?? ''));
+
+        if ($path === '' || str_starts_with($path, '/')
+            || in_array('..', explode('/', $path), true)) {
+            fail("$corpusId discovery Node $field path is invalid");
+        }
+
+        $identityFiles["$droveSource/benchmarks/corpus/$path"] =
+            $nodeRuntime["{$field}_sha256"] ?? null;
+    }
+
+    foreach ($identityFiles as $path => $expectedHash) {
+        if (! is_string($expectedHash)
+            || preg_match('/^[0-9a-f]{64}$/D', $expectedHash) !== 1
+            || ! is_file($path)
+            || hash_file('sha256', $path) !== $expectedHash) {
+            fail("$corpusId discovery Node dependency identity drifted: $path");
+        }
+    }
+
+    $sourceNodeLock = decodeJsonFile("$checkout/package-lock.json");
+    $overlayNodeLock = decodeJsonFile(
+        "$droveSource/benchmarks/corpus/"
+        .normalizePath($nodeRuntime['overlay_lock']),
+    );
+
+    if (($sourceNodeLock['packages']['node_modules/playwright']['version'] ?? null)
+            !== $nodeRuntime['source_playwright']
+        || ($overlayNodeLock['packages']['node_modules/playwright']['version'] ?? null)
+            !== $nodeRuntime['playwright']) {
+        fail("$corpusId discovery Playwright lock contract drifted");
+    }
+
+    [$nodeOutput, $nodeExit] = runCommand(['node', '--version'], $checkout);
+    $nodeVersion = ltrim(trim($nodeOutput), 'v');
+    $playwrightPath = "$checkout/node_modules/.bin/playwright";
+    [$playwrightOutput, $playwrightExit] = is_file($playwrightPath)
+        ? runCommand([$playwrightPath, '--version'], $checkout)
+        : ['', 1];
+    $playwrightVersion = preg_replace('/^Version\s+/', '', trim($playwrightOutput));
+
+    if ($nodeExit !== 0
+        || version_compare($nodeVersion, $nodeRuntime['minimum_version'], '<')
+        || $playwrightExit !== 0
+        || $playwrightVersion !== $nodeRuntime['playwright']) {
+        fail("$corpusId discovery Node runtime does not match its pinned contract");
+    }
+
+    $nodeRuntimeEvidence = [
+        ...$nodeRuntime,
+        'observed_node' => $nodeVersion,
+        'observed_playwright' => $playwrightVersion,
+    ];
+}
+
 $configuration = normalizePath($discovery['configuration']);
 $configurationPath = "$checkout/$configuration";
 $runner = normalizePath($discovery['runner']);
@@ -165,8 +247,14 @@ if ($providedDiscovery !== null) {
 } else {
     $temporaryDiscovery = sys_get_temp_dir()
         .'/drove-corpus-discovery-'.bin2hex(random_bytes(12)).'.xml';
+    $command = [PHP_BINARY];
+
+    if ($phpMemoryLimit !== null) {
+        $command = [...$command, '-d', "memory_limit=$phpMemoryLimit"];
+    }
+
     $command = [
-        PHP_BINARY,
+        ...$command,
         $runnerPath,
         '--configuration='.$configurationPath,
         '--do-not-cache-result',
@@ -611,6 +699,10 @@ $artifact = [
         'runner' => $runner,
         'configuration' => $configuration,
         'configuration_sha256' => hash_file('sha256', $configurationPath),
+        'discovery_runtime' => [
+            'php_memory_limit' => $phpMemoryLimit,
+            'node' => $nodeRuntimeEvidence,
+        ],
         'selection_mode' => 'discovered',
         'whole_suite' => true,
         'source_inputs' => $classifiedInputs,

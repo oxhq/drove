@@ -120,3 +120,17 @@ else
 fi
 
 composer dump-autoload --no-interaction --optimize
+
+if [ "$target" = filament ]; then
+    node_overlay=$(mktemp -d)
+    cp "$lock_root/filament-playwright.json" "$node_overlay/package.json"
+    cp "$lock_root/filament-playwright.lock" "$node_overlay/package-lock.json"
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci \
+        --prefix "$node_overlay" --ignore-scripts --no-audit --no-fund
+    mkdir -p node_modules
+    cp -a "$node_overlay/node_modules/." node_modules/
+    test "$(node_modules/.bin/playwright --version)" = 'Version 1.61.1'
+    test ! -e "$node_overlay/node_modules/playwright-core/.local-browsers"
+    test ! -e "${HOME:-/root}/.cache/ms-playwright"
+    rm -rf -- "$node_overlay"
+fi

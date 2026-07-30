@@ -248,6 +248,64 @@ foreach ($manifest['corpora'] ?? [] as $corpus) {
         continue;
     }
 
+    $memoryLimit = $discovery['php_memory_limit'] ?? null;
+
+    if (($id === 'filament' && $memoryLimit !== '256M')
+        || ($memoryLimit !== null
+            && (! is_string($memoryLimit)
+                || preg_match(
+                    '/^(?:-1|[1-9][0-9]*[KMG])$/D',
+                    $memoryLimit,
+                ) !== 1))) {
+        $errors[] = "$id discovery PHP memory contract is invalid";
+    }
+
+    $nodeRuntime = $discovery['node_runtime'] ?? null;
+
+    if ($id !== 'filament' && $nodeRuntime !== null) {
+        $errors[] = "$id unexpectedly declares a discovery Node runtime";
+    } elseif ($id === 'filament') {
+        $overlayPackage = is_array($nodeRuntime)
+            ? ($nodeRuntime['overlay_package'] ?? '')
+            : '';
+        $overlayLock = is_array($nodeRuntime)
+            ? ($nodeRuntime['overlay_lock'] ?? '')
+            : '';
+
+        if (! is_array($nodeRuntime)
+            || ($nodeRuntime['minimum_version'] ?? null) !== '18.0.0'
+            || ($nodeRuntime['source_playwright'] ?? null) !== '1.60.0'
+            || ($nodeRuntime['playwright'] ?? null) !== '1.61.1'
+            || ($nodeRuntime['install'] ?? null) !== 'npm-ci-ignore-scripts'
+            || ($nodeRuntime['browser_download'] ?? null) !== false
+            || preg_match(
+                '/^[0-9a-f]{64}$/D',
+                (string) ($nodeRuntime['source_package_sha256'] ?? ''),
+            ) !== 1
+            || preg_match(
+                '/^[0-9a-f]{64}$/D',
+                (string) ($nodeRuntime['source_lock_sha256'] ?? ''),
+            ) !== 1
+            || ! in_array(
+                $overlayPackage,
+                ['locks/filament-playwright.json'],
+                true,
+            )
+            || ! in_array(
+                $overlayLock,
+                ['locks/filament-playwright.lock'],
+                true,
+            )
+            || ! is_file("$root/$overlayPackage")
+            || hash_file('sha256', "$root/$overlayPackage")
+                !== ($nodeRuntime['overlay_package_sha256'] ?? null)
+            || ! is_file("$root/$overlayLock")
+            || hash_file('sha256', "$root/$overlayLock")
+                !== ($nodeRuntime['overlay_lock_sha256'] ?? null)) {
+            $errors[] = 'filament discovery Node runtime contract is invalid';
+        }
+    }
+
     foreach ($discovery['case_surfaces'] as $surface) {
         if (! is_string($surface)
             || ! isset($registry['surfaces'][$surface])) {
@@ -986,6 +1044,10 @@ function classificationErrors(
     $statuses = ['supported', 'unsupported', 'bridge-only'];
     $full = $classification['full_suite'] ?? null;
     $platform = $classification['platform'] ?? null;
+    $discoveryRuntime = is_array($full)
+        ? ($full['discovery_runtime'] ?? null)
+        : null;
+    $expectedNodeRuntime = $corpus['full_suite_discovery']['node_runtime'] ?? null;
 
     if (($classification['schema_version'] ?? null) !== ($gate['artifact_schema'] ?? null)
         || ($classification['kind'] ?? null) !== 'full-suite-classification'
@@ -1023,6 +1085,24 @@ function classificationErrors(
         || ($full['configuration'] ?? null) !== ($corpus['full_suite_discovery']['configuration'] ?? null)
         || ($full['configuration_sha256'] ?? null)
             !== ($corpus['full_suite_discovery']['configuration_sha256'] ?? null)
+        || ! is_array($discoveryRuntime)
+        || ($discoveryRuntime['php_memory_limit'] ?? null)
+            !== ($corpus['full_suite_discovery']['php_memory_limit'] ?? null)
+        || ($expectedNodeRuntime === null
+            && ($discoveryRuntime['node'] ?? null) !== null)
+        || (is_array($expectedNodeRuntime)
+            && (! is_array($discoveryRuntime['node'] ?? null)
+                || array_diff_assoc(
+                    $expectedNodeRuntime,
+                    $discoveryRuntime['node'],
+                ) !== []
+                || version_compare(
+                    (string) ($discoveryRuntime['node']['observed_node'] ?? '0'),
+                    (string) ($expectedNodeRuntime['minimum_version'] ?? ''),
+                    '<',
+                )
+                || ($discoveryRuntime['node']['observed_playwright'] ?? null)
+                    !== ($expectedNodeRuntime['playwright'] ?? null)))
         || ($full['selection_mode'] ?? null) !== 'discovered'
         || ($full['whole_suite'] ?? null) !== true
         || ! is_int($full['source_inputs'] ?? null)

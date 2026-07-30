@@ -768,6 +768,20 @@
                 "runner": "vendor/bin/pest",
                 "configuration": "phpunit.xml.dist",
                 "configuration_sha256": "e904547fc28fdb30c52ed44793281bd07a853097c543f100d4ac1e2a4dc1a78c",
+                "php_memory_limit": "256M",
+                "node_runtime": {
+                    "minimum_version": "18.0.0",
+                    "source_package_sha256": "ebacd7ee8386698d00802c014b1442a9acff3e79ebcea7e5b3e055a20d53c2b7",
+                    "source_lock_sha256": "ab7834adddfdccdc3cd4b58d627c2ae893b66741c0049fbde6421cbf190aef4e",
+                    "source_playwright": "1.60.0",
+                    "overlay_package": "locks/filament-playwright.json",
+                    "overlay_package_sha256": "360fd98f8681acbd2334f917728b13d32d0312d5b7627911ab98c48bcf7e7741",
+                    "overlay_lock": "locks/filament-playwright.lock",
+                    "overlay_lock_sha256": "e8739139e8bc5772a58b0881f28213dba1e2add8d99d425d6e845ae892f6a1b9",
+                    "playwright": "1.61.1",
+                    "install": "npm-ci-ignore-scripts",
+                    "browser_download": false
+                },
                 "input_roots": [
                     "tests"
                 ],
