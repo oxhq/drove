@@ -1738,14 +1738,14 @@ impl Scheduler {
     pub fn step(&mut self) -> Result<Step, String> {
         self.collect()?;
 
-        if let Some(result) = self.completed.pop_front() {
-            return Ok(Step::Result(Box::new(result)));
-        }
-
         if self.interrupted_signal.is_none() {
             if let Some(step) = self.spawn_available()? {
                 return Ok(step);
             }
+        }
+
+        if let Some(result) = self.completed.pop_front() {
+            return Ok(Step::Result(Box::new(result)));
         }
 
         if self.pending.is_empty() && self.active.is_empty() {
@@ -3861,6 +3861,61 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn refills_a_released_lane_before_delivering_a_buffered_result() {
+        let engine = Engine::new(
+            "refill-before-result-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(2).unwrap();
+        scheduler
+            .submit(
+                "task:completed".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                100,
+                true,
+            )
+            .unwrap();
+        let completed = scheduler.pending.pop_front().unwrap();
+        scheduler.completed.push_back(failed_result(
+            completed,
+            "fork_failure",
+            "fixture".into(),
+            empty_telemetry(None),
+            Vec::new(),
+        ));
+        scheduler
+            .submit(
+                "task:pending".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                100,
+                true,
+            )
+            .unwrap();
+
+        match scheduler.step().unwrap() {
+            Step::Child(child) => unsafe {
+                libc::close(child.fd);
+                libc::_exit(0);
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover delivered a buffered result before refilling its free lane")
+            }
+        }
+
+        assert_eq!(scheduler.active_count(), 1);
+        assert_eq!(scheduler.completed.len(), 1);
+        scheduler.cancel().unwrap();
     }
 
     #[test]

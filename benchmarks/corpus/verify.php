@@ -128,6 +128,12 @@ foreach ($manifest['corpora'] ?? [] as $corpus) {
         $errors[] = "$id execution configuration hash is invalid";
     }
 
+    if ($executionConfiguration === 'phpunit.drove.xml'
+        && ($corpus['execution_configuration_sha256'] ?? null)
+            !== hash_file('sha256', __DIR__.'/phpunit.laravel.xml')) {
+        $errors[] = "$id shared execution configuration identity drifted";
+    }
+
     if (preg_match(
         '/^[0-9a-f]{64}$/D',
         (string) ($corpus['full_suite_discovery']['configuration_sha256'] ?? ''),

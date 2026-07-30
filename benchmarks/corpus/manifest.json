@@ -363,7 +363,7 @@
             "selection_mode": "curated",
             "whole_suite": false,
             "execution_configuration": "phpunit.drove.xml",
-            "execution_configuration_sha256": "d217cfc3b45f2c1facdc65c0a220eaee072f1a93acea84f2c8e53827b1fddd47",
+            "execution_configuration_sha256": "ebbac7a6a1e69f5978e61751325ea64a786d3cea7a2e63cd02313b384ccfd1eb",
             "runner_identity": {
                 "baseline": {
                     "command": "pest",
@@ -721,7 +721,7 @@
             "selection_mode": "curated",
             "whole_suite": false,
             "execution_configuration": "phpunit.drove.xml",
-            "execution_configuration_sha256": "d217cfc3b45f2c1facdc65c0a220eaee072f1a93acea84f2c8e53827b1fddd47",
+            "execution_configuration_sha256": "ebbac7a6a1e69f5978e61751325ea64a786d3cea7a2e63cd02313b384ccfd1eb",
             "runner_identity": {
                 "baseline": {
                     "command": "pest",

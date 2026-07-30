@@ -48,7 +48,7 @@ final class Cache implements HandlesArguments
                 $cacheDirectory = realpath(self::TEMPORARY_FOLDER);
 
                 if (! is_string($cacheDirectory)) {
-                    $cacheDirectory = self::fallbackCacheDirectory();
+                    $cacheDirectory = $this->fallbackCacheDirectory();
                 }
 
                 $arguments = $this->pushArgument('--cache-directory', $arguments);
@@ -63,7 +63,7 @@ final class Cache implements HandlesArguments
         return $arguments;
     }
 
-    private static function fallbackCacheDirectory(): string
+    private function fallbackCacheDirectory(): string
     {
         $workingDirectory = getcwd();
 
