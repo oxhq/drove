@@ -35,7 +35,7 @@ test('has the expected answer', function (int|string $expected): void {
 Run explicit files or directories:
 
 ```bash
-vendor/bin/drove --native --processes=8 tests
+vendor/bin/drove --processes=8 tests
 ```
 
 Native execution accepts only the concurrency values proven by the conformance
@@ -70,7 +70,7 @@ mismatches fail during planning before any test body runs.
 ## Selection
 
 ```bash
-vendor/bin/drove --native \
+vendor/bin/drove \
   --filter="invoice total" \
   --group=fast \
   --group=database \

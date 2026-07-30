@@ -53,6 +53,7 @@ final class TestCaseRuntime
         private readonly bool $reportUselessTests,
         private readonly bool $capturePhpunitWarnings,
         private readonly ?CoverageAggregator $coverage,
+        private readonly bool $disallowTestOutput,
     ) {
         //
     }
@@ -67,12 +68,14 @@ final class TestCaseRuntime
         bool $reportUselessTests = true,
         bool $capturePhpunitWarnings = false,
         ?CoverageAggregator $coverage = null,
+        bool $disallowTestOutput = false,
     ): self {
         $runtime = new self(
             $prepareCase,
             $reportUselessTests,
             $capturePhpunitWarnings,
             $coverage,
+            $disallowTestOutput,
         );
         $pestFiles = $compiler->files();
         $casesByFile = [];
@@ -138,6 +141,7 @@ final class TestCaseRuntime
                     $filename,
                     $sourceFile,
                     $line,
+                    $case::class,
                     $case->name(),
                     $case->dataName(),
                     $case->dataSetAsString(),
@@ -265,6 +269,15 @@ final class TestCaseRuntime
                 'This test is not expected to perform assertions but performed %d assertion%s',
                 $case->numberOfAssertionsPerformed(),
                 $case->numberOfAssertionsPerformed() > 1 ? 's' : '',
+            );
+        }
+
+        if ($phpunitStatus->isSuccess()
+            && $this->disallowTestOutput
+            && $case->hasUnexpectedOutput()) {
+            $risk = sprintf(
+                'Test code or tested code printed unexpected output: %s',
+                $case->output(),
             );
         }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drove;
 
+use Drove\Bridge\CompatibilityRegistry as BridgeCompatibilityRegistry;
 use JsonException;
 use RuntimeException;
 
@@ -48,6 +49,7 @@ final class CompatibilityRegistry
         }
 
         $registry['drove_version'] = Version::current();
+        $registry['surface_registry'] = BridgeCompatibilityRegistry::load()->manifest();
 
         return $registry;
     }

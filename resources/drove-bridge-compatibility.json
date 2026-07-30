@@ -1,0 +1,342 @@
+{
+    "schema": 1,
+    "registry_version": 1,
+    "scope_ir_schema": 1,
+    "bridges": {
+        "pest": {
+            "entrypoint": "Drove\\Bridge\\Pest\\Bridge",
+            "role": "frontend",
+            "status": "bridge-only"
+        },
+        "phpunit": {
+            "entrypoint": "Drove\\Bridge\\PhpUnit\\Bridge",
+            "role": "frontend",
+            "status": "bridge-only"
+        },
+        "testbench": {
+            "entrypoint": "Drove\\Laravel\\TestbenchBridge",
+            "role": "environment",
+            "status": "bridge-only"
+        }
+    },
+    "surfaces": {
+        "laravel.native-environment": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_LARAVEL_ENVIRONMENT",
+            "status": "supported"
+        },
+        "native.dataset": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_DATASET",
+            "status": "supported"
+        },
+        "native.environment": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_ENVIRONMENT",
+            "status": "supported"
+        },
+        "native.expectation.identity": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_EXPECTATION",
+            "status": "supported"
+        },
+        "native.extension.matcher": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_TYPED_MATCHER",
+            "status": "supported"
+        },
+        "native.lifecycle": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_LIFECYCLE",
+            "status": "supported"
+        },
+        "native.output": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_OUTPUT",
+            "status": "supported"
+        },
+        "native.selection": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_SELECTION",
+            "status": "supported"
+        },
+        "native.test": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_SUPPORTED_TEST",
+            "status": "supported"
+        },
+        "migration.parse-error": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_PARSE_ERROR",
+            "status": "unsupported"
+        },
+        "pest.architecture": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_ARCHITECTURE",
+            "status": "unsupported"
+        },
+        "pest.alternate-printer": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_ALTERNATE_PRINTER",
+            "status": "unsupported"
+        },
+        "pest.ambiguous-call": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_AMBIGUOUS_FUNCTION",
+            "status": "unsupported"
+        },
+        "pest.custom-expectation.call": {
+            "bridge": "pest",
+            "codemod": "typed-matcher-map-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_CUSTOM_EXPECTATION_CALL",
+            "status": "bridge-only"
+        },
+        "pest.custom-expectation.definition": {
+            "bridge": "pest",
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_CUSTOM_EXPECTATION_DEFINITION",
+            "status": "bridge-only"
+        },
+        "pest.browser-mode": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_BROWSER_MODE",
+            "status": "unsupported"
+        },
+        "pest.dependency": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_DEPENDENCY",
+            "status": "unsupported"
+        },
+        "pest.dynamic-call": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_DYNAMIC_FUNCTION",
+            "status": "unsupported"
+        },
+        "pest.higher-order": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_HIGHER_ORDER",
+            "status": "unsupported"
+        },
+        "pest.mutation-testing": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_MUTATION_TESTING",
+            "status": "unsupported"
+        },
+        "pest.plugin.cli-interception": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_PLUGIN_CLI_INTERCEPTION",
+            "status": "unsupported"
+        },
+        "pest.plugin.portable-syntax": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PLUGIN_PORTABLE_SYNTAX",
+            "status": "bridge-only"
+        },
+        "pest.plugin.runner-internals": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_PLUGIN_RUNNER_INTERNALS",
+            "status": "unsupported"
+        },
+        "pest.portable.after-all": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_AFTER_ALL",
+            "status": "bridge-only"
+        },
+        "pest.portable.after-each": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_AFTER_EACH",
+            "status": "bridge-only"
+        },
+        "pest.portable.before-all": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_BEFORE_ALL",
+            "status": "bridge-only"
+        },
+        "pest.portable.before-each": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_BEFORE_EACH",
+            "status": "bridge-only"
+        },
+        "pest.portable.dataset": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_DATASET",
+            "status": "bridge-only"
+        },
+        "pest.portable.describe": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_DESCRIBE",
+            "status": "bridge-only"
+        },
+        "pest.portable.expect": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_EXPECT",
+            "status": "bridge-only"
+        },
+        "pest.portable.it": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_IT",
+            "status": "bridge-only"
+        },
+        "pest.portable.test": {
+            "bridge": "pest",
+            "codemod": "native-qualified-call-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PORTABLE_TEST",
+            "status": "bridge-only"
+        },
+        "pest.repetition": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_REPETITION",
+            "status": "unsupported"
+        },
+        "pest.snapshot": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_SNAPSHOT",
+            "status": "unsupported"
+        },
+        "pest.unknown-modifier": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_MODIFIER",
+            "status": "unsupported"
+        },
+        "pest.uses": {
+            "bridge": "pest",
+            "codemod": "uses-environment-map-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_USES",
+            "status": "bridge-only"
+        },
+        "pest.uses.environment": {
+            "bridge": "pest",
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_SCOPED_ENVIRONMENT",
+            "status": "bridge-only"
+        },
+        "pest.watch-mode": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_WATCH_MODE",
+            "status": "unsupported"
+        },
+        "phpunit.class-lifecycle": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_CLASS_LIFECYCLE",
+            "status": "bridge-only"
+        },
+        "phpunit.coverage": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_COVERAGE",
+            "status": "bridge-only"
+        },
+        "phpunit.datasets": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_DATASET",
+            "status": "bridge-only"
+        },
+        "phpunit.execution-order": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_PHPUNIT_EXECUTION_ORDER",
+            "status": "unsupported"
+        },
+        "phpunit.extensions": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_PHPUNIT_EXTENSION",
+            "status": "unsupported"
+        },
+        "phpunit.groups": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_GROUP",
+            "status": "bridge-only"
+        },
+        "phpunit.instance-lifecycle": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_INSTANCE_LIFECYCLE",
+            "status": "bridge-only"
+        },
+        "phpunit.process-isolation": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_PHPUNIT_PROCESS_ISOLATION",
+            "status": "unsupported"
+        },
+        "phpunit.test-case": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_TEST_CASE",
+            "status": "bridge-only"
+        },
+        "phpunit.statuses": {
+            "bridge": "phpunit",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_PHPUNIT_STATUS",
+            "status": "bridge-only"
+        },
+        "testbench.application": {
+            "bridge": "testbench",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_TESTBENCH_APPLICATION",
+            "status": "bridge-only"
+        },
+        "testbench.attributes": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_TESTBENCH_ATTRIBUTE",
+            "status": "unsupported"
+        },
+        "testbench.dusk": {
+            "bridge": "testbench",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_TESTBENCH_DUSK",
+            "status": "bridge-only"
+        },
+        "testbench.multiple-profiles": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_UNSUPPORTED_TESTBENCH_MULTIPLE_PROFILES",
+            "status": "unsupported"
+        },
+        "testbench.profile": {
+            "bridge": "testbench",
+            "codemod": null,
+            "diagnostic": "DROVE_COMPATIBILITY_BRIDGE_TESTBENCH_PROFILE",
+            "status": "bridge-only"
+        }
+    }
+}

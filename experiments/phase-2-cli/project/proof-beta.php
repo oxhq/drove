@@ -39,6 +39,7 @@ $execute = static function (array $command, ?string $workingDirectory = null): a
 $run = static fn (string ...$arguments): array => $execute([
     PHP_BINARY,
     __DIR__.'/vendor/bin/drove',
+    '--pest',
     ...$arguments,
 ]);
 $readJson = static function (string $path): array {
@@ -95,7 +96,8 @@ try {
             && is_array($registry)
             && ($registry['schema'] ?? null) === 1
             && ($registry['platforms']['windows']['status'] ?? null) === 'unsupported'
-            && ($registry['capabilities']['coverage-aggregation'] ?? null) === 'beta'
+            && ($registry['capabilities']['pest-phpunit-bridge-coverage'] ?? null) === 'beta'
+            && ($registry['capabilities']['native-coverage'] ?? null) === 'unsupported'
             && ($registry['capabilities']['drove-plugin-observers'] ?? null) === 'alpha'
             && ($registry['environment_contract']['schema'] ?? null) === 1
             && in_array(
@@ -156,7 +158,7 @@ PHP,
         $customConsumer,
     );
     $customRun = $execute(
-        [PHP_BINARY, $customBin.'drove', 'tests/SmokeTest.php'],
+        [PHP_BINARY, $customBin.'drove', '--pest', 'tests/SmokeTest.php'],
         $customConsumer,
     );
     $customPest = $execute(
@@ -428,6 +430,7 @@ PHP,
     $command = [
         PHP_BINARY,
         __DIR__.'/vendor/bin/drove',
+        '--pest',
         '--replay-on-failure='.$interruptionReplay,
         'unsupported/InterruptionTest.php',
     ];
@@ -565,10 +568,12 @@ PHP,
 
     $remove = static function (string $directory) use (&$remove): void {
         foreach (scandir($directory) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
+            if ($entry === '.') {
                 continue;
             }
-
+            if ($entry === '..') {
+                continue;
+            }
             $path = $directory.'/'.$entry;
 
             if (is_dir($path) && ! is_link($path)) {

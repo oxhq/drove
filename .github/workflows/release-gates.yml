@@ -111,6 +111,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        fetch-depth: 0
         persist-credentials: false
 
     - name: Verify exact checkout
@@ -125,6 +126,26 @@ jobs:
         tools: composer:v2
         coverage: none
         extensions: ffi, pcntl, posix
+
+    - name: Prove design-partner release verifier
+      run: php scripts/verify-design-partners-self-test.php
+
+    - name: Prove candidate release identity
+      run: |
+        set -euo pipefail
+        php scripts/verify-release-version.php
+        set +e
+        php scripts/verify-release-version.php v0.4.0-alpha.1 \
+          > "$RUNNER_TEMP/release-version-mismatch.txt" 2>&1
+        mismatch_exit="$?"
+        set -e
+        test "$mismatch_exit" -ne 0
+        grep -Fq \
+          'DROVE_RELEASE_VERSION_MISMATCH: expected v0.4.0-alpha.2, received v0.4.0-alpha.1.' \
+          "$RUNNER_TEMP/release-version-mismatch.txt"
+
+    - name: Prove native and bridge package boundary
+      run: composer test:package-boundary
 
     - name: Prove installable archive contents
       run: |
@@ -163,10 +184,14 @@ jobs:
           bin/drove-install-native \
           bin/pest \
           composer.json \
+          docs/design-partner-evidence.json \
           docs/design-partner-validation.md \
           docs/migration-from-pest.md \
+          docs/package-boundary.md \
           native/drover/README.md \
+          resources/release.json \
           resources/drove-compatibility.json \
+          src/Drove/Bridge/Pest/Bootstrap.php \
           src/Drove/Kernel/DroverScheduler.php \
           src/Drove/Kernel/NativeLibrary.php
         do
@@ -177,12 +202,13 @@ jobs:
         sha256sum "$archive_directory/drove.tar" "$contents"
 
         package="$RUNNER_TEMP/drove-package"
-        consumer="$RUNNER_TEMP/drove-consumer"
-        mkdir -p "$package" "$consumer"
+        native_consumer="$RUNNER_TEMP/drove-native-consumer"
+        bridge_consumer="$RUNNER_TEMP/drove-bridge-consumer"
+        mkdir -p "$package" "$native_consumer" "$bridge_consumer"
         tar -xf "$archive_directory/drove.tar" -C "$package"
-        cat > "$consumer/composer.json" <<JSON
+        cat > "$native_consumer/composer.json" <<JSON
         {
-          "name": "drove/archive-consumer",
+          "name": "drove/native-archive-consumer",
           "type": "project",
           "repositories": [
             {
@@ -191,27 +217,65 @@ jobs:
               "options": {
                 "symlink": false,
                 "versions": {
-                  "oxhq/drove": "0.4.0-alpha.1"
+                  "oxhq/drove": "0.4.0-alpha.2"
                 }
               }
             }
           ],
-          "require-dev": {
-            "oxhq/drove": "0.4.0-alpha.1"
-          },
-          "config": {
-            "allow-plugins": {
-              "pestphp/pest-plugin": true
-            }
+          "require": {
+            "oxhq/drove": "0.4.0-alpha.2"
           }
         }
         JSON
-        composer --working-dir="$consumer" install \
-          --no-interaction --no-progress --prefer-dist --optimize-autoloader
-        test ! -L "$consumer/vendor/oxhq/drove"
-        test "$("$consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.1"
-        "$consumer/vendor/bin/drove" --compatibility \
-          > "$consumer/compatibility.json"
+        composer --working-dir="$native_consumer" install \
+          --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+        test ! -L "$native_consumer/vendor/oxhq/drove"
+        php scripts/verify-package-boundary.php \
+          "$package/composer.json" \
+          "$package/resources/drove-bridge-compatibility.json"
+        for bridge_dependency in \
+          brianium/paratest \
+          nunomaduro/collision \
+          nunomaduro/termwind \
+          pestphp/pest-plugin \
+          phpunit/phpunit \
+          symfony/process
+        do
+          if composer --working-dir="$native_consumer" show "$bridge_dependency" \
+            >/dev/null 2>&1
+          then
+            echo "$bridge_dependency leaked into the native package" >&2
+            exit 1
+          fi
+        done
+        cat > "$native_consumer/native-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        if (! function_exists('Drove\Native\test')
+            || function_exists('test')
+            || function_exists('expect')
+            || class_exists('Pest\Kernel')
+            || class_exists('PHPUnit\Framework\TestCase')) {
+            throw new RuntimeException('The native package autoloaded a compatibility frontend.');
+        }
+        PHP
+        php "$native_consumer/native-boundary.php"
+        test "$("$native_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$native_consumer/vendor/bin/drove" --native --version)" = "Drove 0.4.0-alpha.2"
+        "$native_consumer/vendor/bin/drove" --help \
+          | grep -Fq 'Drove native'
+        set +e
+        "$native_consumer/vendor/bin/drove" --pest --version \
+          >"$native_consumer/missing-bridge.txt" 2>&1
+        missing_bridge_exit="$?"
+        set -e
+        test "$missing_bridge_exit" -eq 2
+        grep -Fq 'DROVE_PEST_BRIDGE_MISSING_DEPENDENCIES' \
+          "$native_consumer/missing-bridge.txt"
+        "$native_consumer/vendor/bin/drove" --compatibility \
+          > "$native_consumer/compatibility.json"
         php -r '
           $registry = json_decode(
               file_get_contents($argv[1]),
@@ -220,8 +284,74 @@ jobs:
           );
           exit(
               ($registry["schema"] ?? null) === 1
-              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.1"
+              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.2"
                   ? 0
                   : 1,
           );
-        ' "$consumer/compatibility.json"
+        ' "$native_consumer/compatibility.json"
+
+        cat > "$bridge_consumer/composer.json" <<JSON
+        {
+          "name": "drove/bridge-archive-consumer",
+          "type": "project",
+          "repositories": [
+            {
+              "type": "path",
+              "url": "$package",
+              "options": {
+                "symlink": false,
+                "versions": {
+                  "oxhq/drove": "0.4.0-alpha.2"
+                }
+              }
+            }
+          ],
+          "require-dev": {
+            "brianium/paratest": "7.23.0",
+            "nunomaduro/collision": "8.9.5",
+            "nunomaduro/termwind": "2.4.0",
+            "oxhq/drove": "0.4.0-alpha.2",
+            "pestphp/pest-plugin": "5.0.0",
+            "phpunit/phpunit": "13.2.4",
+            "symfony/process": "8.1.0"
+          },
+          "config": {
+            "allow-plugins": {
+              "pestphp/pest-plugin": true
+            }
+          }
+        }
+        JSON
+        composer --working-dir="$bridge_consumer" install \
+          --no-interaction --no-progress --prefer-dist --optimize-autoloader
+        test ! -L "$bridge_consumer/vendor/oxhq/drove"
+        cat > "$bridge_consumer/bridge-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        if (function_exists('test')) {
+            throw new RuntimeException('The Pest bridge was autoloaded before explicit boot.');
+        }
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        if (! function_exists('test') || ! class_exists(Pest\Kernel::class)) {
+            throw new RuntimeException('The explicit Pest bridge did not boot.');
+        }
+        PHP
+        php "$bridge_consumer/bridge-boundary.php"
+        test "$("$bridge_consumer/vendor/bin/drove" --pest --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$bridge_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
+        mkdir -p "$bridge_consumer/tests"
+        cat > "$bridge_consumer/tests/PackageBoundaryTest.php" <<'PHP'
+        <?php
+
+        test('Pest is an explicit compatibility bridge', function (): void {
+            expect(class_exists(Drove\Bridge\Pest\Bridge::class))->toBeTrue();
+        });
+        PHP
+        (
+          cd "$bridge_consumer"
+          vendor/bin/pest --colors=never --compact
+        )

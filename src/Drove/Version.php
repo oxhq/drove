@@ -11,7 +11,7 @@ use Composer\InstalledVersions;
  */
 final class Version
 {
-    public const string FALLBACK = '0.4.0-alpha.1-dev';
+    public const string FALLBACK = '0.4.0-alpha.2-dev';
 
     public static function current(): string
     {

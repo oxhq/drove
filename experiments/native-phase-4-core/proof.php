@@ -202,16 +202,12 @@ $assert(
         'assert-plan',
         'environment-plan',
         'scope-context',
-        'before:scope',
-        'enter:scope',
         'before:test',
         'enter:test',
         'leave:test',
         'after:test',
-        'leave:scope',
-        'after:scope',
     ],
-    'The native environment lifecycle wiring changed.',
+    'The inert file scope created a worker or resource branch instead of dispatching its test directly.',
 );
 
 $duplicateRejected = false;

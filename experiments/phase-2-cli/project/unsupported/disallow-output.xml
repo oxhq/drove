@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit bootstrap="../compatibility-bootstrap.php" beStrictAboutOutputDuringTests="true">
+<phpunit
+    bootstrap="../compatibility-bootstrap.php"
+    beStrictAboutOutputDuringTests="true"
+    failOnRisky="true"
+>
     <testsuites>
         <testsuite name="Strict">
-            <file>OrdinaryPhpUnitTest.php</file>
+            <file>StrictOutputTest.php</file>
         </testsuite>
     </testsuites>
 </phpunit>

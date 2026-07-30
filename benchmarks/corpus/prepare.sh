@@ -6,8 +6,8 @@ drove_source=${DROVE_SOURCE:-}
 lock_root=${CORPUS_LOCK_ROOT:-$drove_source/benchmarks/corpus/locks}
 
 case "$target" in
-    invoiceshelf|livewire|filament) ;;
-    *) echo "usage: DROVE_SOURCE=/absolute/drove/path $0 invoiceshelf|livewire|filament" >&2; exit 2 ;;
+    pest|invoiceshelf|livewire|filament) ;;
+    *) echo "usage: DROVE_SOURCE=/absolute/drove/path $0 pest|invoiceshelf|livewire|filament" >&2; exit 2 ;;
 esac
 
 if [ -z "$drove_source" ] || [ ! -f "$drove_source/composer.json" ]; then
@@ -20,7 +20,30 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 2
 fi
 
-sh "$drove_source/benchmarks/corpus/select.sh" "$target" . >/dev/null
+if [ "$target" != pest ]; then
+    sh "$drove_source/benchmarks/corpus/select.sh" "$target" . >/dev/null
+fi
+
+lock="$lock_root/$target.lock"
+
+if [ "$target" = pest ]; then
+    if [ ! -f "$lock" ]; then
+        echo "missing pinned corpus lock: $lock" >&2
+        exit 2
+    fi
+
+    cp "$lock" composer.lock
+    COMPOSER_ROOT_VERSION=5.0.1 \
+        composer validate --no-check-publish --no-interaction
+
+    if [ "${CORPUS_VALIDATE_LOCK_ONLY:-0}" != 1 ]; then
+        COMPOSER_ROOT_VERSION=5.0.1 \
+            composer install --no-scripts --no-interaction --no-progress --prefer-dist
+        composer dump-autoload --no-interaction --optimize
+    fi
+
+    exit 0
+fi
 
 drove_repository=$(printf '{"type":"path","url":"%s","options":{"symlink":false,"reference":"none","versions":{"oxhq/drove":"0.4.0-alpha.1"}}}' "$drove_source")
 laravel_repository=$(printf '{"type":"path","url":"%s/packages/drove-laravel","options":{"symlink":false,"reference":"none","versions":{"oxhq/drove-laravel":"0.4.0-alpha.1"}}}' "$drove_source")
@@ -56,8 +79,6 @@ else
             ;;
     esac
 fi
-
-lock="$lock_root/$target.lock"
 
 if [ "${CORPUS_UPDATE_LOCK:-0}" = 1 ]; then
     case "$target" in

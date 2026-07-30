@@ -18,21 +18,29 @@ jobs:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
             target: linux-gnu-x86_64
+            machine: x86_64
             library: target/release/libdrover.so
           - runner: ubuntu-24.04-arm
             target: linux-gnu-aarch64
+            machine: aarch64
             library: target/release/libdrover.so
           - runner: macos-15-intel
             target: macos-x86_64
+            machine: x86_64
             library: target/release/libdrover.dylib
-          - runner: macos-14
+          - runner: macos-15
             target: macos-aarch64
+            machine: arm64
             library: target/release/libdrover.dylib
 
     steps:
@@ -46,6 +54,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
+          test -z "$(git status --porcelain=v1)"
+          test "$(uname -m)" = "${{ matrix.machine }}"
           git fetch --no-tags origin \
             refs/heads/develop:refs/remotes/origin/develop
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
@@ -75,6 +85,15 @@ jobs:
           extensions: ffi, pcntl
           coverage: none
 
+      - name: Verify candidate release identity
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            php scripts/verify-release-version.php "$GITHUB_REF_NAME"
+          else
+            php scripts/verify-release-version.php
+          fi
+
       - name: Test and build Drover on glibc 2.31
         if: startsWith(matrix.target, 'linux-gnu-')
         env:
@@ -89,12 +108,26 @@ jobs:
             docker run --rm --entrypoint getconf "$NATIVE_IMAGE" GNU_LIBC_VERSION
           )" = "glibc 2.31"
           docker run --rm "$NATIVE_IMAGE"
+          reproduction_image="$NATIVE_IMAGE-reproduction"
+          docker build \
+            --no-cache \
+            --target native-builder \
+            --file native/drover/Dockerfile \
+            --tag "$reproduction_image" \
+            .
           container="$(docker create "$NATIVE_IMAGE")"
-          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          reproduction_container="$(docker create "$reproduction_image")"
+          trap 'docker rm -f "$container" "$reproduction_container" >/dev/null 2>&1 || true' EXIT
           mkdir -p native/drover/target/release
           docker cp \
             "$container:/usr/local/lib/libdrover.so" \
             native/drover/target/release/libdrover.so
+          docker cp \
+            "$reproduction_container:/build/target/release/libdrover.so" \
+            "$RUNNER_TEMP/libdrover-reproduction.so"
+          cmp \
+            native/drover/target/release/libdrover.so \
+            "$RUNNER_TEMP/libdrover-reproduction.so"
 
       - name: Test and build Drover on macOS
         if: startsWith(matrix.target, 'macos-')
@@ -105,6 +138,11 @@ jobs:
           cargo test --locked -- --test-threads=1
           cargo clippy --locked --all-targets -- -D warnings
           cargo build --release --locked
+          CARGO_TARGET_DIR="$RUNNER_TEMP/drover-reproduction" \
+            cargo build --release --locked
+          cmp \
+            target/release/libdrover.dylib \
+            "$RUNNER_TEMP/drover-reproduction/release/libdrover.dylib"
 
       - name: Package checksummed overlay
         env:
@@ -113,12 +151,50 @@ jobs:
         run: |
           set -euo pipefail
           output="$RUNNER_TEMP/native"
+          reproduction="$RUNNER_TEMP/native-reproduction"
+          source_revision="$(git rev-parse HEAD)"
           bash scripts/package-native.sh \
             "$DROVER_TARGET" \
             "native/drover/$DROVER_LIBRARY" \
-            "$output"
+            "$output" \
+            "$source_revision"
+          sleep 1
+          bash scripts/package-native.sh \
+            "$DROVER_TARGET" \
+            "native/drover/$DROVER_LIBRARY" \
+            "$reproduction" \
+            "$source_revision"
           cd "$output"
-          shasum -a 256 --check "drove-native-$DROVER_TARGET.tar.gz.sha256"
+          asset="drove-native-$DROVER_TARGET.tar.gz"
+          checksum="$asset.sha256"
+          provenance="drove-native-$DROVER_TARGET.provenance.json"
+          shasum -a 256 --check "$checksum"
+          cmp "$asset" "$reproduction/$asset"
+          cmp "$checksum" "$reproduction/$checksum"
+          cmp "$provenance" "$reproduction/$provenance"
+          php -r '
+            $manifest = json_decode(
+                file_get_contents($argv[1]),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+            exit(
+                ($manifest["schema"] ?? null) === 1
+                && ($manifest["source_revision"] ?? null) === $argv[2]
+                && ($manifest["target"] ?? null) === $argv[3]
+                && ($manifest["archive"]["name"] ?? null) === $argv[4]
+                && ($manifest["archive"]["sha256"] ?? null)
+                    === hash_file("sha256", $argv[4])
+                    ? 0
+                    : 1,
+            );
+          ' "$provenance" "$source_revision" "$DROVER_TARGET" "$asset"
+
+      - name: Attest release archive provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz
 
       - name: Verify archive, resolver, and ABI
         env:
@@ -152,6 +228,7 @@ jobs:
           path: |
             ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz
             ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz.sha256
+            ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.provenance.json
           if-no-files-found: error
 
   release:
@@ -162,6 +239,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       actions: read
+      attestations: read
       contents: write
 
     steps:
@@ -175,6 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
+          test -z "$(git status --porcelain=v1)"
           git fetch --no-tags origin \
             refs/heads/develop:refs/remotes/origin/develop
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
@@ -220,6 +299,11 @@ jobs:
             tests.yml
             phase-one.yml
             release-gates.yml
+            native-dsl.yml
+            native-extensions.yml
+            native-laravel.yml
+            native-topology.yml
+            bridge-coverage.yml
           )
           for workflow in "${workflows[@]}"; do
             details="$(
@@ -234,6 +318,14 @@ jobs:
             test "$head_sha" = "$release_sha"
             echo "$workflow release gate: run $run_id"
           done
+
+      - name: Require external design-partner evidence
+        run: |
+          set -euo pipefail
+          php scripts/verify-design-partners.php \
+            docs/design-partner-evidence.json \
+            "$GITHUB_REF_NAME" \
+            "$(git rev-parse HEAD)"
 
       - name: Download native packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -255,13 +347,40 @@ jobs:
             macos-x86_64
             macos-aarch64
           )
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 8
+          release_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          signer_workflow="${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY/.github/workflows/native-release.yml"
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 12
           for target in "${targets[@]}"; do
             archive="drove-native-$target.tar.gz"
             checksum="$archive.sha256"
+            provenance="drove-native-$target.provenance.json"
             test -f "$archive"
             test -f "$checksum"
+            test -f "$provenance"
             shasum -a 256 --check "$checksum"
+            php -r '
+              $manifest = json_decode(
+                  file_get_contents($argv[1]),
+                  true,
+                  flags: JSON_THROW_ON_ERROR,
+              );
+              exit(
+                  ($manifest["schema"] ?? null) === 1
+                  && ($manifest["source_revision"] ?? null) === $argv[2]
+                  && ($manifest["target"] ?? null) === $argv[3]
+                  && ($manifest["archive"]["name"] ?? null) === $argv[4]
+                  && ($manifest["archive"]["sha256"] ?? null)
+                      === hash_file("sha256", $argv[4])
+                      ? 0
+                      : 1,
+              );
+            ' "$provenance" "$release_sha" "$target" "$archive"
+            gh attestation verify "$archive" \
+              --repo "$GH_REPO" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$release_sha" \
+              --source-ref "refs/tags/$GITHUB_REF_NAME" \
+              --deny-self-hosted-runners
           done
           cat ./*.tar.gz.sha256 | LC_ALL=C sort > SHA256SUMS
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
@@ -276,6 +395,12 @@ jobs:
             echo
             echo "The four attached native Drover archives target glibc 2.31+ Linux and macOS on x86_64 and ARM64. Alpine and other musl systems are not supported."
             echo
+            echo "Each archive has a SHA-256 checksum, normalized provenance manifest, and GitHub build-provenance attestation. Verify with \`gh attestation verify <archive> --repo $GH_REPO --signer-workflow $signer_workflow --source-digest $release_sha --source-ref refs/tags/$GITHUB_REF_NAME --deny-self-hosted-runners\`."
+            echo
+            echo "Bridge Coverage gates PCOV 1.0.12 line coverage only through the Pest/PHPUnit bridge. The native frontend rejects coverage options and does not declare coverage support."
+            echo
+            echo "Native guarantees, bridge-only compatibility, unsupported surfaces, and migration guidance are versioned in the tagged README and docs. CI artifacts do not by themselves establish the external design-partner gate."
+            echo
             echo "Historical repository tags through v5.0.1 belong to the Pest lineage and are not prior Drove releases."
           } > "$notes"
           gh release create "$GITHUB_REF_NAME" \
@@ -285,4 +410,5 @@ jobs:
             --notes-file "$notes" \
             ./*.tar.gz \
             ./*.tar.gz.sha256 \
+            ./*.provenance.json \
             SHA256SUMS

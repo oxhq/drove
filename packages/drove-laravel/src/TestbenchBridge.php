@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drove\Laravel;
 
 use Closure;
+use Drove\Bridge\BridgeEntrypoint;
 use Drove\Kernel\StateAdapterException;
 use Illuminate\Foundation\Application;
 use PHPUnit\Framework\TestCase;
@@ -15,7 +16,7 @@ use ReflectionProperty;
 /**
  * @internal
  */
-final class TestbenchBridge
+final class TestbenchBridge implements BridgeEntrypoint
 {
     private const string TEST_CASE = 'Orchestra\\Testbench\\TestCase';
 
@@ -82,6 +83,29 @@ final class TestbenchBridge
         'app',
         'testCaseSetUpCallback',
     ];
+
+    public static function bridgeId(): string
+    {
+        return 'testbench';
+    }
+
+    public static function scopeIrSchema(): int
+    {
+        return 1;
+    }
+
+    public static function available(): bool
+    {
+        return class_exists(self::TEST_CASE)
+            && class_exists(Application::class);
+    }
+
+    public static function unavailableDiagnostic(): ?string
+    {
+        return self::available()
+            ? null
+            : 'DROVE_BRIDGE_TESTBENCH_DEPENDENCY_MISSING: Orchestra Testbench and Laravel are required by the Testbench bridge.';
+    }
 
     public static function isTestCase(TestCase $case): bool
     {
@@ -176,7 +200,7 @@ final class TestbenchBridge
     public static function createApplication(TestCase $case): Application
     {
         self::assertCompatibleContract($case);
-        $application = (new ReflectionMethod($case, 'createApplication'))
+        $application = new ReflectionMethod($case, 'createApplication')
             ->invoke($case);
 
         if (! $application instanceof Application) {
@@ -205,7 +229,6 @@ final class TestbenchBridge
         }
 
         $app = new ReflectionProperty($case, 'app');
-        $app->setAccessible(true);
         $bound = $app->getValue($case);
 
         if ($bound !== null && $bound !== $application) {
@@ -215,7 +238,7 @@ final class TestbenchBridge
             ));
         }
 
-        (new ReflectionMethod($case, 'setUpTheEnvironmentUsing'))->invoke(
+        new ReflectionMethod($case, 'setUpTheEnvironmentUsing')->invoke(
             $case,
             static function (Closure $setUp) use (
                 $app,
@@ -236,14 +259,14 @@ final class TestbenchBridge
 
                     $prepared = true;
                     $app->setValue($case, $application);
-                    (new ReflectionMethod(
+                    new ReflectionMethod(
                         $case,
                         'setUpTheTestEnvironmentUsingTestCase',
-                    ))->invoke($case);
-                    (new ReflectionMethod(
+                    )->invoke($case);
+                    new ReflectionMethod(
                         $case,
                         'setUpParallelTestingCallbacks',
-                    ))->invoke($case);
+                    )->invoke($case);
                     $setUp();
                 };
 
@@ -367,7 +390,6 @@ final class TestbenchBridge
     private static function assertNoSetupCallback(TestCase $case): void
     {
         $callback = new ReflectionProperty($case, 'testCaseSetUpCallback');
-        $callback->setAccessible(true);
 
         if ($callback->getValue($case) !== null) {
             throw new StateAdapterException(sprintf(

@@ -50,9 +50,9 @@ The following invariants apply to every feature declared supported:
 | 2. Typed extension front door | **IMPLEMENTED — HOSTED GATE PENDING** | Local Linux C1–C30 parity passes; required artifacts have not yet been observed and accepted upstream |
 | 3. Native DSL feature surface | **IMPLEMENTED — HOSTED GATE PENDING** | Local Drover C1–C30 parity and repeated 10,000-case C30 stress pass; required hosted artifact has not yet been observed upstream |
 | 4. Native Laravel prepared runtime | **IMPLEMENTED — HOSTED GATE PENDING** | Local Docker C1–C30 matrix, provider faults, preflight, and cleanup proofs pass; exact hosted artifact remains pending |
-| 5. Bounded one-fork execution | PENDING | Declared-concurrency topology, telemetry, reliability, and performance gates pass |
-| 6. Bridges and migration corpus | PENDING | Classified bridge parity ladder passes, ending with Filament |
-| 7. Public experimental release | PENDING | Installable artifacts, publication, coverage, and design-partner gates pass |
+| 5. Bounded one-fork execution | **IMPLEMENTED — HOSTED GATE PENDING** | Local topology, telemetry, reliability, cancellation, and controlled performance gates pass; the exact hosted artifact has not yet been observed |
+| 6. Bridges and migration corpus | **IMPLEMENTED — HOSTED GATE PENDING** | Local bridge, migration, source-identity, and exact pinned Pest proofs pass; the required hosted ladder ending with Filament has not yet been observed |
+| 7. Public experimental release | **IMPLEMENTED — EXTERNAL/PUBLICATION GATES PENDING** | Local native/bridge archive consumers and bridge coverage pass; candidate `v0.4.0-alpha.2`, hosted packages, 3 design partners, and 2 retained migrations remain pending |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -82,8 +82,9 @@ Deliverables:
   by the kernel without a PHPUnit assertion object.
 - A dependency guard that fails when `src/Drove/Native` imports or invokes
   Pest, PHPUnit, or Testbench runtime names. Stable scanner diagnostics may
-  name rejected bridge syntax as inert data. Package extraction and removal of
-  compatibility dependencies from the root manifest remain later work.
+  name rejected bridge syntax as inert data. The production package does not
+  require or autoload compatibility dependencies; the explicit Pest bridge
+  remains co-located during the alpha and is selected with `--pest`.
 
 Exit gates:
 
@@ -268,8 +269,10 @@ Exit gates:
   work and no resource limit, scheduler-caused idle-lane time remains below
   5%.
 - Increasing inactive sibling scopes from 10 to 1,000 at fixed test count and
-  concurrency changes execution peak PIDs and execution memory by no more than
-  10% after subtracting plan metadata.
+  concurrency preserves the exact full-lane PID population and changes raw
+  execution PSS by no more than a 10% median across three paired repetitions;
+  no individual pair may exceed 15%. PHP plan memory is reported separately
+  and is never subtracted from `/proc` PSS.
 - Aggregate execution memory stays within
   `M(C) <= 1.15 * C * M(C1)` at every declared concurrency, with no swap or
   OOM event.
@@ -312,10 +315,21 @@ Exit gates:
 - Parallel-safe cohorts pass at C1, C2, C4, C8, C16, and C30. Serial resource
   cohorts remain explicit rather than being silently serialized.
 - The scanner classifies 100% of full-suite inputs. Across target execution
-  cohorts, at least 80% of cases load unchanged and at least 95% load unchanged
-  or after an idempotent codemod.
+  cohorts, normalized exact-source baseline/Drove artifacts prove that at least
+  80% of cases load unchanged and at least 95% load unchanged or after an
+  explicitly recorded idempotent codemod. Static native-migration ratios remain
+  diagnostic and cannot be substituted for execution evidence.
 - Filament is the last hosted proof and cannot be skipped by an earlier green
   rung.
+
+Current local evidence is implementation proof, not hosted completion. The
+exact pinned Pest checkout discovers and classifies its complete configured
+suite while preserving runtime compatibility and native-migration status as
+separate axes. Its calibrated 785-case parallel and 12-case serial selections
+load unchanged through the Pest bridge and match baseline statuses, assertions,
+and exits locally. Every normalized result is bound to the same commit, tree,
+selected-file bytes, configuration, dependency lock, and prepared Composer
+overlay. The all-corpus hosted ladder remains the exit gate.
 
 ## Phase 7 — Packaging and public experimental release
 
@@ -328,8 +342,10 @@ Deliverables:
   metadata.
 - A tagged experimental release and Packagist publication. The release remains
   pre-v1 and links the exact native support surface and bridge registry.
-- A coverage aggregation decision recorded as an ADR and an implementation for
-  every driver declared supported; unsupported drivers fail explicitly.
+- A Pest/PHPUnit bridge coverage decision recorded as an ADR and an
+  implementation for every bridge driver declared supported; unsupported
+  bridge drivers fail explicitly. Native coverage remains undeclared and its
+  frontend rejects coverage options.
 - Installation, migration, troubleshooting, benchmark, security, attribution,
   and rollback documentation.
 - A design-partner program using external Laravel/Pest repositories rather than
@@ -342,14 +358,21 @@ Exit gates:
   incompatible platform clearly.
 - Packagist installs resolve the tagged package without source-tree paths or
   uncommitted artifacts.
-- Supported coverage output has identical covered-line data at C1, C2, C4, C8,
-  C16, and C30 and survives failed, skipped, timed-out, and crashed tests
-  without corrupting the report.
+- PCOV 1.0.12 line coverage through `drove --pest` has identical covered-line
+  data at C1, C2, C4, C8, C16, and C30 and survives failed, skipped,
+  timed-out, and crashed tests without corrupting the report. This bridge gate
+  is not native-frontend coverage evidence.
 - At least three external design partners run the scanner and benchmark. At
   least two migrate a meaningful suite, retain Drove in CI for two weeks, and
   report reproducible before/after artifacts.
 - Public release notes distinguish native guarantees, bridge compatibility,
   known unsupported surfaces, and evidence that remains local or experimental.
+
+The `v0.4.0-alpha.2` candidate is not published. Its local archive consumers
+and PCOV bridge matrix pass, but the external ledger currently records 0 of 3
+design partners and 0 of 2 retained migrations. The release workflow therefore
+blocks tag assets and Packagist verification rather than manufacturing
+repository-owned evidence for this gate.
 
 ## Non-goals
 

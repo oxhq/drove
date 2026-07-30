@@ -39,39 +39,30 @@
         "ext-phar": "*",
         "ext-posix": "*",
         "ext-zlib": "*",
-        "php": "^8.4",
-        "brianium/paratest": "^7.23.0",
-        "nunomaduro/collision": "^8.9.5",
-        "nunomaduro/termwind": "^2.4.0",
-        "pestphp/pest-plugin": "^5.0.0",
-        "pestphp/pest-plugin-arch": "^5.0.0",
-        "pestphp/pest-plugin-mutate": "^5.0.0",
-        "pestphp/pest-plugin-profanity": "^5.0.0",
-        "phpunit/phpunit": "^13.2.4",
-        "symfony/process": "^8.1.0"
+        "php": "^8.4"
     },
-    "conflict": {
-        "filp/whoops": "<2.18.3",
-        "phpunit/phpunit": ">13.2.4",
-        "sebastian/exporter": "<7.0.0",
-        "webmozart/assert": "<1.11.0"
+    "suggest": {
+        "brianium/paratest": "Required only by the explicit Pest compatibility bridge.",
+        "nunomaduro/collision": "Required only by the explicit Pest compatibility bridge.",
+        "nunomaduro/termwind": "Required only by the explicit Pest compatibility bridge.",
+        "pestphp/pest-plugin": "Required only by the explicit Pest compatibility bridge.",
+        "phpunit/phpunit": "Required only by the explicit Pest and PHPUnit compatibility bridges.",
+        "symfony/process": "Required only by the explicit Pest compatibility bridge."
     },
     "replace": {
         "pestphp/pest": "5.0.1"
     },
     "autoload": {
         "psr-4": {
-            "Drove\\": "src/Drove/",
-            "Pest\\": "src/"
+            "Drove\\": "src/Drove/"
         },
         "files": [
-            "src/Functions.php",
-            "src/Pest.php",
             "src/Drove/Native/functions.php"
         ]
     },
     "autoload-dev": {
         "psr-4": {
+            "Pest\\": "src/",
             "Tests\\Fixtures\\Covers\\": "tests/Fixtures/Covers",
             "Tests\\Fixtures\\Inheritance\\": "tests/Fixtures/Inheritance",
             "Tests\\Fixtures\\Arch\\": "tests/Fixtures/Arch",
@@ -81,17 +72,28 @@
             "tests/Fixtures/Arch/ToBeCasedCorrectly/IncorrectCasing/incorrectCasing.php"
         ],
         "files": [
+            "src/Functions.php",
+            "src/Pest.php",
             "tests/Autoload.php"
         ]
     },
     "require-dev": {
+        "brianium/paratest": "^7.23.0",
         "laravel/pao": "^1.1.2",
+        "nunomaduro/collision": "^8.9.5",
+        "nunomaduro/termwind": "^2.4.0",
         "pestphp/pest-dev-tools": "^5.0.0",
+        "pestphp/pest-plugin": "^5.0.0",
+        "pestphp/pest-plugin-arch": "^5.0.0",
         "pestphp/pest-plugin-browser": "^5.0.0",
+        "pestphp/pest-plugin-mutate": "^5.0.0",
         "pestphp/pest-plugin-phpstan": "^5.0.0",
+        "pestphp/pest-plugin-profanity": "^5.0.0",
         "pestphp/pest-plugin-rector": "^5.0.0",
         "pestphp/pest-plugin-type-coverage": "^5.0.0",
-        "psy/psysh": "^0.12.24"
+        "phpunit/phpunit": "^13.2.4",
+        "psy/psysh": "^0.12.24",
+        "symfony/process": "^8.1.0"
     },
     "prefer-stable": true,
     "config": {
@@ -140,6 +142,17 @@
             "phpstan analyse src/Drove/Native experiments/native-phase-4-core/proof.php --no-progress --memory-limit=512M",
             "pint --test src/Drove/Native experiments/native-phase-4-core"
         ],
+        "test:native-phase-5": "bash experiments/native-phase-5/gate.sh",
+        "test:native-phase-5:static": [
+            "phpstan analyse experiments/native-phase-5 --no-progress --memory-limit=512M",
+            "pint --test experiments/native-phase-5"
+        ],
+        "test:native-phase-6-bridges": "php experiments/native-phase-6-bridges/proof.php",
+        "test:native-phase-6-bridges:static": [
+            "phpstan analyse src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges --no-progress --memory-limit=512M",
+            "pint --test src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges packages/drove-laravel/src/TestbenchBridge.php"
+        ],
+        "test:package-boundary": "php scripts/verify-package-boundary.php",
         "test:parallel": "php bin/pest --exclude-group=integration --parallel --processes=3",
         "test:integration": "php bin/pest --group=integration -v",
         "update:snapshots": "REBUILD_SNAPSHOTS=true php bin/pest --update-snapshots",
@@ -153,9 +166,30 @@
         ]
     },
     "extra": {
+        "drove": {
+            "native-entrypoint": "bin/drove",
+            "bridge-only": {
+                "autoload-files": [
+                    "src/Functions.php",
+                    "src/Pest.php"
+                ],
+                "binaries": [
+                    "bin/drove --pest",
+                    "bin/pest"
+                ],
+                "composer-plugins": [
+                    "pestphp/pest-plugin"
+                ],
+                "namespaces": [
+                    "Pest\\"
+                ],
+                "replaces": [
+                    "pestphp/pest"
+                ]
+            }
+        },
         "pest": {
             "plugins": [
-                "Pest\\Mutate\\Plugins\\Mutate",
                 "Pest\\Plugins\\Configuration",
                 "Pest\\Plugins\\Bail",
                 "Pest\\Plugins\\Cache",

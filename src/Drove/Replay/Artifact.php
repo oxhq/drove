@@ -26,7 +26,7 @@ final class Artifact
 
     private bool $written = false;
 
-    /** @var array{sha256: string, tests: int, scopes: int, environment: ?array<string, mixed>, extensions: ?array<string, mixed>}|null */
+    /** @var array{sha256: string, tests: int, scopes: int, case_identity: array<string, mixed>, environment: ?array<string, mixed>, extensions: ?array<string, mixed>}|null */
     private ?array $plan = null;
 
     /**
@@ -106,6 +106,7 @@ final class Artifact
             'sha256' => hash('sha256', $encoded),
             'tests' => $this->countNodes($plan, 'tests'),
             'scopes' => $this->countScopes($plan),
+            'case_identity' => $this->caseIdentity($plan),
             'environment' => $this->environmentProjection($plan),
             'extensions' => $this->extensionProjection($plan),
         ];
@@ -384,6 +385,70 @@ final class Artifact
         }
 
         return $count;
+    }
+
+    /**
+     * @param  array<string, mixed>  $plan
+     * @return array{
+     *     schema: 1,
+     *     cases: list<array{execution_id: string, frontend_id: string}>,
+     *     frontend_ids_sha256: string
+     * }
+     */
+    private function caseIdentity(array $plan): array
+    {
+        $cases = [];
+        $this->collectCaseIdentity($plan, $cases);
+        usort(
+            $cases,
+            static fn (array $left, array $right): int => $left['execution_id'] <=> $right['execution_id'],
+        );
+        $frontendIds = array_column($cases, 'frontend_id');
+        sort($frontendIds, SORT_STRING);
+
+        return [
+            'schema' => 1,
+            'cases' => $cases,
+            'frontend_ids_sha256' => hash(
+                'sha256',
+                json_encode(
+                    $frontendIds,
+                    JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  list<array{execution_id: string, frontend_id: string}>  $cases
+     */
+    private function collectCaseIdentity(array $node, array &$cases): void
+    {
+        foreach (is_array($node['tests'] ?? null) ? $node['tests'] : [] as $test) {
+            if (! is_array($test)) {
+                continue;
+            }
+            if (! is_string($test['id'] ?? null)) {
+                continue;
+            }
+            $cases[] = [
+                'execution_id' => $test['id'],
+                'frontend_id' => is_string($test['frontend_id'] ?? null)
+                    ? $test['frontend_id']
+                    : $test['id'],
+            ];
+        }
+
+        foreach (is_array($node['children'] ?? null) ? $node['children'] : [] as $child) {
+            if (is_array($child)) {
+                $this->collectCaseIdentity($child, $cases);
+            }
+        }
+
+        if (is_array($node['root'] ?? null)) {
+            $this->collectCaseIdentity($node['root'], $cases);
+        }
     }
 
     /**

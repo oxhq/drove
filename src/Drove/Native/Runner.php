@@ -35,7 +35,7 @@ final readonly class Runner
             $plan['environment'] = $environment->environmentPlan()->toArray();
         }
 
-        [$executionPlan, $synthetic, $order] = $this->executionPlan($plan);
+        [$synthetic, $order] = $this->executionPlan($plan);
         $run = new LifecycleExecutor(
             $this->scheduler,
             fn (string $id): \Closure => $declarations->resolveHook($id),
@@ -54,18 +54,42 @@ final readonly class Runner
             enterDescendant: $environment instanceof EnvironmentRuntime ? $environment->enterDescendant(...) : null,
             leaveDescendant: $environment instanceof EnvironmentRuntime ? $environment->leaveDescendant(...) : null,
             afterDispatch: $environment instanceof EnvironmentRuntime ? $environment->afterDispatch(...) : null,
-        )->run($executionPlan, $environment?->scopeContext());
+        )->run($plan, $environment?->scopeContext());
+        unset($plan);
 
-        $byId = [];
+        $runnable = $run['tests'];
+        unset($run['tests']);
+        $runnableCount = count($runnable);
+        $runnableIndex = 0;
 
-        foreach ([...$run['tests'], ...$synthetic] as $test) {
-            $byId[$test['id']] = $test;
+        foreach ($order as $index => $id) {
+            $test = $runnable[$runnableIndex] ?? null;
+
+            if (is_array($test) && ($test['id'] ?? null) === $id) {
+                $order[$index] = $test;
+                unset($runnable[$runnableIndex]);
+                $runnableIndex++;
+
+                continue;
+            }
+
+            if (! isset($synthetic[$id])) {
+                throw new \LogicException(sprintf(
+                    'Native execution omitted test result %s.',
+                    $id,
+                ));
+            }
+
+            $order[$index] = $synthetic[$id];
+            unset($synthetic[$id]);
         }
 
-        $run['tests'] = array_map(
-            static fn (string $id): array => $byId[$id],
-            $order,
-        );
+        if ($runnableIndex !== $runnableCount || $synthetic !== []) {
+            throw new \LogicException('Native execution returned unexpected test results.');
+        }
+
+        $run['tests'] = $order;
+        unset($runnable, $synthetic, $order);
 
         foreach ($run['tests'] as &$test) {
             $metrics = TestContext::extractMetrics(
@@ -99,22 +123,22 @@ final readonly class Runner
 
     /**
      * @param  array<string, mixed>  $plan
-     * @return array{array<string, mixed>, list<array<string, mixed>>, list<string>}
+     * @return array{array<string, array<string, mixed>>, list<string>}
      */
-    private function executionPlan(array $plan): array
+    private function executionPlan(array &$plan): array
     {
         $synthetic = [];
         $order = [];
         $root = $plan['root'];
         $plan['root'] = $this->runnableScope($root, [], $synthetic, $order, true);
 
-        return [$plan, $synthetic, $order];
+        return [$synthetic, $order];
     }
 
     /**
      * @param  array<string, mixed>  $scope
      * @param  list<string>  $ancestors
-     * @param  list<array<string, mixed>>  $synthetic
+     * @param  array<string, array<string, mixed>>  $synthetic
      * @param  list<string>  $order
      * @return array<string, mixed>|null
      */
@@ -154,7 +178,7 @@ final readonly class Runner
                 continue;
             }
 
-            $synthetic[] = [
+            $synthetic[$id] = [
                 'id' => $id,
                 'scope_id' => $scopeId,
                 'scopes' => $scopeIds,

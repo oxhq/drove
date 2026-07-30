@@ -34,73 +34,76 @@ final class NativePhaseFourStateProvider implements DatabaseStateProvider
     public function beforeDispatch(ScopeContext $scope, array $tasks): void
     {
         $this->inner->beforeDispatch($scope, $tasks);
-
-        if ($this->fault === 'cleanup'
-            && $this->inner->name() === 'sqlite-copy'
-            && getmypid() === $this->rootPid) {
-            $copies = $this->copyArtifacts();
-
-            if (count($copies) !== 1
-                || preg_match(
-                    '/\A(drove-[a-f0-9]{24}-)/D',
-                    basename($copies[0]),
-                    $match,
-                ) !== 1) {
-                throw new RuntimeException('Could not identify the SQLite cleanup fault prefix.');
-            }
-
-            $this->copyPrefix = $match[1];
-        }
     }
 
     /** @param array<string, mixed> $task */
     public function enterDescendant(ScopeContext $scope, array $task): void
     {
-        if ($this->fault === 'enter') {
-            if ($this->inner->name() === 'sqlite-memory') {
-                $scope->app()->make('db')->disconnect('sqlite');
-            } else {
-                $copies = $this->copyArtifacts();
-
-                if (count($copies) !== 1
-                    || file_put_contents(
-                        $copies[0],
-                        'native-phase-four-corrupt-copy',
-                        LOCK_EX,
-                    ) === false) {
-                    throw new RuntimeException('Could not corrupt the SQLite enter fault copy.');
-                }
-            }
-
+        if ($this->fault === 'enter' && $this->inner->name() === 'sqlite-memory') {
+            $scope->app()->make('db')->disconnect('sqlite');
             $this->record('enter');
         }
 
         $this->inner->enterDescendant($scope, $task);
+
+        if ($this->inner->name() !== 'sqlite-copy'
+            || ! in_array($this->fault, ['enter', 'cleanup'], true)) {
+            return;
+        }
+
+        $copies = $this->copyArtifacts();
+
+        if (count($copies) !== 1
+            || preg_match(
+                '/\A(drove-[a-f0-9]{24}-)/D',
+                basename($copies[0]),
+                $match,
+            ) !== 1) {
+            throw new RuntimeException('Could not identify the lazy SQLite copy.');
+        }
+
+        $this->copyPrefix = $match[1];
+
+        if ($this->fault === 'enter') {
+            if (file_put_contents(
+                $copies[0],
+                'native-phase-four-corrupt-copy',
+                LOCK_EX,
+            ) === false) {
+                throw new RuntimeException('Could not corrupt the lazy SQLite enter fault copy.');
+            }
+
+            $scope->app()->make('db')->disconnect('sqlite');
+            $this->record('enter');
+        }
     }
 
     /** @param array<string, mixed> $task */
     public function leaveDescendant(ScopeContext $scope, array $task): void
     {
         $this->inner->leaveDescendant($scope, $task);
+
+        if ($this->fault === 'cleanup' && $this->inner->name() === 'sqlite-copy') {
+            $prefix = $this->copyPrefix ?? throw new RuntimeException(
+                'The lazy SQLite cleanup fault prefix was not captured.',
+            );
+            $artifact = $this->workspace().'/'.$prefix.'fault-artifact';
+
+            if (! mkdir($artifact)) {
+                throw new RuntimeException('Could not create the SQLite cleanup fault artifact.');
+            }
+
+            $this->record('cleanup');
+        }
     }
 
     /** @param list<array<string, mixed>> $tasks */
     public function afterDispatch(ScopeContext $scope, array $tasks): void
     {
-        if ($this->fault === 'cleanup' && getmypid() === $this->rootPid) {
-            if ($this->inner->name() === 'sqlite-memory') {
-                $scope->app()->make('db')->disconnect('sqlite');
-            } else {
-                $prefix = $this->copyPrefix ?? throw new RuntimeException(
-                    'The SQLite cleanup fault prefix was not captured.',
-                );
-                $artifact = $this->workspace().'/'.$prefix.'fault-artifact';
-
-                if (! mkdir($artifact)) {
-                    throw new RuntimeException('Could not create the SQLite cleanup fault artifact.');
-                }
-            }
-
+        if ($this->fault === 'cleanup'
+            && $this->inner->name() === 'sqlite-memory'
+            && getmypid() === $this->rootPid) {
+            $scope->app()->make('db')->disconnect('sqlite');
             $this->record('cleanup');
         }
 
@@ -143,7 +146,7 @@ final class NativePhaseFourStateProvider implements DatabaseStateProvider
             throw new RuntimeException('Could not scan SQLite fault copies.');
         }
 
-        return array_values(array_filter($paths, 'is_file'));
+        return array_values(array_filter($paths, is_file(...)));
     }
 
     private function workspace(): string
@@ -225,10 +228,12 @@ function nativePhaseFourRemove(string $directory): void
     }
 
     foreach (scandir($directory) ?: [] as $name) {
-        if ($name === '.' || $name === '..') {
+        if ($name === '.') {
             continue;
         }
-
+        if ($name === '..') {
+            continue;
+        }
         $path = $directory.'/'.$name;
 
         if (is_link($path)) {

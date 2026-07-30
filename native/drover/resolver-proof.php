@@ -21,6 +21,16 @@ $assert(NativeLibrary::filename('macos-aarch64') === 'libdrover.dylib', 'macOS l
 $assert(NativeLibrary::resolve('/tmp/libdrover.test') === '/tmp/libdrover.test', 'Explicit native override drifted.');
 
 try {
+    NativeLibrary::target('Windows', 'AMD64');
+    throw new RuntimeException('Unsupported OS detection did not fail.');
+} catch (RuntimeException $exception) {
+    $assert(
+        str_contains($exception->getMessage(), 'does not provide native binaries for Windows'),
+        'Unsupported OS rejection diagnostic drifted.',
+    );
+}
+
+try {
     NativeLibrary::target('Linux', 'x86_64', 'musl');
     throw new RuntimeException('Musl target detection did not fail.');
 } catch (RuntimeException $exception) {

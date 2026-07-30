@@ -30,6 +30,7 @@ final class Command
         'group',
         'help',
         'native',
+        'pest',
         'processes',
         'version',
     ];
@@ -469,7 +470,7 @@ final class Command
 Drove native
 
 Usage:
-  drove --native [options] [paths...]
+  drove [options] [paths...]
 
 Options:
   --processes=N         Isolation lanes: 1, 2, 4, 8, 16, or 30.
@@ -478,6 +479,9 @@ Options:
   --exclude-group=NAME  Exclude tests in NAME; repeatable, exclusion wins.
   --help                Show this native help.
   --version             Show the installed Drove version.
+
+Pest compatibility:
+  drove --pest [Pest/PHPUnit options...]
 
 HELP;
 

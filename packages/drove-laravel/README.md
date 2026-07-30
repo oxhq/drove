@@ -12,11 +12,10 @@ prepared-process runtime. It adds:
 
 ## Install
 
-The alpha depends on Drove's inherited Pest plugin loader, so clean consumers
-must explicitly trust that Composer plugin before installing:
+The native Laravel runtime does not install or trust Drove's optional Pest
+compatibility dependencies:
 
 ```bash
-composer config --no-plugins allow-plugins.pestphp/pest-plugin true
 composer require --dev oxhq/drove-laravel:^0.4@alpha
 vendor/bin/drove-install-native
 vendor/bin/drove --version
@@ -45,6 +44,10 @@ use Drove\Laravel\LaravelRuntime;
 $runtime = LaravelRuntime::boot($projectRoot);
 $context = $runtime->scopeContext();
 ```
+
+Pest/PHPUnit/Testbench compatibility remains an explicit bridge. Install the
+dependency set documented by `oxhq/drove`, then invoke
+`vendor/bin/drove --pest`.
 
 Native Drove suites declare the application without a Laravel `TestCase`:
 

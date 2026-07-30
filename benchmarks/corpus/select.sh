@@ -13,8 +13,7 @@ cd "$root"
 
 case "$target" in
     pest|pest-nonserial|pest-serial)
-        # Pest is the inherited source surface in this fork, not an external checkout.
-        commit=
+        commit=6b2cd358e8a9d6d1abb93804b70e1c659bbc411b
         case "$target" in
             pest) expected_files=143 ;;
             pest-nonserial) expected_files=140 ;;

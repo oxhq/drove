@@ -65,7 +65,6 @@ final class Runner
         '--fail-on-',
         '--do-not-fail-on-',
         '--strict-',
-        '--disallow-test-output',
         '--enforce-time-limit',
         '--default-time-limit',
         '--warm-coverage-cache',
@@ -235,10 +234,6 @@ final class Runner
                 throw new InvalidArgumentException('Drove does not support strict PHPUnit coverage modes from XML yet.');
             }
 
-            if ($configuration->disallowTestOutput()) {
-                throw new InvalidArgumentException('Drove does not support disallowTestOutput from PHPUnit XML yet.');
-            }
-
             if ($configuration->extensionBootstrappers() !== []) {
                 throw new InvalidArgumentException('Drove does not support PHPUnit extensions yet.');
             }
@@ -267,6 +262,7 @@ final class Runner
                 $configuration->reportUselessTests(),
                 capturePhpunitWarnings: true,
                 coverage: $coverage,
+                disallowTestOutput: $configuration->disallowTestOutput(),
             );
             EventFacade::instance()->seal();
             $phpunitResult = TestResultFacade::result();

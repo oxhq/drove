@@ -23,6 +23,7 @@ use RuntimeException;
  *
  * @phpstan-type TestDescriptor array{
  *     id: string,
+ *     frontend_id: string,
  *     name: string,
  *     scope: list<string>,
  *     source: array{path: string, line: int},
@@ -197,6 +198,7 @@ final class ScopeCompiler
         string $filename,
         string $sourceFile,
         int $line,
+        string $class,
         string $method,
         int|string $dataset,
         string $datasetLabel,
@@ -240,6 +242,7 @@ final class ScopeCompiler
             $path = $this->relativePath($filename);
             $test = [
                 'id' => 'test:'.$path.'::'.rawurlencode($method),
+                'frontend_id' => $class.'::'.$method,
                 'name' => $method,
                 'scope' => [],
                 'source' => [
@@ -292,6 +295,7 @@ final class ScopeCompiler
             ? (is_int($dataset) ? 'index:' : 'name:').rawurlencode((string) $dataset)
             : null;
         $test['id'] = $baseId.($datasetKey === null ? '' : '::dataset:'.$datasetKey);
+        $test['frontend_id'] .= $hasDataset ? '#'.$dataset : '';
         $test['name'] .= $hasDataset ? $datasetLabel : '';
         $test['groups'] = array_values(array_unique($groups));
         $test['disposition'] = $template['disposition'];
@@ -494,6 +498,7 @@ final class ScopeCompiler
             $this->closures[$id] = $method->closure;
             $test = [
                 'id' => $id,
+                'frontend_id' => 'pest:'.$path.'::'.Str::evaluable($method->description),
                 'name' => $method->description,
                 'scope' => array_values(array_map(strval(...), $method->describing)),
                 'source' => [
