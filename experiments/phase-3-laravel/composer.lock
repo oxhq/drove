@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "23f2462ff020c1647624b4b5df5c42a9",
+    "content-hash": "4697a1a86bf77d5b6887a65a577af286",
     "packages": [
         {
             "name": "brianium/paratest",
@@ -3049,7 +3049,8 @@
                 },
                 "files": [
                     "src/Functions.php",
-                    "src/Pest.php"
+                    "src/Pest.php",
+                    "src/Drove/Native/functions.php"
                 ]
             },
             "autoload-dev": {
@@ -3089,6 +3090,34 @@
                 ],
                 "test:inline": [
                     "php bin/pest --configuration=phpunit.inline.xml"
+                ],
+                "test:native-phase-1": [
+                    "php experiments/native-phase-1/proof.php"
+                ],
+                "test:native-phase-1:static": [
+                    "phpstan analyse src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1/proof.php --no-progress --memory-limit=512M",
+                    "pint --test src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1"
+                ],
+                "test:native-phase-2": [
+                    "php experiments/native-phase-2/proof.php"
+                ],
+                "test:native-phase-2:static": [
+                    "phpstan analyse src/Drove/Extension src/Drove/Native src/Drove/Replay/Artifact.php experiments/native-phase-2/proof.php experiments/native-phase-2/fixtures.php experiments/native-phase-2/compare.php --no-progress --memory-limit=512M",
+                    "pint --test src/Drove/Extension src/Drove/Native src/Drove/Replay/Artifact.php experiments/native-phase-2"
+                ],
+                "test:native-phase-3": [
+                    "php experiments/native-phase-3/proof.php"
+                ],
+                "test:native-phase-3:static": [
+                    "phpstan analyse src/Drove/Native experiments/native-phase-3/proof.php experiments/native-phase-3/compare.php --no-progress --memory-limit=512M",
+                    "pint --test src/Drove/Native experiments/native-phase-3"
+                ],
+                "test:native-phase-4-core": [
+                    "php experiments/native-phase-4-core/proof.php"
+                ],
+                "test:native-phase-4-core:static": [
+                    "phpstan analyse src/Drove/Native experiments/native-phase-4-core/proof.php --no-progress --memory-limit=512M",
+                    "pint --test src/Drove/Native experiments/native-phase-4-core"
                 ],
                 "test:parallel": [
                     "php bin/pest --exclude-group=integration --parallel --processes=3"
@@ -3170,6 +3199,9 @@
                 }
             },
             "autoload": {
+                "files": [
+                    "src/functions.php"
+                ],
                 "psr-4": {
                     "Drove\\Laravel\\": "src/"
                 }

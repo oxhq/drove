@@ -135,6 +135,11 @@
             "phpstan analyse src/Drove/Native experiments/native-phase-3/proof.php experiments/native-phase-3/compare.php --no-progress --memory-limit=512M",
             "pint --test src/Drove/Native experiments/native-phase-3"
         ],
+        "test:native-phase-4-core": "php experiments/native-phase-4-core/proof.php",
+        "test:native-phase-4-core:static": [
+            "phpstan analyse src/Drove/Native experiments/native-phase-4-core/proof.php --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Native experiments/native-phase-4-core"
+        ],
         "test:parallel": "php bin/pest --exclude-group=integration --parallel --processes=3",
         "test:integration": "php bin/pest --group=integration -v",
         "update:snapshots": "REBUILD_SNAPSHOTS=true php bin/pest --update-snapshots",

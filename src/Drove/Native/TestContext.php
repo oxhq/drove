@@ -41,6 +41,11 @@ final class TestContext
         return $this->extensions->contextValue($owner, $field);
     }
 
+    public function app(): mixed
+    {
+        return $this->scope->app();
+    }
+
     public function assertWith(
         string $owner,
         string $matcher,

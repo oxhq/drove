@@ -27,12 +27,29 @@ Run from the repository root:
 docker build -f experiments/phase-3-laravel/Dockerfile -t drove-phase-three-laravel .
 docker run --rm drove-phase-three-laravel
 docker run --rm drove-phase-three-laravel php proof-state-capabilities.php
+docker run --rm drove-phase-three-laravel php proof-native-runtime.php
 docker run --rm drove-phase-three-laravel php proof-testbench-guards.php
 docker run --rm drove-phase-three-laravel php proof-testbench.php
 docker run --rm drove-phase-three-laravel php proof-data-provider.php
 ```
 
-This proves one file-backed SQLite default connection only. The configured
+The native proof uses an inherited SQLite `:memory:` connection without
+loading PHPUnit or Testbench. It proves state, package-discovery, provider,
+prepare-signature, fixed and custom config-cache, and hidden-bootstrap guards.
+It treats `bootstrap/app.php` and `config/*.php` as trusted executable project
+code, verifies declarative provider configuration before provider bootstrap,
+rejects an unapproved `config/app.php` provider after configuration load but
+before provider registration, invokes the prepare closure exactly once before
+the selected provider captures state, and boots twice in separate PHP
+processes so fresh isolated package and service manifests cannot poison a
+later run. The
+proof also keeps malicious fixed and custom cache sentinels cold, verifies
+their hashes remain unchanged, and leaves no temporary manifest behind. A
+separate-process proof repeats those checks for cache paths declared through
+`.env`. Direct cache-path mutation or manifest resolution from trusted
+`bootstrap/app.php` or `config/*.php` code is deliberately outside this claim.
+
+The default bridge proof covers one file-backed SQLite default connection only. The configured
 selected connection must equal Laravel's default. It does not prove queues,
 WAL, reflinks, multiple databases, Redis, HTTP resources, or production
 readiness. Explicit secondary writes may happen before cleanup rejects the

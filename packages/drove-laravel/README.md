@@ -46,7 +46,71 @@ $runtime = LaravelRuntime::boot($projectRoot);
 $context = $runtime->scopeContext();
 ```
 
-Core integration calls:
+Native Drove suites declare the application without a Laravel `TestCase`:
+
+```php
+use App\Providers\AppServiceProvider;
+use Drove\Laravel\DroveLaravelServiceProvider;
+use Illuminate\Foundation\Application;
+
+use function Drove\Laravel\laravel;
+
+laravel(
+    $projectRoot,
+    ['driver' => 'sqlite-memory', 'prepared_schema' => true],
+    [
+        AppServiceProvider::class,
+        DroveLaravelServiceProvider::class,
+    ],
+    static function (Application $app): void {
+        // Migrate or seed the prepared parent state exactly once.
+    },
+);
+```
+
+This path resolves `ApplicationRuntime` directly and does not enter the
+PHPUnit/Testbench bridge. State and the application-provider allowlist are
+mandatory data; `bootstrap/providers.php` must be the standard literal
+`Provider::class` list and is validated without execution before
+`bootstrap/app.php`. Native environments require a branchable,
+scope-isolated provider, so the transaction adapter remains bridge-only.
+
+Native projects must disable Composer package discovery explicitly:
+
+```json
+{
+    "extra": {
+        "laravel": {
+            "dont-discover": ["*"]
+        }
+    }
+}
+```
+
+Cached configuration is rejected, including a custom `APP_CONFIG_CACHE` path.
+For Laravel's normal declarative bootstrap, package and service manifests from
+fixed paths, process environment, or `.env` are not consumed. Drove gives
+Laravel fresh, per-boot temporary `APP_PACKAGES_CACHE` and
+`APP_SERVICES_CACHE` paths, validates those paths again immediately before
+provider registration, and removes both manifests after boot.
+
+`bootstrap/app.php` is trusted construction-only code. Drove cannot undo
+arbitrary I/O performed while that file is required. The returned application
+must still be unbootstrapped; Drove then verifies its
+`bootstrap/providers.php` path and any `withProviders()` additions against the
+allowlist before the console kernel or providers boot. Once Laravel has loaded
+configuration, Drove also compares `config('app.providers')` against Laravel's
+default providers plus the same allowlist immediately before
+`RegisterProviders`. `bootstrap/app.php` and PHP configuration files remain
+trusted executable project code. The allowlist closes Laravel's declarative
+bootstrap, configuration, package, and service-manifest channels; it cannot
+undo arbitrary I/O or direct `app()->register()` calls performed by trusted
+code. Trusted code can also mutate or resolve cache paths directly and cause
+side effects before Drove rejects the changed path; that behavior is outside
+the isolation guarantee. The optional prepare closure runs after Laravel boot
+and before the database provider captures its prepared state.
+
+Compatibility-bridge integration calls:
 
 ```php
 $runtime->assertPlanSupported($scopeIr);

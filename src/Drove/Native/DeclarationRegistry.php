@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drove\Native;
 
 use Closure;
+use Drove\Environment\EnvironmentRuntime;
 use Drove\Extension\ExtensionSet;
 use Drove\Extension\PlanView;
 use InvalidArgumentException;
@@ -62,6 +63,14 @@ final class DeclarationRegistry
 
     /** @var array<string, list<array{key: int|string, arguments: list<mixed>}>> */
     private array $materializedDatasets = [];
+
+    private ?Closure $environmentFactory = null;
+
+    private ?EnvironmentRuntime $environmentRuntime = null;
+
+    private ?string $environmentName = null;
+
+    private bool $environmentResolved = false;
 
     private bool $poisoned = false;
 
@@ -136,6 +145,28 @@ final class DeclarationRegistry
         }
 
         $this->datasets[$name] = $rows;
+    }
+
+    public function declareEnvironment(string $name, Closure $factory): void
+    {
+        $this->assertHealthy();
+        $this->assertMutable();
+
+        if (trim($name) === '') {
+            throw new InvalidArgumentException('A native environment requires a name.');
+        }
+
+        $this->assertNoParameters($factory, 'environment factory');
+
+        if ($this->environmentFactory instanceof Closure) {
+            throw new LogicException(sprintf(
+                'Native environment %s is already declared.',
+                $this->environmentName,
+            ));
+        }
+
+        $this->environmentName = $name;
+        $this->environmentFactory = $factory;
     }
 
     public function declareDescribe(
@@ -248,6 +279,37 @@ final class DeclarationRegistry
     public function extensions(): ExtensionSet
     {
         return $this->extensions;
+    }
+
+    public function resolveEnvironment(): ?EnvironmentRuntime
+    {
+        $this->assertHealthy();
+
+        if (! $this->frozen) {
+            throw new LogicException('The native environment may only resolve after planning.');
+        }
+
+        if (! $this->environmentFactory instanceof Closure) {
+            return null;
+        }
+
+        if ($this->environmentResolved) {
+            return $this->environmentRuntime;
+        }
+
+        $runtime = ($this->environmentFactory)();
+
+        if (! $runtime instanceof EnvironmentRuntime) {
+            throw new LogicException(sprintf(
+                'Native environment %s must resolve to an EnvironmentRuntime.',
+                $this->environmentName,
+            ));
+        }
+
+        $this->environmentRuntime = $runtime;
+        $this->environmentResolved = true;
+
+        return $runtime;
     }
 
     public function resolveTest(string $testId): Closure

@@ -11,6 +11,9 @@
         "dataset": [
             "dataset"
         ],
+        "environment": [
+            "environment"
+        ],
         "expectation": [
             "expect"
         ],
@@ -23,6 +26,7 @@
     },
     "methods": {
         "context": [
+            "app",
             "assertWith",
             "defer",
             "extensionValue"

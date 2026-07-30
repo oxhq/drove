@@ -117,7 +117,7 @@ $proofStartedNs = hrtime(true);
 $surface = SupportedSurface::load();
 $surfaceHash = $surface->hash();
 $assert(
-    $surfaceHash === '149be3d001a563b573254ad4db6825b45ae616850fb79751350a2fb21c488afc',
+    $surfaceHash === '32782524791372b99ee8ba27b0b5b66054a8e28759be48e50b5e78055f6bf96f',
     'The native supported-surface manifest changed without updating its conformance proof.',
 );
 $manifest = $surface->manifest();
@@ -125,9 +125,11 @@ $assert(
     ($manifest['functions'] ?? null) === [
         'declaration' => ['describe', 'it', 'test'],
         'dataset' => ['dataset'],
+        'environment' => ['environment'],
         'expectation' => ['expect'],
         'hook' => ['afterAll', 'afterEach', 'beforeAll', 'beforeEach'],
     ]
+        && ($manifest['methods']['context'] ?? null) === ['app', 'assertWith', 'defer', 'extensionValue']
         && ($manifest['methods']['declaration'] ?? null) === ['group', 'skip', 'timeout', 'todo', 'with']
         && ($manifest['methods']['expectation'] ?? null) === ['toBe', 'toEqual'],
     'The native supported-surface manifest claims an unproved declaration or expectation.',

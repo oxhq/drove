@@ -49,7 +49,7 @@ The following invariants apply to every feature declared supported:
 | 1. Native frontend vertical slice | **IMPLEMENTED — HOSTED GATE PENDING** | Local and Linux C1/C4 proofs pass; required artifacts have not yet been observed and accepted upstream |
 | 2. Typed extension front door | **IMPLEMENTED — HOSTED GATE PENDING** | Local Linux C1–C30 parity passes; required artifacts have not yet been observed and accepted upstream |
 | 3. Native DSL feature surface | **IMPLEMENTED — HOSTED GATE PENDING** | Local Drover C1–C30 parity and repeated 10,000-case C30 stress pass; required hosted artifact has not yet been observed upstream |
-| 4. Native Laravel prepared runtime | PENDING | Laravel fixture proves prepared boot and sibling resource isolation |
+| 4. Native Laravel prepared runtime | **IMPLEMENTED — HOSTED GATE PENDING** | Local Docker C1–C30 matrix, provider faults, preflight, and cleanup proofs pass; exact hosted artifact remains pending |
 | 5. Bounded one-fork execution | PENDING | Declared-concurrency topology, telemetry, reliability, and performance gates pass |
 | 6. Bridges and migration corpus | PENDING | Classified bridge parity ladder passes, ending with Filament |
 | 7. Public experimental release | PENDING | Installable artifacts, publication, coverage, and design-partner gates pass |
@@ -219,8 +219,11 @@ Deliverables:
 - Initial SQLite memory and SQLite copy providers. Any transactional SQL
   provider must advertise its weaker scope guarantees instead of masquerading
   as branchable state.
-- Preflight rejection for reconnects, traits, providers, or external resources
-  that invalidate the selected prepared-state guarantee.
+- Preflight rejection for declared incompatible traits, providers, and
+  resources, plus runtime rejection for reconnects the selected provider can
+  observe. `bootstrap/app.php` and `config/*.php` remain trusted executable
+  construction/configuration code; arbitrary I/O or direct provider
+  registration performed there is outside the isolation guarantee.
 
 Exit gates:
 

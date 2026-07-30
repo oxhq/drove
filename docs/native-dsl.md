@@ -52,6 +52,13 @@ shutdown.
 - inline `->with(iterable)` and named `dataset()` values;
 - `->group()`, `->skip()`, `->todo()`, and `->timeout()`.
 
+One optional `environment()` declaration may return a Drove
+`EnvironmentRuntime`. Its zero-argument factory resolves once after planning,
+before dispatch. Tests access the prepared application through
+`$this->app()`. Laravel projects should use the typed `Drove\Laravel\laravel()`
+frontend documented in
+[`packages/drove-laravel`](../packages/drove-laravel/README.md).
+
 Dataset cases receive stable suffixes:
 
 - integer key: `::dataset:index:N`;

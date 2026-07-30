@@ -31,6 +31,11 @@ function dataset(string $name, iterable|Closure $rows): void
     Declarations::current()->declareDataset($name, $rows);
 }
 
+function environment(string $name, Closure $factory): void
+{
+    Declarations::current()->declareEnvironment($name, $factory);
+}
+
 function describe(string $description, Closure $declarations): void
 {
     $location = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0] ?? [];

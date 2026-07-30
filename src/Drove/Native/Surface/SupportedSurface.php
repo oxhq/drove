@@ -127,6 +127,7 @@ final readonly class SupportedSurface implements JsonSerializable
             ...array_keys($expectations),
             ...array_keys($unsupportedFunctions),
             ...array_keys($this->names('functions', 'dataset')),
+            ...array_keys($this->names('functions', 'environment')),
             ...array_keys($this->names('functions', 'hook')),
         ], true);
         $namespaces = $this->namespaceContexts($tokens);
@@ -284,7 +285,7 @@ final readonly class SupportedSurface implements JsonSerializable
         $functions = $this->section('functions');
         $this->exactKeys(
             $functions,
-            ['dataset', 'declaration', 'expectation', 'hook'],
+            ['dataset', 'declaration', 'environment', 'expectation', 'hook'],
             'functions',
         );
 

@@ -27,6 +27,13 @@ final readonly class Runner
         $extensions = $declarations->extensions();
         $metricsToken = bin2hex(random_bytes(16));
         $plan = $declarations->plan($selection);
+        $environment = $declarations->resolveEnvironment();
+
+        if ($environment !== null) {
+            $environment->assertPlanSupported($plan);
+            $plan['environment'] = $environment->environmentPlan()->toArray();
+        }
+
         [$executionPlan, $synthetic, $order] = $this->executionPlan($plan);
         $run = new LifecycleExecutor(
             $this->scheduler,
@@ -42,7 +49,11 @@ final readonly class Runner
                     'runtime' => $context,
                 ];
             },
-        )->run($executionPlan);
+            beforeDispatch: $environment === null ? null : $environment->beforeDispatch(...),
+            enterDescendant: $environment === null ? null : $environment->enterDescendant(...),
+            leaveDescendant: $environment === null ? null : $environment->leaveDescendant(...),
+            afterDispatch: $environment === null ? null : $environment->afterDispatch(...),
+        )->run($executionPlan, $environment?->scopeContext());
 
         $byId = [];
 

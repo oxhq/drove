@@ -60,6 +60,7 @@
         "proof:data-provider": "php proof-data-provider.php",
         "proof:guards": "php proof-runtime-guards.php",
         "proof:mysql": "php proof-mysql.php",
+        "proof:native": "php proof-native-runtime.php",
         "proof:testbench-guards": "php proof-testbench-guards.php",
         "proof:testbench": "php proof-testbench.php"
     },
@@ -69,6 +70,13 @@
         },
         "preferred-install": "dist",
         "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "*"
+            ]
+        }
     },
     "minimum-stability": "dev",
     "prefer-stable": true

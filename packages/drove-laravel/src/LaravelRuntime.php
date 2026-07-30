@@ -4,19 +4,12 @@ declare(strict_types=1);
 
 namespace Drove\Laravel;
 
-use Drove\Environment\CoordinationGuarantee;
 use Drove\Environment\EnvironmentPlan;
 use Drove\Environment\EnvironmentRuntime;
-use Drove\Environment\ResourceKind;
-use Drove\Environment\ResourcePlan;
 use Drove\Kernel\ScopeContext;
 use Drove\Kernel\StateAdapterException;
 use Drove\Laravel\Contracts\DatabaseStateAdapter;
 use Drove\Laravel\State\AbstractDatabaseStateAdapter;
-use Drove\Laravel\State\InMemorySqliteDatabaseStateAdapter;
-use Drove\Laravel\State\SqliteCopyDatabaseStateAdapter;
-use Drove\Laravel\State\TransactionalDatabaseStateAdapter;
-use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as LaravelTestCase;
 use InvalidArgumentException;
@@ -27,7 +20,7 @@ use Throwable;
 
 final class LaravelRuntime implements EnvironmentRuntime
 {
-    public const string ROOT_PID_BINDING = 'drove.laravel.root_pid';
+    public const string ROOT_PID_BINDING = ApplicationRuntime::ROOT_PID_BINDING;
 
     /** @var list<string> */
     private const array RUNTIME_MODES = [
@@ -38,10 +31,6 @@ final class LaravelRuntime implements EnvironmentRuntime
 
     private static ?self $active = null;
 
-    private readonly ScopeContext $scope;
-
-    private readonly EnvironmentPlan $environment;
-
     /** @var resource|null */
     private mixed $testbenchDuskFileLock = null;
 
@@ -51,50 +40,9 @@ final class LaravelRuntime implements EnvironmentRuntime
 
     private function __construct(
         private readonly string $basePath,
-        private readonly Application $application,
-        private readonly DatabaseStateAdapter $state,
+        private readonly ApplicationRuntime $runtime,
         private readonly ?string $testbenchProfile = null,
-    ) {
-        $this->environment = new EnvironmentPlan(
-            [
-                $state->resourcePlan(),
-                new ResourcePlan(
-                    ResourceKind::Filesystem,
-                    null,
-                    [],
-                    ['Filesystem state is unmanaged in this alpha.'],
-                ),
-                new ResourcePlan(
-                    ResourceKind::Cache,
-                    null,
-                    [],
-                    ['Cache state is unmanaged in this alpha.'],
-                ),
-                new ResourcePlan(
-                    ResourceKind::Queue,
-                    null,
-                    [],
-                    ['Queue state is unmanaged in this alpha.'],
-                ),
-                new ResourcePlan(
-                    ResourceKind::ObjectStorage,
-                    null,
-                    [],
-                    ['Object-storage state is unmanaged in this alpha.'],
-                ),
-            ],
-            CoordinationGuarantee::BestEffort,
-        );
-        $this->scope = new ScopeContext(
-            application: $application,
-            values: ['drove.laravel.runtime' => $this],
-            metadata: [
-                'framework' => 'laravel',
-                'state_adapter' => $state->name(),
-                'environment_plan' => $this->environment->toArray(),
-            ],
-        );
-    }
+    ) {}
 
     /**
      * @param  array{driver?: mixed, connection?: mixed, prepared_schema?: mixed, workspace?: mixed}|DatabaseStateAdapter|null  $state
@@ -278,55 +226,46 @@ final class LaravelRuntime implements EnvironmentRuntime
         DatabaseStateAdapter|array|null $state,
         ?string $testbenchProfile = null,
     ): self {
-        if (! $application->hasBeenBootstrapped()) {
-            $kernel = $application->make(ConsoleKernel::class);
-            $kernel->bootstrap();
-        }
-
-        if (! $application->environment('testing')) {
-            throw new StateAdapterException(
-                'Drove Laravel requires the booted application environment to be testing.',
-            );
-        }
-
-        $state ??= $application->make('config')->get('drove.state');
-
-        if (is_array($state)) {
-            $state = self::resolveStateAdapter($state);
-        }
-
-        if (! $state instanceof DatabaseStateAdapter) {
-            throw new StateAdapterException(
-                'Drove Laravel requires a configured database state adapter.',
-            );
-        }
-
-        $state->boot($application);
-        $runtime = new self($basePath, $application, $state, $testbenchProfile);
+        $applicationRuntime = ApplicationRuntime::fromApplication(
+            $application,
+            $state,
+        );
+        $runtime = new self(
+            $basePath,
+            $applicationRuntime,
+            $testbenchProfile,
+        );
         $application->instance(self::class, $runtime);
-        $application->instance(self::ROOT_PID_BINDING, getmypid());
 
         return self::$active = $runtime;
     }
 
     public function application(): Application
     {
-        return $this->application;
+        return $this->runtime->application();
     }
 
     public function scopeContext(): ScopeContext
     {
-        return $this->scope;
+        return $this->runtime->scopeContext();
     }
 
     public function stateAdapter(): DatabaseStateAdapter
     {
-        return $this->state;
+        $state = $this->runtime->stateProvider();
+
+        if (! $state instanceof DatabaseStateAdapter) {
+            throw new StateAdapterException(
+                'The Laravel compatibility bridge requires a database state adapter.',
+            );
+        }
+
+        return $state;
     }
 
     public function environmentPlan(): EnvironmentPlan
     {
-        return $this->environment;
+        return $this->runtime->environmentPlan();
     }
 
     /**
@@ -334,7 +273,7 @@ final class LaravelRuntime implements EnvironmentRuntime
      */
     public function assertPlanSupported(array $suitePlan): void
     {
-        $this->environment->assertSuiteSupported($suitePlan);
+        $this->runtime->assertPlanSupported($suitePlan);
     }
 
     public function bindTestCase(TestCase $case, ScopeContext $scope): void
@@ -355,15 +294,15 @@ final class LaravelRuntime implements EnvironmentRuntime
         $property->setAccessible(true);
         $bound = $property->getValue($case);
 
-        if ($bound !== null && $bound !== $this->application) {
+        if ($bound !== null && $bound !== $this->application()) {
             throw new StateAdapterException(sprintf(
                 'Laravel TestCase %s is already bound to another application.',
                 $case::class,
             ));
         }
 
-        $property->setValue($case, $this->application);
-        $this->state->assertTestCaseSupported($case);
+        $property->setValue($case, $this->application());
+        $this->stateAdapter()->assertTestCaseSupported($case);
     }
 
     private function bindTestbenchTestCase(TestCase $case): void
@@ -374,10 +313,10 @@ final class LaravelRuntime implements EnvironmentRuntime
             );
         }
 
-        $this->state->assertTestCaseSupported($case);
+        $this->stateAdapter()->assertTestCaseSupported($case);
         TestbenchBridge::bind(
             $case,
-            $this->application,
+            $this->application(),
             $this->testbenchProfile,
         );
     }
@@ -387,9 +326,7 @@ final class LaravelRuntime implements EnvironmentRuntime
      */
     public function beforeDispatch(ScopeContext $scope, array $tasks): void
     {
-        $this->assertScope($scope);
-        $this->environment->assertDispatchSupported($tasks);
-        $this->state->beforeDispatch($scope, $tasks);
+        $this->runtime->beforeDispatch($scope, $tasks);
     }
 
     /**
@@ -401,7 +338,7 @@ final class LaravelRuntime implements EnvironmentRuntime
         $locked = $this->acquireTestbenchDuskFileLock($task);
 
         try {
-            $this->state->enterDescendant($scope, $task);
+            $this->runtime->enterDescendant($scope, $task);
         } catch (Throwable $throwable) {
             if ($locked) {
                 $this->releaseTestbenchDuskFileLock($task);
@@ -419,7 +356,7 @@ final class LaravelRuntime implements EnvironmentRuntime
         $this->assertScope($scope);
 
         try {
-            $this->state->leaveDescendant($scope, $task);
+            $this->runtime->leaveDescendant($scope, $task);
         } finally {
             $this->releaseTestbenchDuskFileLock($task);
         }
@@ -430,13 +367,12 @@ final class LaravelRuntime implements EnvironmentRuntime
      */
     public function afterDispatch(ScopeContext $scope, array $tasks): void
     {
-        $this->assertScope($scope);
-        $this->state->afterDispatch($scope, $tasks);
+        $this->runtime->afterDispatch($scope, $tasks);
     }
 
     private function assertScope(ScopeContext $scope): void
     {
-        if ($scope->app() !== $this->application) {
+        if ($scope->app() !== $this->application()) {
             throw new StateAdapterException(
                 'Drove Laravel received a scope from a different application.',
             );
@@ -449,7 +385,7 @@ final class LaravelRuntime implements EnvironmentRuntime
             if ($case instanceof LaravelTestCase
                 || ($case instanceof TestCase
                     && TestbenchBridge::isTestCase($case))) {
-                $this->state->assertTestCaseSupported($case);
+                $this->stateAdapter()->assertTestCaseSupported($case);
             }
         }
     }
@@ -471,7 +407,7 @@ final class LaravelRuntime implements EnvironmentRuntime
         }
 
         if (is_array($state)) {
-            $state = self::resolveStateAdapter($state);
+            $state = ApplicationRuntime::resolveState($state);
         }
 
         if (! $state instanceof AbstractDatabaseStateAdapter) {
@@ -583,64 +519,6 @@ final class LaravelRuntime implements EnvironmentRuntime
             && ($task['kind'] ?? null) === 'scope'
             && is_string($task['id'] ?? null)
             && str_starts_with($task['id'], 'file:');
-    }
-
-    /**
-     * @param  array{driver?: mixed, connection?: mixed, prepared_schema?: mixed, workspace?: mixed}  $configuration
-     */
-    private static function resolveStateAdapter(
-        array $configuration,
-    ): DatabaseStateAdapter {
-        $driver = $configuration['driver'] ?? null;
-        $connection = $configuration['connection'] ?? null;
-
-        if ($connection !== null && (! is_string($connection) || $connection === '')) {
-            throw new StateAdapterException(
-                'Drove Laravel state.connection must be a non-empty string or null.',
-            );
-        }
-
-        $preparedSchema = $configuration['prepared_schema'] ?? false;
-
-        if (! is_bool($preparedSchema)) {
-            throw new StateAdapterException(
-                'Drove Laravel state.prepared_schema must be a boolean.',
-            );
-        }
-
-        return match ($driver) {
-            'transaction' => new TransactionalDatabaseStateAdapter($connection),
-            'sqlite-memory' => new InMemorySqliteDatabaseStateAdapter(
-                $connection,
-                $preparedSchema,
-            ),
-            'sqlite-copy' => new SqliteCopyDatabaseStateAdapter(
-                $connection,
-                self::workspace($configuration['workspace'] ?? null),
-                $preparedSchema,
-            ),
-            default => throw new StateAdapterException(sprintf(
-                'Drove Laravel requires DROVE_LARAVEL_STATE=transaction, sqlite-memory, or sqlite-copy; received %s.',
-                is_scalar($driver) && (string) $driver !== ''
-                    ? (string) $driver
-                    : get_debug_type($driver),
-            )),
-        };
-    }
-
-    private static function workspace(mixed $workspace): ?string
-    {
-        if ($workspace === null || $workspace === '') {
-            return null;
-        }
-
-        if (! is_string($workspace)) {
-            throw new StateAdapterException(
-                'Drove Laravel state.workspace must be a path string.',
-            );
-        }
-
-        return $workspace;
     }
 
     private static function assertRuntimeRequirements(): void
