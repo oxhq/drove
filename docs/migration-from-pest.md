@@ -4,11 +4,14 @@ Drove keeps a deliberately small Pest surface while Drove owns scope planning,
 scope lifecycle, native scheduling, result aggregation, and rendering. The
 technical evaluation [GitHub release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2),
 [Packagist package](https://packagist.org/packages/oxhq/drove), and
-[hosted workflows](https://github.com/oxhq/drove/actions) become authorities
-for the exact `v0.4.0-alpha.2` artifacts only after those artifacts exist and
-their technical gates pass. This release intentionally precedes external
-validation; evidence collected with it gates candidate `v0.4.0-alpha.3`.
-Source documentation alone is not publication proof.
+[hosted workflows](https://github.com/oxhq/drove/actions) are the live
+authorities for the exact `v0.4.0-alpha.2` artifacts.
+[Native release #30588903021](https://github.com/oxhq/drove/actions/runs/30588903021)
+published the four native targets, and
+[Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
+resolved both tagged packages from Packagist on all four targets. This release
+intentionally precedes external validation; evidence collected with it gates
+candidate `v0.4.0-alpha.3`.
 
 ## Install
 

@@ -20,7 +20,7 @@ compatible plugin surface installable during the extraction.
 | --- | --- |
 | `oxhq/drove` | [Packagist](https://packagist.org/packages/oxhq/drove) |
 | `oxhq/drove-laravel` | [Packagist](https://packagist.org/packages/oxhq/drove-laravel) |
-| Linux and macOS native archives | [GitHub Releases](https://github.com/oxhq/drove/releases) |
+| Linux and macOS native archives | [`v0.4.0-alpha.2` release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) |
 | Hosted external corpus | [External Corpus workflow](https://github.com/oxhq/drove/actions/workflows/corpus.yml) |
 | External design partners | [`docs/design-partner-validation.md`](docs/design-partner-validation.md) |
 
@@ -53,6 +53,10 @@ vendor/bin/drove-install-native
 vendor/bin/drove --version
 vendor/bin/drove --compatibility
 ```
+
+The [published-package gate #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
+resolved both tagged packages from Packagist and passed on Linux and macOS,
+x86_64 and ARM64.
 
 The native install does not install or trust Pest, PHPUnit, ParaTest,
 Collision, Termwind, Symfony Process, or the Pest Composer plugin.
@@ -155,8 +159,8 @@ The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
 Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
 nonserial cohort at 1, 2, 4, 8, 16, and 30 Drove processes plus its 28-case
-filesystem-sensitive cohort at 1. The exact-SHA full ladder is accepted in
-[GitHub Actions #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071);
+filesystem-sensitive cohort at 1. The release-SHA full ladder is accepted in
+[External Corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130);
 the stored
 [compatibility benchmark](benchmarks/results/2026-07-30-corpus-2146dd4b.md)
 retains requested/observed lanes, counts, milliseconds, and memory sources as a
