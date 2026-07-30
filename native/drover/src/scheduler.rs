@@ -2670,6 +2670,16 @@ impl Scheduler {
 
             if active_ready {
                 ready.push(pid);
+
+                if self.interrupted_signal.is_none()
+                    && self
+                        .active
+                        .get(&pid)
+                        .is_some_and(ActiveTask::owns_task_permits)
+                    && self.active.values().any(ActiveTask::armed)
+                {
+                    break;
+                }
             }
         }
 
@@ -4955,6 +4965,89 @@ mod tests {
         assert_eq!(scheduler.max_active(), 1);
         assert!(scheduler.pending.is_empty());
         scheduler.cancel().unwrap();
+    }
+
+    #[test]
+    fn stops_collection_for_prearmed_refill_without_serializing_interruption_cleanup() {
+        let engine = Engine::new(
+            "bounded-collection-run".into(),
+            3,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(8).unwrap();
+        let global = [GLOBAL_POOL.into()];
+
+        for _ in 0..3 {
+            assert!(scheduler.registry.try_acquire(&global).unwrap());
+        }
+        assert!(scheduler.registry.try_acquire_armed().unwrap());
+
+        let task = |ordinal, id: &str| Task {
+            ordinal,
+            id: id.into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 0,
+            permit_names: global.to_vec(),
+        };
+        for (ordinal, pid) in [(0, 41), (1, 42), (2, 44)] {
+            let mut active = ActiveTask::new(
+                task(ordinal, &format!("task:ready-{ordinal}")),
+                pid,
+                pid,
+                -1,
+                0,
+                "bounded-collection-run",
+                false,
+            );
+            active.mark_started(1, true);
+            active.exited = true;
+            active.reaped = true;
+            active.wait_status = Some(0);
+            active.eof = true;
+            active.kill_ns = Some(1);
+            scheduler.active.insert(pid, active);
+        }
+
+        let mut armed = ActiveTask::new(
+            task(3, "task:armed"),
+            43,
+            43,
+            -1,
+            0,
+            "bounded-collection-run",
+            false,
+        );
+        armed.mark_armed_permit_acquired();
+        scheduler.active.insert(43, armed);
+
+        scheduler.collect().unwrap();
+
+        assert_eq!(scheduler.completed.len(), 1);
+        assert!(scheduler.active.contains_key(&42));
+        assert!(scheduler.active.contains_key(&44));
+        assert!(scheduler.active.get(&43).is_some_and(ActiveTask::armed));
+
+        scheduler.interrupted_signal = Some(libc::SIGINT);
+        scheduler.collect().unwrap();
+
+        assert_eq!(scheduler.completed.len(), 3);
+        assert!(!scheduler.active.contains_key(&42));
+        assert!(!scheduler.active.contains_key(&44));
+        scheduler.interrupted_signal = None;
+        scheduler.active.remove(&43);
+        scheduler.release_armed_permit().unwrap();
+        scheduler.completed.clear();
+
+        for _ in 0..3 {
+            assert!(scheduler.registry.try_acquire(&global).unwrap());
+        }
+        assert!(!scheduler.registry.try_acquire(&global).unwrap());
+        for _ in 0..3 {
+            scheduler.registry.release(&global).unwrap();
+        }
     }
 
     #[test]
