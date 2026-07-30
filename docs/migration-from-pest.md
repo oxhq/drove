@@ -70,13 +70,54 @@ php bin/drove --pest --testsuite=Feature
 ```
 
 When this checkout is installed into a disposable project through a Composer
-path repository, invoke `vendor/bin/drove --pest` and point `DROVER_LIBRARY` at the
-library built from this checkout. The package is named `oxhq/drove` and
+path repository, invoke `vendor/bin/drove --pest` and point `DROVER_LIBRARY` at
+the library built from this checkout. The package is named `oxhq/drove` and
 declares that it replaces Pest 5.0.1 for plugin compatibility.
 
-Keep `vendor/bin/pest` in CI while evaluating the alpha. Run both commands
-against the same selected suite and treat a semantic difference as a
-compatibility bug.
+### Compare against an honest baseline
+
+`oxhq/drove` replaces `pestphp/pest` in Composer, and Drove's packaged
+`vendor/bin/pest` is a compatibility alias. It is not an independent Pest
+baseline. Run Pest and Drove from separate clean worktrees or containers bound
+to the same project revision and selected case IDs. Preserve the original
+Pest `composer.json` and lock for the baseline; install Drove only in the
+evaluation checkout. A semantic or assertion difference is a compatibility
+bug.
+
+### Troubleshoot an installation
+
+```bash
+composer show oxhq/drove
+php -r 'foreach (["ffi", "pcntl", "posix", "openssl", "Phar", "zlib"] as $extension) { printf("%s=%s\n", $extension, extension_loaded($extension) ? "yes" : "no"); }'
+php -r 'printf("ffi.enable=%s\n", ini_get("ffi.enable"));'
+vendor/bin/drove --version
+vendor/bin/drove --compatibility
+```
+
+FFI must be enabled for the CLI that runs Drove. GNU/Linux must use glibc
+2.31+; Windows and musl are unsupported. If `DROVER_LIBRARY` is set, verify
+that it names the library built for the current OS and architecture, or unset
+it and rerun `vendor/bin/drove-install-native`. Preserve a failing run with
+`--replay=/private/path/run.json`; replay artifacts omit test output and use
+private permissions, but should still be reviewed before sharing.
+
+### Roll back to Pest
+
+The safest rollback is restoring the pre-evaluation Composer files from the
+project's own version control and reinstalling them:
+
+```bash
+git restore -- composer.json composer.lock
+composer install
+vendor/bin/pest --version
+```
+
+Alternatively, remove `oxhq/drove-laravel` when installed, remove
+`oxhq/drove`, and require the project's intended Pest version with dependency
+updates. Remove Drove-only CI commands, `DROVE_*` variables, and native
+extension manifests. `drove-install-native` writes only inside the installed
+Drove package, so removing that package removes its downloaded library; unset
+an external `DROVER_LIBRARY` separately.
 
 ## Declared compatibility
 

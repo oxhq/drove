@@ -92,6 +92,10 @@ Laravel/Testbench users will also install the matching alpha:
 composer require --dev oxhq/drove-laravel:^0.4@alpha
 ```
 
+Drove's packaged `vendor/bin/pest` is a bridge alias, not an independent Pest
+baseline. Use separate dependency trees for comparisons. See the
+[migration, troubleshooting, and rollback guide](docs/migration-from-pest.md).
+
 ## Run the compatibility gate
 
 Docker is the reproducible path in a tagged source checkout. The Composer
