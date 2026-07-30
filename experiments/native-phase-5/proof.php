@@ -525,6 +525,10 @@ try {
                     $bodyIntervals,
                     $processes,
                 ),
+                'scheduler_steady_state_idle_lane_ratio' => nativePhaseFiveSteadyStateIdleRatio(
+                    $bodyIntervals,
+                    $processes,
+                ),
                 'queue_wait_ms' => [
                     'total' => round(array_sum($queueWaitMs), 3),
                     'median' => round(nativePhaseFiveMedian($queueWaitMs), 3),

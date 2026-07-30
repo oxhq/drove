@@ -262,6 +262,58 @@ function nativePhaseFiveIdleRatio(array $intervals, int $processes): float
 }
 
 /**
+ * @param  list<array{started_ns: int, finished_ns: int}>  $intervals
+ */
+function nativePhaseFiveSteadyStateIdleRatio(array $intervals, int $processes): float
+{
+    nativePhaseFiveAssert(
+        $processes > 0 && count($intervals) >= 2 * $processes,
+        'Steady-state idle measurement requires at least two full process waves.',
+    );
+    $starts = [];
+    $finishes = [];
+
+    foreach ($intervals as $interval) {
+        nativePhaseFiveAssert(
+            $interval['finished_ns'] >= $interval['started_ns'],
+            'Steady-state idle measurement received an invalid interval.',
+        );
+        $starts[] = $interval['started_ns'];
+        $finishes[] = $interval['finished_ns'];
+    }
+
+    nativePhaseFiveAssert(
+        nativePhaseFivePeakConcurrency($intervals) <= $processes,
+        'Steady-state idle measurement exceeded declared process capacity.',
+    );
+    sort($starts, SORT_NUMERIC);
+    sort($finishes, SORT_NUMERIC);
+    $first = $starts[$processes - 1];
+    $last = $finishes[count($intervals) - $processes];
+    nativePhaseFiveAssert(
+        $last > $first,
+        'Steady-state idle measurement has no valid full-width window.',
+    );
+    $capacity = ($last - $first) * $processes;
+    $busy = 0;
+
+    foreach ($intervals as $interval) {
+        $busy += max(
+            0,
+            min($last, $interval['finished_ns'])
+                - max($first, $interval['started_ns']),
+        );
+    }
+
+    nativePhaseFiveAssert(
+        $busy <= $capacity,
+        'Steady-state idle measurement exceeded available process capacity.',
+    );
+
+    return round(max(0.0, 1.0 - ($busy / $capacity)), 6);
+}
+
+/**
  * @param  list<int|float>  $values
  */
 function nativePhaseFiveMedian(array $values): float

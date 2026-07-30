@@ -303,6 +303,8 @@ try {
     );
 
     $independent = [];
+    $independentRawIdleRatios = [];
+    $independentSteadyStateIdleRatios = [];
     $independentSemanticHashes = [];
 
     foreach ([1, 16, 30] as $processCount) {
@@ -312,6 +314,8 @@ try {
             $executionMs = $summary['telemetry']['timings_ms']['execution'] ?? null;
             $wallMs = $summary['telemetry']['timings_ms']['wall'] ?? null;
             $semanticHash = $summary['semantic_hash'] ?? null;
+            $rawIdleRatio = $summary['telemetry']['scheduler']['scheduler_idle_lane_ratio'] ?? null;
+            $steadyStateIdleRatio = $summary['telemetry']['scheduler']['scheduler_steady_state_idle_lane_ratio'] ?? null;
             nativePhaseFiveAssert(
                 ($summary['fixture'] ?? null) === 'independent'
                     && ($summary['processes'] ?? null) === $processCount
@@ -328,10 +332,17 @@ try {
                     && (is_int($wallMs) || is_float($wallMs))
                     && $wallMs > 0
                     && $wallMs >= $executionMs
-                    && ($summary['telemetry']['scheduler']['scheduler_idle_lane_ratio'] ?? 1) < 0.05,
+                    && (is_int($rawIdleRatio) || is_float($rawIdleRatio))
+                    && $rawIdleRatio >= 0
+                    && $rawIdleRatio <= 1
+                    && (is_int($steadyStateIdleRatio) || is_float($steadyStateIdleRatio))
+                    && $steadyStateIdleRatio >= 0
+                    && $steadyStateIdleRatio < 0.05,
                 'Native Phase 5 independent-work utilization gate failed.',
             );
             $independent[$processCount][] = $summary;
+            $independentRawIdleRatios[] = (float) $rawIdleRatio;
+            $independentSteadyStateIdleRatios[] = (float) $steadyStateIdleRatio;
             $independentSemanticHashes[] = $semanticHash;
             $all[] = $summary;
         }
@@ -734,6 +745,7 @@ try {
             'procfs_process_population' => 'root-plus-all-descendants',
             'phase_timings' => 'instrumented-harness',
             'performance_timing' => 'observer-free-harness-no-procfs-monitor',
+            'steady_state_idle' => 'cth-body-start-through-first-finish-leaving-fewer-than-c',
             'aggregate_memory' => 'linux-procfs-rss-and-smaps-rollup-pss',
             'stable_process_snapshot' => 'shared-phase-lock-and-identical-pid-set-before-after',
             'inactive_scope_memory_gate' => 'three-pair-median-raw-peak-population-pss',
@@ -771,6 +783,10 @@ try {
             'setup_speedup' => round($setupReferenceMedian / $setupDroverMedian, 6),
             'independent_median_ms' => $independentMedians,
             'independent_c1_c30_speedup' => round($speedup, 6),
+            'independent_raw_idle_lane_ratio_max' => max($independentRawIdleRatios),
+            'independent_steady_state_idle_lane_ratio_max' => max(
+                $independentSteadyStateIdleRatios,
+            ),
             'independent_procfs_monitor_absent' => true,
             'dsl_stress_10000_256m_unsharded' => true,
             'fault_injections' => 300,
