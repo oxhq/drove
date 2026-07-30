@@ -24,6 +24,9 @@
         "orchestra/testbench": "Required only for package suites; tested with ^11.1."
     },
     "autoload": {
+        "files": [
+            "src/functions.php"
+        ],
         "psr-4": {
             "Drove\\Laravel\\": "src/"
         }

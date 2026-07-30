@@ -88,7 +88,7 @@ function droveNativeReleaseVersion(?string $configured): string
     if (! is_string($version)
         || preg_match('/^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/D', $version) !== 1) {
         throw new RuntimeException(
-            'Drove could not determine a release tag. Pass --version=v0.4.0-alpha.1.',
+            'Drove could not determine a release tag. Pass --version=v0.4.0-alpha.2.',
         );
     }
 
@@ -147,12 +147,12 @@ function droveNativeOpenHttps(string $url, int $redirects = 5)
     $location = null;
 
     foreach (is_array($headers) ? $headers : [] as $header) {
-        if (preg_match('/^HTTP\/\S+\s+([0-9]{3})\b/i', $header, $matches) === 1) {
+        if (preg_match('/^HTTP\/\S+\s+([0-9]{3})\b/i', (string) $header, $matches) === 1) {
             $status = (int) $matches[1];
         }
 
-        if (str_starts_with(strtolower($header), 'location:')) {
-            $location = trim(substr($header, strlen('location:')));
+        if (str_starts_with(strtolower((string) $header), 'location:')) {
+            $location = trim(substr((string) $header, strlen('location:')));
         }
     }
 
@@ -287,7 +287,7 @@ try {
 Install the native Drover library for this Composer package.
 
 Usage:
-  drove-install-native [--version=v0.4.0-alpha.1] [--base-url=https://...]
+  drove-install-native [--version=v0.4.0-alpha.2] [--base-url=https://...]
 
 The installer accepts only HTTPS downloads and verifies the release archive's
 SHA-256 checksum before atomically replacing the package-local library.

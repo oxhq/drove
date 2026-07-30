@@ -45,6 +45,17 @@ final class DroverScheduler implements Scheduler
             char message[256];
         } DroverAction;
 
+        typedef struct {
+            uint32_t schema;
+            uint64_t forks;
+            uint64_t scope_workers;
+            uint64_t executor_workers;
+            uint64_t process_anchors;
+            uint32_t peak_live_pids;
+            uint32_t peak_outstanding_tasks;
+            uint32_t outstanding_task_limit;
+        } DroverTopology;
+
         uint32_t drover_protocol_version(void);
         size_t drover_protocol_max_frame_bytes(void);
         void *drover_engine_new(
@@ -56,6 +67,8 @@ final class DroverScheduler implements Scheduler
         int32_t drover_engine_acquire(void *engine, const char *scopes_json);
         int32_t drover_engine_release(void *engine, const char *scopes_json);
         int32_t drover_engine_release_all(void *engine);
+        size_t drover_engine_error_len(void *engine);
+        int32_t drover_engine_copy_error(void *engine, char *destination, size_t capacity);
         void drover_engine_free(void *engine);
         void *drover_map_new(void *engine, uint32_t queue_capacity);
         int32_t drover_map_submit(
@@ -69,10 +82,13 @@ final class DroverScheduler implements Scheduler
         );
         int32_t drover_map_step(void *map, DroverAction *action);
         int32_t drover_map_interrupt(void *map, int32_t signal);
-        void drover_map_cancel(void *map);
+        int32_t drover_map_cancel(void *map);
+        size_t drover_map_cancel_error_len(void *map);
+        int32_t drover_map_copy_cancel_error(void *map, char *destination, size_t capacity);
         size_t drover_map_last_result_len(void *map);
         int32_t drover_map_copy_last_result(void *map, char *destination, size_t capacity);
         uint32_t drover_map_max_active(void *map);
+        int32_t drover_map_topology(void *map, DroverTopology *topology);
         void drover_map_free(void *map);
         void drover_child_exit(int32_t status);
     C;
@@ -94,12 +110,28 @@ final class DroverScheduler implements Scheduler
 
     private bool $freed = false;
 
+    private bool $cancellationRequested = false;
+
+    /**
+     * @var array{
+     *     schema: int,
+     *     forks: int,
+     *     scope_workers: int,
+     *     executor_workers: int,
+     *     process_anchors: int,
+     *     peak_live_pids: int,
+     *     peak_outstanding_tasks: int,
+     *     outstanding_task_limit: int
+     * }
+     */
+    private array $topologyTelemetry;
+
     /**
      * @param  array<string, mixed>  $scopeConcurrency
      */
     public function __construct(
         private readonly string $runId,
-        int $concurrency,
+        private readonly int $concurrency,
         array $scopeConcurrency = [],
         private readonly int $defaultTimeoutMs = 1_000,
         int $termGraceMs = 50,
@@ -159,6 +191,7 @@ final class DroverScheduler implements Scheduler
         }
 
         $this->protocol = new ChildProtocol($runId);
+        $this->topologyTelemetry = $this->emptyTopologyTelemetry();
     }
 
     public function __destruct()
@@ -168,11 +201,11 @@ final class DroverScheduler implements Scheduler
         }
 
         try {
-            $this->terminateActiveMaps();
-            $this->releaseHeldPermits();
+            $this->cancelActiveMapsBestEffort('scheduler destruction');
+            $this->releaseHeldPermitsBestEffort('scheduler destruction');
             $this->ffi->drover_engine_free($this->engine);
-        } catch (Throwable) {
-            //
+        } catch (Throwable $throwable) {
+            $this->reportBestEffortCleanupFailure('scheduler destruction', $throwable);
         }
 
         $this->freed = true;
@@ -183,33 +216,103 @@ final class DroverScheduler implements Scheduler
         return $this->runId;
     }
 
+    public function concurrency(): int
+    {
+        return $this->concurrency;
+    }
+
+    /**
+     * Requests cancellation at the next safe PHP/native boundary.
+     */
+    public function requestCancellation(): void
+    {
+        if ($this->activeMaps !== []) {
+            $this->cancellationRequested = true;
+        }
+    }
+
+    /**
+     * Returns process-local counters accumulated across maps executed by this scheduler.
+     *
+     * @return array{
+     *     schema: int,
+     *     forks: int,
+     *     scope_workers: int,
+     *     executor_workers: int,
+     *     process_anchors: int,
+     *     peak_live_pids: int,
+     *     peak_outstanding_tasks: int,
+     *     outstanding_task_limit: int
+     * }
+     */
+    public function topologyTelemetry(): array
+    {
+        return $this->topologyTelemetry;
+    }
+
     /**
      * @param  list<array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms?: int, permit?: bool}>  $tasks
-     * @return array{results: list<array<string, mixed>>, completion_order: list<string>}
+     * @return array{
+     *     results: list<array<string, mixed>>,
+     *     completion_order: list<string>,
+     *     telemetry: array{
+     *         topology: array{
+     *             schema: int,
+     *             forks: int,
+     *             scope_workers: int,
+     *             executor_workers: int,
+     *             process_anchors: int,
+     *             peak_live_pids: int,
+     *             peak_outstanding_tasks: int,
+     *             outstanding_task_limit: int
+     *         }
+     *     }
+     * }
      */
     public function map(array $tasks, Closure $execute): array
     {
         if ($tasks === []) {
-            return ['results' => [], 'completion_order' => []];
+            return [
+                'results' => [],
+                'completion_order' => [],
+                'telemetry' => ['topology' => $this->emptyTopologyTelemetry()],
+            ];
         }
 
         $this->assertWaitableChildren();
         $normalized = [];
+        $taskIds = [];
 
         foreach ($tasks as $ordinal => $task) {
-            $normalized[$ordinal] = $this->normalizeTask($task, $ordinal);
+            $normalizedTask = $this->normalizeTask($task, $ordinal);
+
+            if (isset($taskIds[$normalizedTask['id']])) {
+                throw new InvalidArgumentException(sprintf(
+                    'Drove received duplicate process task ID %s.',
+                    $normalizedTask['id'],
+                ));
+            }
+
+            $normalized[$ordinal] = $normalizedTask;
+            $taskIds[$normalizedTask['id']] = true;
         }
 
-        $map = $this->ffi->drover_map_new($this->engine, count($normalized));
+        unset($taskIds);
+        $outstandingLimit = 2 * $this->concurrency;
+        $map = $this->ffi->drover_map_new($this->engine, $outstandingLimit);
 
         if (\FFI::isNull($map)) {
             throw new RuntimeException('Unable to initialize a native Drover task map.');
         }
 
         $mapId = $this->nextMapId++;
+        $this->cancellationRequested = false;
         $this->activeMaps[$mapId] = $map;
         $results = [];
         $completionOrder = [];
+        $nextOrdinal = 0;
+        $outstanding = 0;
+        $peakOutstanding = 0;
         $interruptedSignal = null;
         $interruptionSent = false;
         $previousAsyncSignals = pcntl_async_signals(false);
@@ -229,26 +332,21 @@ final class DroverScheduler implements Scheduler
         pcntl_async_signals(true);
 
         try {
-            foreach ($normalized as $ordinal => $task) {
-                $submitted = $this->ffi->drover_map_submit(
-                    $map,
-                    $task['id'],
-                    $task['kind'],
-                    $task['scope_id'],
-                    $this->encodeScopes($task['scopes']),
-                    $task['timeout_ms'],
-                    $task['permit'] ? 1 : 0,
-                );
-
-                if ($submitted !== $ordinal) {
-                    throw new RuntimeException(sprintf('Drover rejected process task %s.', $task['id']));
-                }
-            }
-
             $action = $this->ffi->new('DroverAction');
 
             while (true) {
                 if ($interruptedSignal !== null && ! $interruptionSent) {
+                    $counter = count($normalized);
+                    for ($ordinal = $nextOrdinal; $ordinal < $counter; $ordinal++) {
+                        $task = $normalized[$ordinal];
+                        $results[$task['ordinal']] = $this->interruptedPendingResult(
+                            $task,
+                            $interruptedSignal,
+                        );
+                    }
+
+                    $nextOrdinal = count($normalized);
+
                     if ($this->ffi->drover_map_interrupt($map, $interruptedSignal) !== 0) {
                         throw new RuntimeException('Drover could not interrupt its active task map.');
                     }
@@ -256,7 +354,39 @@ final class DroverScheduler implements Scheduler
                     $interruptionSent = true;
                 }
 
+                while (! $interruptionSent
+                    && $nextOrdinal < count($normalized)
+                    && $outstanding < $outstandingLimit) {
+                    $task = $normalized[$nextOrdinal];
+                    $submitted = $this->ffi->drover_map_submit(
+                        $map,
+                        $task['id'],
+                        $task['kind'],
+                        $task['scope_id'],
+                        $this->encodeScopes($task['scopes']),
+                        $task['timeout_ms'],
+                        $task['permit'] ? 1 : 0,
+                    );
+
+                    if ($submitted !== $nextOrdinal) {
+                        throw new RuntimeException(sprintf('Drover rejected process task %s.', $task['id']));
+                    }
+
+                    $nextOrdinal++;
+                    $outstanding++;
+                    $peakOutstanding = max($peakOutstanding, $outstanding);
+                }
+
+                if ($this->consumeCancellationRequest()) {
+                    throw new RuntimeException('Drove explicit cancellation requested.');
+                }
+
                 $role = $this->ffi->drover_map_step($map, \FFI::addr($action));
+                pcntl_signal_dispatch();
+
+                if ($this->consumeCancellationRequest()) {
+                    throw new RuntimeException('Drove explicit cancellation requested.');
+                }
 
                 if ($role === self::ROLE_PROGRESS) {
                     continue;
@@ -275,8 +405,13 @@ final class DroverScheduler implements Scheduler
                 }
 
                 if ($role === self::ROLE_RESULT) {
+                    if ($outstanding < 1) {
+                        throw new RuntimeException('Drover returned a result without an outstanding task.');
+                    }
+
                     $result = $this->copyResult($map);
                     $results[$result['ordinal']] = $result;
+                    $outstanding--;
 
                     if (($result['telemetry']['pid'] ?? null) !== null) {
                         $completionOrder[] = $result['id'];
@@ -286,6 +421,10 @@ final class DroverScheduler implements Scheduler
                 }
 
                 if ($role === self::ROLE_DONE) {
+                    if ($nextOrdinal !== count($normalized) || $outstanding !== 0) {
+                        throw new RuntimeException('Drover ended before every submitted task reached a terminal result.');
+                    }
+
                     break;
                 }
 
@@ -298,12 +437,38 @@ final class DroverScheduler implements Scheduler
                 throw new RuntimeException('Drover returned an unknown scheduler role.');
             }
 
+            if (count($results) !== count($normalized)) {
+                throw new RuntimeException('Drover did not return exactly one result per process task.');
+            }
+
+            $topology = $this->copyTopology($map);
+
+            if ($topology['peak_outstanding_tasks'] !== $peakOutstanding
+                || $topology['peak_outstanding_tasks'] > $outstandingLimit
+                || $topology['outstanding_task_limit'] !== $outstandingLimit) {
+                throw new RuntimeException('Drover reported inconsistent outstanding-task topology.');
+            }
+
+            $this->mergeTopologyTelemetry($topology);
             ksort($results);
 
             return [
                 'results' => array_values($results),
                 'completion_order' => $completionOrder,
+                'telemetry' => ['topology' => $topology],
             ];
+        } catch (Throwable $throwable) {
+            try {
+                $this->cancelActiveMaps();
+            } catch (Throwable $cancellation) {
+                throw new RuntimeException(
+                    $cancellation->getMessage().' Original map failure: '.$throwable->getMessage(),
+                    0,
+                    $throwable,
+                );
+            }
+
+            throw $throwable;
         } finally {
             pcntl_async_signals(false);
 
@@ -312,6 +477,7 @@ final class DroverScheduler implements Scheduler
             }
 
             pcntl_async_signals($previousAsyncSignals);
+            $this->cancellationRequested = false;
             unset($this->activeMaps[$mapId]);
             $this->ffi->drover_map_free($map);
         }
@@ -325,14 +491,18 @@ final class DroverScheduler implements Scheduler
         $encoded = $this->encodeScopes($scopes);
 
         if ($this->ffi->drover_engine_acquire($this->engine, $encoded) !== 0) {
-            throw new RuntimeException('Drover could not acquire lifecycle permits.');
+            throw new RuntimeException(
+                'Drover could not acquire lifecycle permits: '.$this->copyEngineError(),
+            );
         }
 
         try {
             return $work();
         } finally {
             if ($this->ffi->drover_engine_release($this->engine, $encoded) !== 0) {
-                throw new RuntimeException('Drover could not release lifecycle permits.');
+                throw new RuntimeException(
+                    'Drover could not release lifecycle permits: '.$this->copyEngineError(),
+                );
             }
         }
     }
@@ -424,8 +594,8 @@ final class DroverScheduler implements Scheduler
                 return;
             }
 
-            $this->terminateActiveMaps();
-            $this->releaseHeldPermits();
+            $this->cancelActiveMapsBestEffort('fatal child shutdown');
+            $this->releaseHeldPermitsBestEffort('fatal child shutdown');
             $error = error_get_last();
 
             if (! is_array($error) || ! in_array($error['type'], [
@@ -529,7 +699,7 @@ final class DroverScheduler implements Scheduler
         }
 
         $report->finished = true;
-        $this->releaseHeldPermits();
+        $this->releaseHeldPermitsBestEffort('completed child shutdown');
         fclose($socket);
 
         $this->childExit($status === 'passed' ? 0 : 1);
@@ -544,8 +714,8 @@ final class DroverScheduler implements Scheduler
 
     private function exitInterruptedChild(int $signal): never
     {
-        $this->terminateActiveMaps();
-        $this->releaseHeldPermits();
+        $this->cancelActiveMapsBestEffort('interrupted child shutdown');
+        $this->releaseHeldPermitsBestEffort('interrupted child shutdown');
 
         $this->childExit(128 + $signal);
     }
@@ -578,6 +748,134 @@ final class DroverScheduler implements Scheduler
     }
 
     /**
+     * @param  CData  $map
+     * @return array{
+     *     schema: int,
+     *     forks: int,
+     *     scope_workers: int,
+     *     executor_workers: int,
+     *     process_anchors: int,
+     *     peak_live_pids: int,
+     *     peak_outstanding_tasks: int,
+     *     outstanding_task_limit: int
+     * }
+     */
+    private function copyTopology(mixed $map): array
+    {
+        $topology = $this->ffi->new('DroverTopology');
+
+        if ($this->ffi->drover_map_topology($map, \FFI::addr($topology)) !== 0) {
+            throw new RuntimeException('Drover could not copy its process topology.');
+        }
+
+        return [
+            'schema' => (int) $topology->schema,
+            'forks' => (int) $topology->forks,
+            'scope_workers' => (int) $topology->scope_workers,
+            'executor_workers' => (int) $topology->executor_workers,
+            'process_anchors' => (int) $topology->process_anchors,
+            'peak_live_pids' => (int) $topology->peak_live_pids,
+            'peak_outstanding_tasks' => (int) $topology->peak_outstanding_tasks,
+            'outstanding_task_limit' => (int) $topology->outstanding_task_limit,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     schema: int,
+     *     forks: int,
+     *     scope_workers: int,
+     *     executor_workers: int,
+     *     process_anchors: int,
+     *     peak_live_pids: int,
+     *     peak_outstanding_tasks: int,
+     *     outstanding_task_limit: int
+     * }
+     */
+    private function emptyTopologyTelemetry(): array
+    {
+        return [
+            'schema' => 1,
+            'forks' => 0,
+            'scope_workers' => 0,
+            'executor_workers' => 0,
+            'process_anchors' => 0,
+            'peak_live_pids' => 0,
+            'peak_outstanding_tasks' => 0,
+            'outstanding_task_limit' => 2 * $this->concurrency,
+        ];
+    }
+
+    /**
+     * @param  array{
+     *     schema: int,
+     *     forks: int,
+     *     scope_workers: int,
+     *     executor_workers: int,
+     *     process_anchors: int,
+     *     peak_live_pids: int,
+     *     peak_outstanding_tasks: int,
+     *     outstanding_task_limit: int
+     * }  $topology
+     */
+    private function mergeTopologyTelemetry(array $topology): void
+    {
+        foreach (['forks', 'scope_workers', 'executor_workers', 'process_anchors'] as $counter) {
+            $this->topologyTelemetry[$counter] += $topology[$counter];
+        }
+
+        foreach (['peak_live_pids', 'peak_outstanding_tasks'] as $peak) {
+            $this->topologyTelemetry[$peak] = max(
+                $this->topologyTelemetry[$peak],
+                $topology[$peak],
+            );
+        }
+    }
+
+    /**
+     * @param  array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool, ordinal: int}  $task
+     * @return array<string, mixed>
+     */
+    private function interruptedPendingResult(array $task, int $signal): array
+    {
+        return [
+            'id' => $task['id'],
+            'kind' => $task['kind'],
+            'scope_id' => $task['scope_id'],
+            'ordinal' => $task['ordinal'],
+            'status' => 'failed',
+            'failure' => [
+                'kind' => FailureKind::UserInterruption->value,
+                'message' => sprintf('The Drove run was interrupted by signal %d.', $signal),
+                'class' => null,
+                'file' => null,
+                'line' => null,
+                'phase' => 'scheduler',
+                'hook_id' => null,
+            ],
+            'value' => null,
+            'stdout' => '',
+            'stderr' => '',
+            'memory_peak_bytes' => null,
+            'events' => [],
+            'telemetry' => [
+                'pid' => null,
+                'pgid' => null,
+                'started_ns' => null,
+                'finished_ns' => null,
+                'duration_ms' => null,
+                'exit_code' => null,
+                'signal' => null,
+                'interrupted_signal' => $signal,
+                'forks' => 0,
+                'scope_workers' => 0,
+                'executor_workers' => 0,
+                'process_anchors' => 0,
+            ],
+        ];
+    }
+
+    /**
      * @param  array<array-key, mixed>  $scopes
      */
     private function encodeScopes(array $scopes): string
@@ -596,18 +894,127 @@ final class DroverScheduler implements Scheduler
         return \FFI::cdef(self::CDEF, $library);
     }
 
-    private function terminateActiveMaps(): void
+    private function cancelActiveMaps(): void
     {
-        foreach ($this->activeMaps as $map) {
-            $this->ffi->drover_map_cancel($map);
+        $maps = $this->activeMaps;
+        $this->activeMaps = [];
+        $failures = [];
+
+        foreach ($maps as $mapId => $map) {
+            if ($this->ffi->drover_map_cancel($map) !== 0) {
+                $failures[] = sprintf(
+                    'map %d: %s',
+                    $mapId,
+                    $this->copyCancellationError($map),
+                );
+            }
         }
 
-        $this->activeMaps = [];
+        if ($failures !== []) {
+            throw new RuntimeException(
+                'Native Drover cancellation failed: '.implode(' | ', $failures),
+            );
+        }
+    }
+
+    /**
+     * @param  CData  $map
+     */
+    private function copyCancellationError(mixed $map): string
+    {
+        $length = $this->ffi->drover_map_cancel_error_len($map);
+
+        if ($length < 1 || $length > 1_048_576) {
+            return 'native cancellation returned no valid diagnostic';
+        }
+
+        $buffer = $this->ffi->new(sprintf('char[%d]', $length + 1));
+
+        if ($this->ffi->drover_map_copy_cancel_error($map, $buffer, $length + 1) !== 0) {
+            return 'native cancellation diagnostic could not be copied';
+        }
+
+        return \FFI::string($buffer, $length);
+    }
+
+    private function copyEngineError(): string
+    {
+        $length = $this->ffi->drover_engine_error_len($this->engine);
+
+        if ($length < 1 || $length > 1_048_576) {
+            return 'native engine returned no valid diagnostic';
+        }
+
+        $buffer = $this->ffi->new(sprintf('char[%d]', $length + 1));
+
+        if ($this->ffi->drover_engine_copy_error($this->engine, $buffer, $length + 1) !== 0) {
+            return 'native engine diagnostic could not be copied';
+        }
+
+        return \FFI::string($buffer, $length);
+    }
+
+    private function cancelActiveMapsBestEffort(string $phase): void
+    {
+        try {
+            $this->cancelActiveMaps();
+        } catch (Throwable $throwable) {
+            $this->reportBestEffortCleanupFailure($phase, $throwable);
+        }
+    }
+
+    /**
+     * @phpstan-impure
+     */
+    private function consumeCancellationRequest(): bool
+    {
+        $requested = $this->cancellationRequested;
+        $this->cancellationRequested = false;
+
+        return $requested;
+    }
+
+    private function reportBestEffortCleanupFailure(string $phase, Throwable $throwable): void
+    {
+        $message = sprintf(
+            'Drove best-effort cleanup failure during %s: %s',
+            $phase,
+            $throwable->getMessage(),
+        );
+
+        try {
+            if (defined('STDERR')
+                && is_resource(STDERR)
+                && fwrite(STDERR, $message.PHP_EOL) !== false) {
+                return;
+            }
+        } catch (Throwable) {
+            //
+        }
+
+        try {
+            error_log($message);
+        } catch (Throwable) {
+            //
+        }
     }
 
     private function releaseHeldPermits(): void
     {
-        $this->ffi->drover_engine_release_all($this->engine);
+        if ($this->ffi->drover_engine_release_all($this->engine) !== 0) {
+            throw new RuntimeException(
+                'Native Drover engine cleanup failed: '.$this->copyEngineError(),
+            );
+        }
+    }
+
+    private function releaseHeldPermitsBestEffort(string $phase): void
+    {
+        try {
+            $this->releaseHeldPermits();
+        } catch (Throwable $throwable) {
+            $this->reportBestEffortCleanupFailure($phase, $throwable);
+        }
     }
 
     private function assertWaitableChildren(): void

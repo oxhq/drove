@@ -36,6 +36,18 @@ pub struct DroverAction {
     pub message: [c_char; 256],
 }
 
+#[repr(C)]
+pub struct DroverTopology {
+    pub schema: u32,
+    pub forks: u64,
+    pub scope_workers: u64,
+    pub executor_workers: u64,
+    pub process_anchors: u64,
+    pub peak_live_pids: u32,
+    pub peak_outstanding_tasks: u32,
+    pub outstanding_task_limit: u32,
+}
+
 impl Default for DroverAction {
     fn default() -> Self {
         Self {
@@ -58,9 +70,15 @@ impl Default for DroverAction {
     }
 }
 
+struct EngineHandle {
+    engine: Engine,
+    error: Vec<u8>,
+}
+
 struct MapHandle {
     scheduler: Scheduler,
     last_result: Vec<u8>,
+    cancel_error: Vec<u8>,
 }
 
 #[no_mangle]
@@ -105,7 +123,11 @@ pub unsafe extern "C" fn drover_engine_new(
         return ptr::null_mut();
     };
 
-    Box::into_raw(Box::new(engine)).cast()
+    Box::into_raw(Box::new(EngineHandle {
+        engine,
+        error: Vec::new(),
+    }))
+    .cast()
 }
 
 #[no_mangle]
@@ -126,7 +148,9 @@ pub unsafe extern "C" fn drover_engine_acquire(
         return ERR_JSON;
     };
 
-    engine.acquire(&scopes).map(|_| 0).unwrap_or(ROLE_ERROR)
+    let result = engine.engine.acquire(&scopes);
+
+    record_engine_result(engine, result)
 }
 
 #[no_mangle]
@@ -147,7 +171,9 @@ pub unsafe extern "C" fn drover_engine_release(
         return ERR_JSON;
     };
 
-    engine.release(&scopes).map(|_| 0).unwrap_or(ROLE_ERROR)
+    let result = engine.engine.release(&scopes);
+
+    record_engine_result(engine, result)
 }
 
 #[no_mangle]
@@ -162,7 +188,41 @@ pub unsafe extern "C" fn drover_engine_release_all(engine: *mut c_void) -> i32 {
         return ERR_NULL;
     };
 
-    engine.release_all().map(|_| 0).unwrap_or(ROLE_ERROR)
+    let result = engine.engine.release_all();
+
+    record_engine_result(engine, result)
+}
+
+#[no_mangle]
+/// Returns the byte length of the most recent engine error.
+///
+/// # Safety
+///
+/// `engine` must be a live, non-concurrently-used pointer returned by
+/// `drover_engine_new`.
+pub unsafe extern "C" fn drover_engine_error_len(engine: *mut c_void) -> usize {
+    engine_handle(engine)
+        .map(|handle| handle.error.len())
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+/// Copies the most recent engine error and appends a NUL terminator.
+///
+/// # Safety
+///
+/// `engine` must be live and exclusively used. `destination` must be writable
+/// for `capacity` bytes and must not overlap engine-owned memory.
+pub unsafe extern "C" fn drover_engine_copy_error(
+    engine: *mut c_void,
+    destination: *mut c_char,
+    capacity: usize,
+) -> i32 {
+    let Some(handle) = engine_handle(engine) else {
+        return ERR_NULL;
+    };
+
+    copy_bytes(&handle.error, destination, capacity)
 }
 
 #[no_mangle]
@@ -174,7 +234,7 @@ pub unsafe extern "C" fn drover_engine_release_all(engine: *mut c_void) -> i32 {
 /// must be passed at most once and no map may outlive it.
 pub unsafe extern "C" fn drover_engine_free(engine: *mut c_void) {
     if !engine.is_null() {
-        drop(Box::from_raw(engine.cast::<Engine>()));
+        drop(Box::from_raw(engine.cast::<EngineHandle>()));
     }
 }
 
@@ -189,13 +249,14 @@ pub unsafe extern "C" fn drover_map_new(engine: *mut c_void, queue_capacity: u32
     let Some(engine) = engine_handle(engine) else {
         return ptr::null_mut();
     };
-    let Ok(scheduler) = engine.scheduler(queue_capacity as usize) else {
+    let Ok(scheduler) = engine.engine.scheduler(queue_capacity as usize) else {
         return ptr::null_mut();
     };
 
     Box::into_raw(Box::new(MapHandle {
         scheduler,
         last_result: Vec::new(),
+        cancel_error: Vec::new(),
     }))
     .cast()
 }
@@ -323,10 +384,66 @@ pub unsafe extern "C" fn drover_map_interrupt(map: *mut c_void, signal: c_int) -
 /// # Safety
 ///
 /// `map` must be a live, exclusively used pointer returned by `drover_map_new`.
-pub unsafe extern "C" fn drover_map_cancel(map: *mut c_void) {
-    if let Some(handle) = map_handle(map) {
-        handle.scheduler.cancel();
+pub unsafe extern "C" fn drover_map_cancel(map: *mut c_void) -> i32 {
+    let Some(handle) = map_handle(map) else {
+        return ERR_NULL;
+    };
+
+    match handle.scheduler.cancel() {
+        Ok(()) => {
+            handle.cancel_error.clear();
+
+            0
+        }
+        Err(error) => {
+            handle.cancel_error = error.into_bytes();
+
+            ROLE_ERROR
+        }
     }
+}
+
+#[no_mangle]
+/// Returns the byte length of the most recent cancellation error.
+///
+/// # Safety
+///
+/// `map` must be a live, non-concurrently-used pointer returned by
+/// `drover_map_new`.
+pub unsafe extern "C" fn drover_map_cancel_error_len(map: *mut c_void) -> usize {
+    map_handle(map)
+        .map(|handle| handle.cancel_error.len())
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+/// Copies the most recent cancellation error and appends a NUL terminator.
+///
+/// # Safety
+///
+/// `map` must be live and exclusively used. `destination` must be writable for
+/// `capacity` bytes and must not overlap map-owned memory.
+pub unsafe extern "C" fn drover_map_copy_cancel_error(
+    map: *mut c_void,
+    destination: *mut c_char,
+    capacity: usize,
+) -> i32 {
+    let Some(handle) = map_handle(map) else {
+        return ERR_NULL;
+    };
+
+    if destination.is_null() || capacity <= handle.cancel_error.len() {
+        return ERR_NULL;
+    }
+
+    ptr::copy_nonoverlapping(
+        handle.cancel_error.as_ptr(),
+        destination.cast(),
+        handle.cancel_error.len(),
+    );
+    *destination.add(handle.cancel_error.len()) = 0;
+
+    0
 }
 
 #[no_mangle]
@@ -383,6 +500,43 @@ pub unsafe extern "C" fn drover_map_max_active(map: *mut c_void) -> u32 {
     map_handle(map)
         .map(|handle| handle.scheduler.max_active() as u32)
         .unwrap_or(0)
+}
+
+#[no_mangle]
+/// Copies exact process-topology counters for a native map.
+///
+/// # Safety
+///
+/// `map` must be live and exclusively used. `topology` must point to writable
+/// memory large enough for `DroverTopology`.
+pub unsafe extern "C" fn drover_map_topology(
+    map: *mut c_void,
+    topology: *mut DroverTopology,
+) -> i32 {
+    if topology.is_null() {
+        return ERR_NULL;
+    }
+
+    let Some(handle) = map_handle(map) else {
+        return ERR_NULL;
+    };
+    let value = handle.scheduler.topology();
+
+    ptr::write(
+        topology,
+        DroverTopology {
+            schema: value.schema,
+            forks: value.forks,
+            scope_workers: value.scope_workers,
+            executor_workers: value.executor_workers,
+            process_anchors: value.process_anchors,
+            peak_live_pids: value.peak_live_pids,
+            peak_outstanding_tasks: value.peak_outstanding_tasks,
+            outstanding_task_limit: value.outstanding_task_limit,
+        },
+    );
+
+    0
 }
 
 #[no_mangle]
@@ -531,8 +685,34 @@ fn populate_result(action: &mut DroverAction, result: &TaskResult) {
     }
 }
 
-unsafe fn engine_handle<'a>(engine: *mut c_void) -> Option<&'a mut Engine> {
-    engine.cast::<Engine>().as_mut()
+fn record_engine_result(handle: &mut EngineHandle, result: Result<(), String>) -> i32 {
+    match result {
+        Ok(()) => {
+            handle.error.clear();
+
+            0
+        }
+        Err(error) => {
+            handle.error = error.into_bytes();
+
+            ROLE_ERROR
+        }
+    }
+}
+
+unsafe fn copy_bytes(bytes: &[u8], destination: *mut c_char, capacity: usize) -> i32 {
+    if destination.is_null() || capacity <= bytes.len() {
+        return ERR_NULL;
+    }
+
+    ptr::copy_nonoverlapping(bytes.as_ptr(), destination.cast(), bytes.len());
+    *destination.add(bytes.len()) = 0;
+
+    0
+}
+
+unsafe fn engine_handle<'a>(engine: *mut c_void) -> Option<&'a mut EngineHandle> {
+    engine.cast::<EngineHandle>().as_mut()
 }
 
 unsafe fn map_handle<'a>(map: *mut c_void) -> Option<&'a mut MapHandle> {
@@ -565,4 +745,43 @@ fn fill_array<const N: usize>(target: &mut [c_char; N], value: &str) {
     }
 
     target[length] = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn engine_error_crosses_the_abi_and_clears_after_success() {
+        let run_id = CString::new("engine-error-run").unwrap();
+        let scopes = CString::new("[]").unwrap();
+        let limits = CString::new("{}").unwrap();
+        let engine = unsafe { drover_engine_new(run_id.as_ptr(), 1, limits.as_ptr(), 10) };
+        assert!(!engine.is_null());
+        assert_eq!(
+            unsafe { drover_engine_release(engine, scopes.as_ptr()) },
+            ROLE_ERROR
+        );
+
+        let length = unsafe { drover_engine_error_len(engine) };
+        let mut error = vec![0_i8; length + 1];
+        assert!(length > 0);
+        assert_eq!(
+            unsafe { drover_engine_copy_error(engine, error.as_mut_ptr(), error.len()) },
+            0
+        );
+        assert!(unsafe { CStr::from_ptr(error.as_ptr()) }
+            .to_str()
+            .unwrap()
+            .contains("unheld permit"));
+
+        assert_eq!(unsafe { drover_engine_acquire(engine, scopes.as_ptr()) }, 0);
+        assert_eq!(unsafe { drover_engine_release(engine, scopes.as_ptr()) }, 0);
+        assert_eq!(unsafe { drover_engine_error_len(engine) }, 0);
+
+        unsafe {
+            drover_engine_free(engine);
+        }
+    }
 }

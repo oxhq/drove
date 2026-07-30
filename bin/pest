@@ -3,22 +3,23 @@
 
 declare(strict_types=1);
 
+use Drove\Bridge\Pest\Bootstrap;
 use Pest\Contracts\Restarter;
 use Pest\Kernel;
 use Pest\Panic;
 use Pest\Support\Container;
 use Pest\TestCaseFilters\GitDirtyTestCaseFilter;
 use Pest\TestCaseMethodFilters\AssigneeTestCaseFilter;
+use Pest\TestCaseMethodFilters\FlakyTestCaseFilter;
 use Pest\TestCaseMethodFilters\IssueTestCaseFilter;
 use Pest\TestCaseMethodFilters\NotesTestCaseFilter;
 use Pest\TestCaseMethodFilters\PrTestCaseFilter;
-use Pest\TestCaseMethodFilters\FlakyTestCaseFilter;
 use Pest\TestCaseMethodFilters\TodoTestCaseFilter;
 use Pest\TestSuite;
 use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Output\ConsoleOutput;
 
-(static function () {
+(static function (): void {
     // Ensures Collision's Printer is registered.
     $_SERVER['COLLISION_PRINTER'] = 'DefaultPrinter';
 
@@ -41,7 +42,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             unset($arguments[$key]);
         }
 
-        if (str_contains($value, '--test-directory=')) {
+        if (str_contains((string) $value, '--test-directory=')) {
             unset($arguments[$key]);
         } elseif ($value === '--test-directory') {
             unset($arguments[$key]);
@@ -71,7 +72,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             unset($arguments[$key]);
         }
 
-        if (str_contains($value, '--assignee=')) {
+        if (str_contains((string) $value, '--assignee=')) {
             unset($arguments[$key]);
         } elseif ($value === '--assignee') {
             unset($arguments[$key]);
@@ -81,7 +82,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             }
         }
 
-        if (str_contains($value, '--issue=')) {
+        if (str_contains((string) $value, '--issue=')) {
             unset($arguments[$key]);
         } elseif ($value === '--issue') {
             unset($arguments[$key]);
@@ -91,7 +92,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             }
         }
 
-        if (str_contains($value, '--ticket=')) {
+        if (str_contains((string) $value, '--ticket=')) {
             unset($arguments[$key]);
         } elseif ($value === '--ticket') {
             unset($arguments[$key]);
@@ -101,7 +102,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             }
         }
 
-        if (str_contains($value, '--pr=')) {
+        if (str_contains((string) $value, '--pr=')) {
             unset($arguments[$key]);
         } elseif ($value === '--pr') {
             unset($arguments[$key]);
@@ -111,7 +112,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             }
         }
 
-        if (str_contains($value, '--pull-request=')) {
+        if (str_contains((string) $value, '--pull-request=')) {
             unset($arguments[$key]);
         } elseif ($value === '--pull-request') {
             unset($arguments[$key]);
@@ -121,7 +122,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
             }
         }
 
-        if (str_contains($value, '--teamcity')) {
+        if (str_contains((string) $value, '--teamcity')) {
             unset($arguments[$key]);
             $arguments[] = '--no-output';
             unset($_SERVER['COLLISION_PRINTER']);
@@ -145,6 +146,14 @@ use Symfony\Component\Console\Output\ConsoleOutput;
     } else {
         include_once $localPath;
         $autoloadPath = $localPath;
+    }
+
+    try {
+        Bootstrap::boot();
+    } catch (RuntimeException $exception) {
+        fwrite(STDERR, $exception->getMessage().PHP_EOL);
+
+        exit(2);
     }
 
     $rootPath = dirname($autoloadPath);

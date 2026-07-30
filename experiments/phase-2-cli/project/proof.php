@@ -32,6 +32,7 @@ $execute = static function (array $command): array {
 $run = static fn (string ...$arguments): array => $execute([
     PHP_BINARY,
     __DIR__.'/vendor/bin/drove',
+    '--pest',
     ...$arguments,
 ]);
 $prepareCase = $execute([PHP_BINARY, __DIR__.'/prepare-case.php']);
@@ -99,6 +100,12 @@ $failOnRiskyBaseline = $execute([
     PHP_BINARY,
     __DIR__.'/vendor/bin/phpunit',
     '--configuration=unsupported/fail-on-risky.xml',
+    '--colors=never',
+]);
+$strictOutputBaseline = $execute([
+    PHP_BINARY,
+    __DIR__.'/vendor/bin/phpunit',
+    '--configuration=unsupported/disallow-output.xml',
     '--colors=never',
 ]);
 $classSkipBaseline = $execute([
@@ -707,9 +714,16 @@ $expect(
     'XML coverage strictness was not rejected explicitly.',
 );
 $expect(
-    $cases['xml_disallow_output']['exit'] === 2
-        && str_contains($cases['xml_disallow_output']['stderr'], 'disallowTestOutput from PHPUnit XML'),
-    'XML output strictness was not rejected explicitly.',
+    $strictOutputBaseline['exit'] === 1
+        && str_contains($strictOutputBaseline['stdout'], 'Risky: 1')
+        && $cases['xml_disallow_output']['exit'] === 1
+        && str_contains($cases['xml_disallow_output']['stdout'], '1 risky, 1 passed')
+        && str_contains(
+            $cases['xml_disallow_output']['stdout'],
+            'Test code or tested code printed unexpected output: unexpected output',
+        )
+        && str_contains($cases['xml_disallow_output']['stdout'], 'Assertions: 2'),
+    'XML output strictness drifted from PHPUnit expected/unexpected-output semantics.',
 );
 $expect(
     $cases['xml_extensions']['exit'] === 2

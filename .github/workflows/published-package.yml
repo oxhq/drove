@@ -1,0 +1,460 @@
+name: Published package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Annotated Drove release tag
+        required: true
+        type: string
+      commit:
+        description: Exact 40-character oxhq/drove release commit
+        required: true
+        type: string
+      laravel_commit:
+        description: Exact 40-character oxhq/drove-laravel split commit
+        required: true
+        type: string
+
+concurrency:
+  group: drove-published-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+
+jobs:
+  installed-consumer:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-gnu-x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux-gnu-aarch64
+          - runner: macos-15-intel
+            target: macos-x86_64
+          - runner: macos-15
+            target: macos-aarch64
+
+    steps:
+      - name: Validate inputs and checkout exact release source
+        env:
+          LARAVEL_COMMIT: ${{ inputs.laravel_commit }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$LARAVEL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout exact release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact clean checkout
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = "$RELEASE_VERSION"
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_VERSION"
+          test "$(git rev-parse "$GITHUB_SHA^{commit}")" = "$RELEASE_COMMIT"
+          test -z "$(git status --porcelain=v1)"
+          git fetch --force --no-tags origin \
+            "refs/tags/$RELEASE_VERSION:refs/tags/$RELEASE_VERSION"
+          test "$(git cat-file -t "refs/tags/$RELEASE_VERSION")" = tag
+          test "$(
+            git rev-parse "refs/tags/$RELEASE_VERSION^{commit}"
+          )" = "$RELEASE_COMMIT"
+
+      - name: Verify exact annotated Laravel package tag
+        env:
+          LARAVEL_COMMIT: ${{ inputs.laravel_commit }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          split_tag="refs/drove-laravel/tags/$RELEASE_VERSION"
+          git fetch --force --no-tags \
+            https://github.com/oxhq/drove-laravel.git \
+            "refs/tags/$RELEASE_VERSION:$split_tag"
+          test "$(git cat-file -t "$split_tag")" = tag
+          test "$(git rev-parse "$split_tag^{commit}")" = "$LARAVEL_COMMIT"
+          test "$(
+            git rev-parse "$split_tag^{tree}"
+          )" = "$(
+            git rev-parse "$RELEASE_COMMIT:packages/drove-laravel"
+          )"
+
+      - name: Setup pinned PHP and Composer
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # v2.37.0
+        with:
+          php-version: '8.4'
+          tools: composer:2.10.2
+          coverage: none
+          extensions: ffi, openssl, pcntl, phar, posix, zlib
+
+      - name: Resolve release publication policy
+        id: release_policy
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          php scripts/verify-release-version.php \
+            "$RELEASE_VERSION" \
+            --github-output \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Require candidate design-partner evidence
+        if: steps.release_policy.outputs.requires_design_partner_evidence == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          php scripts/verify-design-partners.php \
+            docs/design-partner-evidence.json \
+            "$RELEASE_VERSION" \
+            "$RELEASE_COMMIT"
+
+      - name: Resolve both tagged packages from Packagist
+        env:
+          LARAVEL_COMMIT: ${{ inputs.laravel_commit }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/drove-package-consumer"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          composer init --name=drove/published-consumer --no-interaction
+          composer require --dev \
+            "oxhq/drove:${RELEASE_VERSION#v}" \
+            "oxhq/drove-laravel:${RELEASE_VERSION#v}" \
+            --no-interaction \
+            --no-progress \
+            --prefer-dist
+          test ! -L vendor/oxhq/drove
+          test ! -L vendor/oxhq/drove-laravel
+          cmp vendor/oxhq/drove/composer.json \
+            "$GITHUB_WORKSPACE/composer.json"
+          cmp vendor/oxhq/drove-laravel/composer.json \
+            "$GITHUB_WORKSPACE/packages/drove-laravel/composer.json"
+          php -r '
+            $installed = json_decode(
+                file_get_contents("vendor/composer/installed.json"),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+            $expected = [
+                "oxhq/drove" => [$argv[2], "https://github.com/oxhq/drove.git"],
+                "oxhq/drove-laravel" => [
+                    $argv[3],
+                    "https://github.com/oxhq/drove-laravel.git",
+                ],
+            ];
+            foreach ($expected as $name => [$reference, $sourceUrl]) {
+                $package = array_find(
+                    $installed["packages"] ?? [],
+                    static fn (array $candidate): bool =>
+                        ($candidate["name"] ?? null) === $name,
+                );
+                if (! is_array($package)
+                    || ($package["version"] ?? null) !== $argv[1]
+                    || ($package["installation-source"] ?? null) !== "dist"
+                    || ($package["source"]["type"] ?? null) !== "git"
+                    || ($package["source"]["url"] ?? null) !== $sourceUrl
+                    || ($package["source"]["reference"] ?? null) !== $reference
+                    || ($package["dist"]["type"] ?? null) !== "zip"
+                    || ($package["dist"]["reference"] ?? null) !== $reference
+                    || preg_match(
+                        "#\\Ahttps://api\\.github\\.com/repos/"
+                            .preg_quote(substr($sourceUrl, 19, -4), "#")
+                            ."/zipball/".preg_quote($reference, "#")."\\z#",
+                        $package["dist"]["url"] ?? "",
+                    ) !== 1) {
+                    exit(1);
+                }
+            }
+          ' "$RELEASE_VERSION" "$RELEASE_COMMIT" "$LARAVEL_COMMIT"
+
+      - name: Verify published archive, checksum, and provenance
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          release="$RUNNER_TEMP/drove-release"
+          mkdir -p "$release"
+          asset="drove-native-$EXPECTED_TARGET.tar.gz"
+          checksum="$asset.sha256"
+          provenance="drove-native-$EXPECTED_TARGET.provenance.json"
+          gh release download "$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$release" \
+            --pattern "$asset" \
+            --pattern "$checksum" \
+            --pattern "$provenance"
+          (
+            cd "$release"
+            shasum -a 256 --check "$checksum"
+          )
+          php -r '
+            $manifest = json_decode(
+                file_get_contents($argv[1]),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            );
+            exit(
+                ($manifest["schema"] ?? null) === 1
+                && ($manifest["source_revision"] ?? null) === $argv[2]
+                && ($manifest["target"] ?? null) === $argv[3]
+                && ($manifest["archive"]["name"] ?? null) === $argv[4]
+                && ($manifest["archive"]["sha256"] ?? null)
+                    === hash_file("sha256", $argv[5])
+                ? 0
+                : 1,
+            );
+          ' \
+            "$release/$provenance" \
+            "$RELEASE_COMMIT" \
+            "$EXPECTED_TARGET" \
+            "$asset" \
+            "$release/$asset"
+          signer_workflow="${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY/.github/workflows/native-release.yml"
+          gh attestation verify "$release/$asset" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$signer_workflow" \
+            --source-digest "$RELEASE_COMMIT" \
+            --source-ref "refs/tags/$RELEASE_VERSION" \
+            --deny-self-hosted-runners
+
+      - name: Install native asset and exercise pass/fail suites
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+          LARAVEL_COMMIT: ${{ inputs.laravel_commit }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/drove-smoke-consumer"
+          evidence="$RUNNER_TEMP/drove-published-evidence"
+          mkdir -p "$consumer/tests" "$evidence"
+          cd "$consumer"
+          composer init --name=drove/published-smoke-consumer --no-interaction
+          composer require --dev \
+            "oxhq/drove:${RELEASE_VERSION#v}" \
+            --no-interaction \
+            --no-progress \
+            --prefer-dist
+          test ! -L vendor/oxhq/drove
+          for bridge_dependency in \
+            brianium/paratest \
+            nunomaduro/collision \
+            nunomaduro/termwind \
+            pestphp/pest-plugin \
+            phpunit/phpunit \
+            symfony/process
+          do
+            if composer show "$bridge_dependency" >/dev/null 2>&1; then
+              echo "$bridge_dependency leaked into the native package" >&2
+              exit 1
+            fi
+          done
+          target="$(
+            php -r '
+              require "vendor/autoload.php";
+              echo Drove\Kernel\NativeLibrary::target();
+            '
+          )"
+          test "$target" = "$EXPECTED_TARGET"
+          vendor/bin/drove-install-native --version="$RELEASE_VERSION"
+          library="$(
+            php -r '
+              require "vendor/autoload.php";
+              $target = Drove\Kernel\NativeLibrary::target();
+              echo Drove\Kernel\NativeLibrary::bundledPath($target);
+            '
+          )"
+          test -f "$library"
+          archive="$RUNNER_TEMP/drove-release/drove-native-$EXPECTED_TARGET.tar.gz"
+          if [[ "$EXPECTED_TARGET" == macos-* ]]; then
+            filename="libdrover.dylib"
+          else
+            filename="libdrover.so"
+          fi
+          entry="native/drover/prebuilt/$EXPECTED_TARGET/$filename"
+          cat > tests/NativePass.php <<'PHP'
+          <?php
+
+          use function Drove\Native\expect;
+          use function Drove\Native\test;
+
+          test('published native package passes one', fn () => expect(true)->toBe(true));
+          test('published native package passes two', fn () => expect(42)->toEqual('42'));
+          PHP
+          cat > tests/NativeFail.php <<'PHP'
+          <?php
+
+          use function Drove\Native\expect;
+          use function Drove\Native\test;
+
+          test('published native package fails', fn () => expect('actual')->toBe('expected'));
+          PHP
+          cat > tests/BridgePassTest.php <<'PHP'
+          <?php
+
+          test('published bridge passes', fn () => expect(true)->toBeTrue());
+          PHP
+          php -d ffi.enable=true vendor/bin/drove \
+            --processes=2 \
+            tests/NativePass.php \
+            > "$evidence/native-pass.txt"
+          set +e
+          php -d ffi.enable=true vendor/bin/drove \
+            --processes=2 \
+            tests/NativeFail.php \
+            > "$evidence/native-fail.txt" 2>&1
+          fail_exit="$?"
+          set -e
+          test "$fail_exit" -eq 1
+          grep -Fq 'Run: failed' "$evidence/native-fail.txt"
+          composer config --no-plugins allow-plugins.pestphp/pest-plugin true
+          composer require --dev \
+            brianium/paratest:7.23.0 \
+            nunomaduro/collision:8.9.5 \
+            nunomaduro/termwind:2.4.0 \
+            pestphp/pest-plugin:5.0.0 \
+            phpunit/phpunit:13.2.4 \
+            symfony/process:8.1.0 \
+            --no-interaction \
+            --no-progress \
+            --prefer-dist
+          DROVER_LIBRARY="$library" \
+          php -d ffi.enable=true vendor/bin/drove --pest tests/BridgePassTest.php \
+            > "$evidence/bridge-pass.txt"
+          php -r '
+            require "vendor/autoload.php";
+            $checks = [
+                ["Windows", "AMD64", null, "does not provide native binaries"],
+                ["Linux", "x86_64", "musl", "musl systems are unsupported"],
+                ["Linux", "x86_64", "glibc 2.30", "detected glibc 2.30"],
+            ];
+            foreach ($checks as [$os, $machine, $libc, $message]) {
+                try {
+                    Drove\Kernel\NativeLibrary::target($os, $machine, $libc);
+                    exit(1);
+                } catch (RuntimeException $exception) {
+                    if (! str_contains($exception->getMessage(), $message)) {
+                        exit(1);
+                    }
+                }
+            }
+          '
+          library_sha256="$(shasum -a 256 "$library" | awk '{print $1}')"
+          archived_library_sha256="$(
+            tar -xOf "$archive" "$entry" | shasum -a 256 | awk '{print $1}'
+          )"
+          test "$library_sha256" = "$archived_library_sha256"
+          archive_sha256="$(
+            shasum -a 256 \
+              "$archive" \
+              | awk '{print $1}'
+          )"
+          expected_library_sha256="$(
+            php -r '
+              $manifest = json_decode(
+                  file_get_contents($argv[1]),
+                  true,
+                  flags: JSON_THROW_ON_ERROR,
+              );
+              echo $manifest["library"]["sha256"] ?? "";
+            ' \
+              "$RUNNER_TEMP/drove-release/drove-native-$EXPECTED_TARGET.provenance.json"
+          )"
+          test "$library_sha256" = "$expected_library_sha256"
+          composer_version="$(composer --version --no-ansi | awk '{print $3}')"
+          php -r '
+            $evidence = [
+                "schema" => 1,
+                "status" => "passed",
+                "version" => $argv[1],
+                "source_revision" => $argv[2],
+                "laravel_source_revision" => $argv[3],
+                "target" => $argv[4],
+                "platform" => [
+                    "os_family" => PHP_OS_FAMILY,
+                    "architecture" => php_uname("m"),
+                    "php" => PHP_VERSION,
+                    "composer" => $argv[5],
+                ],
+                "packages" => [
+                    "oxhq/drove" => [
+                        "registry" => "packagist",
+                        "installation_source" => "dist",
+                        "source_path" => false,
+                        "source_revision" => $argv[2],
+                    ],
+                    "oxhq/drove-laravel" => [
+                        "registry" => "packagist",
+                        "installation_source" => "dist",
+                        "source_path" => false,
+                        "source_revision" => $argv[3],
+                    ],
+                ],
+                "native" => [
+                    "archive_sha256" => $argv[6],
+                    "library_sha256" => $argv[7],
+                    "checksum_verified" => true,
+                    "provenance_verified" => true,
+                ],
+                "smoke" => [
+                    "native_parallel_pass_exit" => 0,
+                    "native_fail_exit" => 1,
+                    "bridge_pass_exit" => 0,
+                    "incompatible_platforms_rejected" => true,
+                ],
+            ];
+            file_put_contents(
+                $argv[8],
+                json_encode(
+                    $evidence,
+                    JSON_PRETTY_PRINT
+                        | JSON_UNESCAPED_SLASHES
+                        | JSON_THROW_ON_ERROR,
+                ).PHP_EOL,
+            );
+          ' \
+            "$RELEASE_VERSION" \
+            "$RELEASE_COMMIT" \
+            "$LARAVEL_COMMIT" \
+            "$EXPECTED_TARGET" \
+            "$composer_version" \
+            "$archive_sha256" \
+            "$library_sha256" \
+            "$evidence/result.json"
+
+      - name: Upload normalized installed-consumer evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: drove-published-${{ inputs.version }}-${{ matrix.target }}
+          path: ${{ runner.temp }}/drove-published-evidence/result.json
+          if-no-files-found: error
+          retention-days: 90

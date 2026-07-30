@@ -31,8 +31,12 @@ final class Renderer
             $status = is_string($test['status'] ?? null) ? $test['status'] : 'failed';
             $counts[$status] = ($counts[$status] ?? 0) + 1;
             $value = $test['value'] ?? null;
+            $nativeAssertions = $test['assertions'] ?? null;
 
-            if (is_array($value)
+            if (is_int($nativeAssertions) && $nativeAssertions >= 0) {
+                $assertions ??= 0;
+                $assertions += $nativeAssertions;
+            } elseif (is_array($value)
                 && is_int($value['assertions'] ?? null)
                 && is_string($value['phpunit_status'] ?? null)
                 && is_string($value['test_case'] ?? null)) {
@@ -42,7 +46,8 @@ final class Renderer
                 $assertionsComplete = false;
             }
 
-            if (in_array($status, ['failed', 'blocked'], true)) {
+            if (! is_int($nativeAssertions)
+                && in_array($status, ['failed', 'blocked'], true)) {
                 $assertionsComplete = false;
             }
 
@@ -118,6 +123,14 @@ final class Renderer
             }
         }
 
+        $extensionReportLines = $this->extensionReportLines($run['extension_reports'] ?? null);
+
+        if ($extensionReportLines !== []) {
+            $lines[] = '';
+            $lines[] = 'Extension reports:';
+            array_push($lines, ...$extensionReportLines);
+        }
+
         $summary = [];
 
         foreach (['failed', 'blocked', 'risky', 'skipped', 'todo', 'incomplete', 'passed'] as $status) {
@@ -143,6 +156,50 @@ final class Renderer
         }
 
         return implode(PHP_EOL, $lines).PHP_EOL;
+    }
+
+    /**
+     * Reporter output is opaque presentation data. It is rendered in its own
+     * labelled section and never participates in test status, assertion, or
+     * exit-code aggregation.
+     *
+     * @return list<string>
+     */
+    private function extensionReportLines(mixed $reports): array
+    {
+        if (! is_array($reports) || ! array_is_list($reports)) {
+            return [];
+        }
+
+        $lines = [];
+
+        foreach ($reports as $report) {
+            if (! is_array($report)) {
+                continue;
+            }
+            if (! is_string($report['owner'] ?? null)) {
+                continue;
+            }
+            if (! is_string($report['key'] ?? null)) {
+                continue;
+            }
+            if (! is_string($report['output'] ?? null)) {
+                continue;
+            }
+            $lines[] = sprintf(' [%s:%s]', $report['owner'], $report['key']);
+
+            if ($report['output'] === '') {
+                continue;
+            }
+
+            $output = rtrim($report['output'], "\r\n");
+
+            foreach (preg_split('/\R/', $output) ?: [$output] as $outputLine) {
+                $lines[] = '   report | '.$outputLine;
+            }
+        }
+
+        return $lines;
     }
 
     private function marker(string $status): string

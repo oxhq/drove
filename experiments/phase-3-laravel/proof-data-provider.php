@@ -11,6 +11,7 @@ $process = new Process([
     'artisan',
     'drove',
     '--',
+    '--pest',
     'tests/Feature/ApplicationDataProviderTest.php',
 ], __DIR__, [
     'DROVE_LARAVEL_RUNTIME' => 'application',

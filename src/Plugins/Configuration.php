@@ -64,7 +64,9 @@ final class Configuration implements HandlesArguments, Terminable
 
         $contents = $doc->saveXML();
 
-        assert(is_int(file_put_contents($path, $contents)));
+        if (! is_string($contents) || file_put_contents($path, $contents) === false) {
+            throw new \RuntimeException('Drove could not write the Pest bridge configuration.');
+        }
 
         return $path;
     }

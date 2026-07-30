@@ -1,6 +1,8 @@
 {
-    "schema_version": 3,
+    "schema_version": 5,
     "initial_proof_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
+    "candidate_version": "0.4.0-alpha.2",
+    "evaluation_version": "0.4.0-alpha.1",
     "release_overlay_version": "0.4.0-alpha.1",
     "ladder": [
         "pest",
@@ -14,6 +16,8 @@
             "invoiceshelf"
         ],
         "full": [
+            "pest",
+            "invoiceshelf",
             "livewire",
             "filament"
         ],
@@ -24,12 +28,160 @@
         ]
     },
     "classifications": {
-        "SUPPORTED": "The selected cases must complete with the same pass, fail, skip, and incomplete semantics.",
-        "EXPLICITLY_UNSUPPORTED": "Drove must reject before any selected test body executes or persistent application state is mutated.",
-        "UNEXPECTED_DIVERGENCE": "The selection exposed a Drove bug and is not an accepted result."
+        "supported": "The native surface can load without a compatibility bridge.",
+        "unsupported": "The registry supplies a stable rejection diagnostic and the case is excluded from supported execution cohorts.",
+        "bridge-only": "The case or extension surface is loadable only through its declared compatibility bridge."
     },
     "gate_statuses": {
-        "PROVEN": "The baseline and Drove result are recorded for the complete selection."
+        "CURATED_PROVEN_FULL_SUITE_PENDING": "The calibrated cohort is proven; the hosted full-suite classification artifact has not yet been observed and accepted."
+    },
+    "full_suite_gate": {
+        "artifact_schema": 1,
+        "hosted_image": "ubuntu-24.04",
+        "statuses": [
+            "supported",
+            "unsupported",
+            "bridge-only"
+        ],
+        "scanner_classification_ratio_min": 1,
+        "unchanged_bridge_load_ratio_min": 0.8,
+        "unchanged_or_idempotent_codemod_bridge_load_ratio_min": 0.95,
+        "parallel_processes": [
+            1,
+            2,
+            4,
+            8,
+            16,
+            30
+        ],
+        "serial_processes": [
+            1
+        ],
+        "hosted_status": "PENDING"
+    },
+    "extension_surface_map": {
+        "package:laravel/pao": [
+            "pest.plugin.cli-interception"
+        ],
+        "package:oxhq/drove": [
+            "pest.plugin.runner-internals"
+        ],
+        "package:phpunit/phpunit": [
+            "phpunit.test-case"
+        ],
+        "package:orchestra/testbench": [
+            "testbench.application",
+            "testbench.profile"
+        ],
+        "package:orchestra/testbench-core": [
+            "testbench.application"
+        ],
+        "package:orchestra/testbench-dusk": [
+            "testbench.dusk"
+        ],
+        "package:pestphp/pest-plugin": [
+            "pest.plugin.runner-internals"
+        ],
+        "package:pestphp/pest-plugin-arch": [
+            "pest.architecture"
+        ],
+        "package:pestphp/pest-plugin-browser": [
+            "pest.browser-mode"
+        ],
+        "package:pestphp/pest-plugin-faker": [
+            "pest.plugin.portable-syntax"
+        ],
+        "package:pestphp/pest-plugin-laravel": [
+            "pest.plugin.portable-syntax"
+        ],
+        "package:pestphp/pest-plugin-mutate": [
+            "pest.mutation-testing"
+        ],
+        "package:pestphp/pest-plugin-profanity": [
+            "pest.plugin.runner-internals"
+        ],
+        "package:pestphp/pest-plugin-type-coverage": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Arch\\Plugin": [
+            "pest.architecture"
+        ],
+        "pest-plugin-class:Laravel\\Pao\\Drivers\\Pest\\Plugin": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Browser\\Plugin": [
+            "pest.browser-mode"
+        ],
+        "pest-plugin-class:Pest\\Laravel\\Plugin": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Mutate\\Plugins\\Mutate": [
+            "pest.mutation-testing"
+        ],
+        "pest-plugin-class:Pest\\Profanity\\Plugin": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\TypeCoverage\\Plugin": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Bail": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Cache": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Configuration": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Coverage": [
+            "pest.plugin.cli-interception",
+            "phpunit.coverage"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Environment": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Help": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Init": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Memory": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Only": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Parallel": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Printer": [
+            "pest.alternate-printer"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\ProcessIsolation": [
+            "phpunit.process-isolation"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Profile": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Retry": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Shard": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Snapshot": [
+            "pest.snapshot"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Tia": [
+            "pest.plugin.runner-internals"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Verbose": [
+            "pest.plugin.cli-interception"
+        ],
+        "pest-plugin-class:Pest\\Plugins\\Version": [
+            "pest.plugin.cli-interception"
+        ]
     },
     "corpora": [
         {
@@ -38,15 +190,83 @@
             "repository": "https://github.com/pestphp/pest.git",
             "commit": "6b2cd358e8a9d6d1abb93804b70e1c659bbc411b",
             "tag": "v5.0.1",
-            "gate_status": "PROVEN",
-            "classification": "SUPPORTED",
+            "gate_status": "CURATED_PROVEN_FULL_SUITE_PENDING",
+            "classification": "bridge-only",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "execution_configuration": "phpunit.xml",
+            "execution_configuration_sha256": "3e9a1223f11669f6f598e45ac406c45995a839be4a23a212554460b29fb0a8d5",
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "bin/pest",
+                    "arguments": [],
+                    "frontend": "pest",
+                    "runtime": "plain",
+                    "state": "none"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "bin/drove",
+                    "arguments": [
+                        "--pest"
+                    ],
+                    "frontend": "pest",
+                    "runtime": "plain",
+                    "state": "none"
+                }
+            },
+            "environment_expectation": null,
+            "dependency_lock": {
+                "path": "locks/pest.lock",
+                "sha256": "99b2831268eeee015d424132b074d4979cedae283641eb8ea433ac98f0e07100"
+            },
+            "dependency_overlay": {
+                "composer_json_sha256": "829d94ff9be2d44e8424b30a19d871390686f67e6b878ea06eef24ad3f2a34be",
+                "tracked_paths": []
+            },
+            "full_suite_discovery": {
+                "mode": "phpunit-list-tests-xml",
+                "runner": "bin/pest",
+                "configuration": "phpunit.xml",
+                "configuration_sha256": "3e9a1223f11669f6f598e45ac406c45995a839be4a23a212554460b29fb0a8d5",
+                "input_roots": [
+                    "tests",
+                    "tests-external"
+                ],
+                "environment": [],
+                "case_surfaces": [
+                    "pest.portable.test"
+                ],
+                "cohorts": {
+                    "nonserial": {
+                        "selector": "pest-nonserial",
+                        "resource_mode": "parallel",
+                        "calibrated_cases": 785,
+                        "include_groups": [],
+                        "exclude_groups": []
+                    },
+                    "serial": {
+                        "selector": "pest-serial",
+                        "resource_mode": "serial",
+                        "calibrated_cases": 12,
+                        "include_groups": [],
+                        "exclude_groups": []
+                    }
+                }
+            },
             "hosted_gate_matrix": {
                 "nonserial": {
                     "baseline": [
                         1
                     ],
                     "drove": [
-                        8
+                        1,
+                        2,
+                        4,
+                        8,
+                        16,
+                        30
                     ]
                 },
                 "serial": {
@@ -84,16 +304,16 @@
             },
             "baseline": {
                 "runner": "php bin/pest with the selector output as explicit paths",
-                "passed": 726,
+                "passed": 794,
                 "failed": 0,
-                "skipped": 71,
-                "assertions": 1718,
+                "skipped": 3,
+                "assertions": 1828,
                 "exit": 0,
                 "nonserial": {
-                    "passed": 714,
+                    "passed": 782,
                     "failed": 0,
-                    "skipped": 71,
-                    "assertions": 1690,
+                    "skipped": 3,
+                    "assertions": 1800,
                     "exit": 0
                 },
                 "serial": {
@@ -104,17 +324,17 @@
                 }
             },
             "drove": {
-                "runner": "php bin/drove --parallel --processes=8 with the same explicit paths",
-                "passed": 726,
+                "runner": "php bin/drove --pest --parallel --processes=8 with the same explicit paths",
+                "passed": 794,
                 "failed": 0,
-                "skipped": 71,
-                "assertions": 1718,
+                "skipped": 3,
+                "assertions": 1828,
                 "exit": 0,
                 "nonserial": {
-                    "passed": 714,
+                    "passed": 782,
                     "failed": 0,
-                    "skipped": 71,
-                    "assertions": 1690,
+                    "skipped": 3,
+                    "assertions": 1800,
                     "exit": 0
                 },
                 "serial": {
@@ -125,11 +345,13 @@
                 }
             },
             "proof_boundary": [
-                "The proof runs Pest's inherited tests from the Drove checkout, not an independently installed Pest consumer.",
-                "142 selected files are byte-identical to v5.0.1; tests/Features/Expect/pipes.php differs only by removal of a redundant property initializer.",
-                "Three unchanged files share /tmp/fake.file and are therefore compared in an explicit one-process cohort; the remaining 140 files run at eight processes.",
-                "Drove and Pest both report 1718 assertions for the selected cases.",
-                "Shared-host wall times are diagnostics only; no performance claim is recorded."
+                "Baseline and Drove execute the same selected source files from the exact pinned Pest v5.0.1 checkout; Drove bind-mounts the complete pinned tests, tests-external, and phpunit.xml surfaces over its runtime tree.",
+                "All 143 selected files are therefore byte-identical to the pinned commit for both runners.",
+                "Three pinned files share /tmp/fake.file and are therefore compared in an explicit one-process cohort; the remaining 140 files run at the declared 1, 2, 4, 8, 16, and 30 process limits.",
+                "The pinned corpus image supplies Node 22, so both runners execute the 68 ViteDepsHelper cases that Pest skips when Node is absent.",
+                "Drove and Pest both report 1828 assertions for the selected cases.",
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Shared-host measurements are diagnostics only; no performance claim is recorded."
             ]
         },
         {
@@ -137,19 +359,90 @@
             "position": 2,
             "repository": "https://github.com/InvoiceShelf/InvoiceShelf.git",
             "commit": "403a4d67225a153838ec126c484339abf60229d1",
-            "gate_status": "PROVEN",
-            "classification": "SUPPORTED",
+            "gate_status": "CURATED_PROVEN_FULL_SUITE_PENDING",
+            "classification": "bridge-only",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "execution_configuration": "phpunit.drove.xml",
+            "execution_configuration_sha256": "ebbac7a6a1e69f5978e61751325ea64a786d3cea7a2e63cd02313b384ccfd1eb",
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "vendor/bin/pest",
+                    "arguments": [],
+                    "frontend": "pest",
+                    "runtime": "laravel",
+                    "state": "sqlite-copy"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "arguments": [
+                        "--pest"
+                    ],
+                    "frontend": "pest",
+                    "runtime": "laravel",
+                    "state": "sqlite-copy"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-copy",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/invoiceshelf.lock",
                 "sha256": "b7eb7b86d205a5dbb9f985a56e756882af60eaa5913a095187fa65fcb0d98f47"
             },
+            "dependency_overlay": {
+                "composer_json_sha256": "19b2ad81eb7e6c0ba457c43a24f952f00aa684a55dbc23e6b718614ca9649129",
+                "tracked_paths": [
+                    "composer.json",
+                    "composer.lock"
+                ]
+            },
+            "full_suite_discovery": {
+                "mode": "phpunit-list-tests-xml",
+                "runner": "vendor/bin/pest",
+                "configuration": "phpunit.xml",
+                "configuration_sha256": "26e4b545d4b2096f53934f8bf800ca4ae2fdf3cae086154f8f2ac096bc392904",
+                "input_roots": [
+                    "tests"
+                ],
+                "environment": {
+                    "APP_ENV": "testing"
+                },
+                "case_surfaces": [
+                    "pest.portable.test",
+                    "laravel.native-environment"
+                ],
+                "cohorts": {
+                    "parallel": {
+                        "selector": "invoiceshelf",
+                        "resource_mode": "parallel",
+                        "calibrated_cases": 202,
+                        "include_groups": [],
+                        "exclude_groups": []
+                    }
+                }
+            },
             "hosted_gate_matrix": {
-                "full": {
+                "parallel": {
                     "baseline": [
                         1
                     ],
                     "drove": [
-                        8
+                        1,
+                        2,
+                        4,
+                        8,
+                        16,
+                        30
                     ]
                 }
             },
@@ -160,7 +453,12 @@
                     "tests/Feature/Customer"
                 ],
                 "files": 47,
-                "cases": 202
+                "cases": 202,
+                "parallel": {
+                    "selector": "sh benchmarks/corpus/select.sh invoiceshelf /checkout",
+                    "files": 47,
+                    "cases": 202
+                }
             },
             "dependency_uplift": {
                 "pest_frontend": "oxhq/drove 0.4.0-alpha.1",
@@ -175,20 +473,33 @@
                 "passed": 202,
                 "failed": 0,
                 "assertions": 328,
-                "exit": 0
+                "exit": 0,
+                "parallel": {
+                    "passed": 202,
+                    "failed": 0,
+                    "assertions": 328,
+                    "exit": 0
+                }
             },
             "drove": {
                 "passed": 202,
                 "failed": 0,
                 "assertions": 328,
                 "exit": 0,
+                "parallel": {
+                    "passed": 202,
+                    "failed": 0,
+                    "assertions": 328,
+                    "exit": 0
+                },
                 "snapshots_after": 0,
                 "additional_sqlite_artifacts_after": 0
             },
             "proof_boundary": [
                 "All 47 selected source files are unchanged from the pinned InvoiceShelf commit.",
                 "The dependency uplift is a compatibility overlay; it is not evidence for InvoiceShelf's original dependency graph.",
-                "The result is correctness evidence only, not a speed comparison."
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Recorded measurements are diagnostics only, not a performance claim."
             ]
         },
         {
@@ -196,17 +507,96 @@
             "position": 3,
             "repository": "https://github.com/livewire/livewire.git",
             "commit": "9c1450739d30c9b0b223ad6512be2a33f8f62f96",
-            "gate_status": "PROVEN",
-            "classification": "SUPPORTED",
+            "gate_status": "CURATED_PROVEN_FULL_SUITE_PENDING",
+            "classification": "bridge-only",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "execution_configuration": "phpunit.xml.dist",
+            "execution_configuration_sha256": "46f84f1b81da0ff8e89a7ed6364a3c272ccd4237d0ee6822ab5619b9dc82c6f1",
+            "runner_identity": {
+                "baseline": {
+                    "command": "phpunit",
+                    "executable": "vendor/bin/phpunit",
+                    "arguments": [],
+                    "frontend": "phpunit",
+                    "runtime": "testbench",
+                    "state": "sqlite-memory"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "arguments": [
+                        "--pest"
+                    ],
+                    "frontend": "phpunit",
+                    "runtime": "testbench",
+                    "state": "sqlite-memory"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-memory",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/livewire.lock",
                 "sha256": "d54b9564f5364cd57f6b0c37eaa4e910abe4f3bf611e19f43b6713cc2862ce52"
+            },
+            "dependency_overlay": {
+                "composer_json_sha256": "d86f98cb5b52b58349dac27ba8ffbc760497421fc9b588e4e5c33d07d69c7a79",
+                "tracked_paths": [
+                    "composer.json"
+                ]
+            },
+            "full_suite_discovery": {
+                "mode": "phpunit-list-tests-xml",
+                "runner": "vendor/bin/phpunit",
+                "configuration": "phpunit.xml.dist",
+                "configuration_sha256": "46f84f1b81da0ff8e89a7ed6364a3c272ccd4237d0ee6822ab5619b9dc82c6f1",
+                "input_roots": [
+                    "src",
+                    "legacy_tests/Browser"
+                ],
+                "environment": {
+                    "APP_ENV": "testing",
+                    "DUSK_DRIVER_URL": "http://127.0.0.1:9515"
+                },
+                "case_surfaces": [
+                    "phpunit.test-case",
+                    "testbench.application"
+                ],
+                "cohorts": {
+                    "parallel": {
+                        "selector": "livewire-parallel",
+                        "resource_mode": "parallel",
+                        "calibrated_cases": 36,
+                        "include_groups": [],
+                        "exclude_groups": []
+                    },
+                    "serial": {
+                        "selector": "livewire",
+                        "resource_mode": "serial",
+                        "calibrated_cases": 288,
+                        "include_groups": [],
+                        "exclude_groups": []
+                    }
+                }
             },
             "selection": {
                 "selector": "sh benchmarks/corpus/select.sh livewire /checkout",
                 "rule": "the lexicographically first 20 src/**/*UnitTest.php files",
                 "files": 20,
                 "cases": 288,
+                "serial": {
+                    "selector": "sh benchmarks/corpus/select.sh livewire /checkout",
+                    "files": 20,
+                    "cases": 288
+                },
                 "parallel": {
                     "selector": "sh benchmarks/corpus/select.sh livewire-parallel /checkout",
                     "rule": "seven explicit Testbench files whose test bodies do not render Blade views, launch Dusk, or generate application files",
@@ -239,6 +629,13 @@
                 "assertions": 1034,
                 "incomplete": 3,
                 "exit": 0,
+                "serial": {
+                    "passed": 285,
+                    "failed": 0,
+                    "assertions": 1034,
+                    "incomplete": 3,
+                    "exit": 0
+                },
                 "parallel": {
                     "runner": "PHPUnit 13 with the filesystem-neutral selector output as explicit paths",
                     "passed": 36,
@@ -248,15 +645,22 @@
                 }
             },
             "drove": {
-                "runner": "php vendor/bin/drove --parallel --processes=1 with the full selector output as explicit paths",
+                "runner": "php vendor/bin/drove --pest --parallel --processes=1 with the full selector output as explicit paths",
                 "tests": 288,
                 "passed": 285,
                 "failed": 0,
                 "assertions": 1034,
                 "incomplete": 3,
                 "exit": 0,
+                "serial": {
+                    "passed": 285,
+                    "failed": 0,
+                    "assertions": 1034,
+                    "incomplete": 3,
+                    "exit": 0
+                },
                 "parallel": {
-                    "runner": "php vendor/bin/drove --parallel at 1, 2, 4, and 8 processes with the filesystem-neutral selector output",
+                    "runner": "php vendor/bin/drove --pest --parallel at C1/C2/C4/C8/C16/C30 with the filesystem-neutral selector output",
                     "passed": 36,
                     "failed": 0,
                     "assertions": 68,
@@ -265,12 +669,14 @@
                         1,
                         2,
                         4,
-                        8
+                        8,
+                        16,
+                        30
                     ]
                 }
             },
             "hosted_gate_matrix": {
-                "full": {
+                "serial": {
                     "state": "sqlite-memory",
                     "baseline": [
                         1
@@ -288,7 +694,9 @@
                         1,
                         2,
                         4,
-                        8
+                        8,
+                        16,
+                        30
                     ]
                 }
             },
@@ -297,10 +705,11 @@
                 "All 20 selected source files and the Testbench bootstrap are unchanged from the pinned Livewire commit.",
                 "DUSK_DRIVER_URL disables Livewire's local Chromedriver launcher; this unit-only selection never contacts the driver.",
                 "The complete 288-case selection runs serially because its TestCase clean slate and command tests mutate shared Testbench filesystem paths.",
-                "The 36-case parallel cohort keeps real Testbench application and sqlite-memory lifecycle while excluding test bodies that use those unmanaged filesystem paths; replay metadata must observe the requested 1, 2, 4, and 8 concurrency.",
+                "The 36-case parallel cohort keeps real Testbench application and sqlite-memory lifecycle while excluding test bodies that use those unmanaged filesystem paths; replay metadata records an observed lane high-water mark no greater than each requested 1, 2, 4, 8, 16, and 30 process limit.",
                 "Pinned Livewire uses RefreshDatabase only in browser tests, so this unit cohort proves inherited-PDO identity guards but does not claim external RefreshDatabase trait coverage.",
                 "The non-symlinked Composer overlay records the proven Drove revision.",
-                "The result is correctness evidence only, not a speed comparison."
+                "The curated selections are not a whole-suite compatibility claim.",
+                "Recorded measurements are diagnostics only, not a performance claim."
             ]
         },
         {
@@ -308,11 +717,104 @@
             "position": 4,
             "repository": "https://github.com/filamentphp/filament.git",
             "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
-            "gate_status": "PROVEN",
-            "classification": "SUPPORTED",
+            "gate_status": "CURATED_PROVEN_FULL_SUITE_PENDING",
+            "classification": "bridge-only",
+            "selection_mode": "curated",
+            "whole_suite": false,
+            "execution_configuration": "phpunit.drove.xml",
+            "execution_configuration_sha256": "ebbac7a6a1e69f5978e61751325ea64a786d3cea7a2e63cd02313b384ccfd1eb",
+            "runner_identity": {
+                "baseline": {
+                    "command": "pest",
+                    "executable": "vendor/bin/pest",
+                    "arguments": [],
+                    "frontend": "pest",
+                    "runtime": "testbench",
+                    "state": "sqlite-copy"
+                },
+                "drove": {
+                    "command": "drove",
+                    "executable": "vendor/bin/drove",
+                    "arguments": [
+                        "--pest"
+                    ],
+                    "frontend": "pest",
+                    "runtime": "testbench",
+                    "state": "sqlite-copy"
+                }
+            },
+            "environment_expectation": {
+                "coordination": "best-effort",
+                "database": {
+                    "provider": "sqlite-copy",
+                    "capabilities": [
+                        "branchable",
+                        "scope-isolated"
+                    ]
+                }
+            },
             "dependency_lock": {
                 "path": "locks/filament.lock",
                 "sha256": "07470ae723c2b11e5ac330e9ee3d54676fabb3ee58fb83e98a27834d19d4797b"
+            },
+            "dependency_overlay": {
+                "composer_json_sha256": "69fd1ab05e6092350de8f7be51627a9206f6adc32518c85d3568d889e8312a23",
+                "tracked_paths": [
+                    "composer.json",
+                    "composer.lock"
+                ]
+            },
+            "full_suite_discovery": {
+                "mode": "phpunit-list-tests-xml",
+                "runner": "vendor/bin/pest",
+                "configuration": "phpunit.xml.dist",
+                "configuration_sha256": "e904547fc28fdb30c52ed44793281bd07a853097c543f100d4ac1e2a4dc1a78c",
+                "php_memory_limit": "256M",
+                "node_runtime": {
+                    "minimum_version": "18.0.0",
+                    "source_package_sha256": "ebacd7ee8386698d00802c014b1442a9acff3e79ebcea7e5b3e055a20d53c2b7",
+                    "source_lock_sha256": "ab7834adddfdccdc3cd4b58d627c2ae893b66741c0049fbde6421cbf190aef4e",
+                    "source_playwright": "1.60.0",
+                    "overlay_package": "locks/filament-playwright.json",
+                    "overlay_package_sha256": "360fd98f8681acbd2334f917728b13d32d0312d5b7627911ab98c48bcf7e7741",
+                    "overlay_lock": "locks/filament-playwright.lock",
+                    "overlay_lock_sha256": "e8739139e8bc5772a58b0881f28213dba1e2add8d99d425d6e845ae892f6a1b9",
+                    "playwright": "1.61.1",
+                    "install": "npm-ci-ignore-scripts",
+                    "browser_download": false
+                },
+                "input_roots": [
+                    "tests"
+                ],
+                "environment": {
+                    "APP_ENV": "self-testing",
+                    "APP_KEY": "base64:yk+bUVuZa1p86Dqjk9OjVK2R1pm6XHxC6xEKFq8utH0=",
+                    "DB_CONNECTION": "testing"
+                },
+                "case_surfaces": [
+                    "pest.portable.test",
+                    "testbench.application"
+                ],
+                "cohorts": {
+                    "nonserial": {
+                        "selector": "filament",
+                        "resource_mode": "parallel",
+                        "calibrated_cases": 677,
+                        "include_groups": [],
+                        "exclude_groups": [
+                            "serial"
+                        ]
+                    },
+                    "serial": {
+                        "selector": "filament",
+                        "resource_mode": "serial",
+                        "calibrated_cases": 28,
+                        "include_groups": [
+                            "serial"
+                        ],
+                        "exclude_groups": []
+                    }
+                }
             },
             "hosted_gate_matrix": {
                 "nonserial": {
@@ -323,7 +825,9 @@
                         1,
                         2,
                         4,
-                        8
+                        8,
+                        16,
+                        30
                     ]
                 },
                 "serial": {
@@ -345,7 +849,9 @@
                         1,
                         2,
                         4,
-                        8
+                        8,
+                        16,
+                        30
                     ],
                     "runner_arguments": [
                         "--parallel",
@@ -390,11 +896,15 @@
                         1,
                         2,
                         4,
-                        8
+                        8,
+                        16,
+                        30
                     ],
                     "passed": 677,
                     "assertions": 1016,
                     "exit_codes": [
+                        0,
+                        0,
                         0,
                         0,
                         0,
@@ -418,7 +928,8 @@
                 "All 39 selected source files and Filament's Testbench bootstrap are unchanged from the pinned commit.",
                 "Composer's non-symlinked path overlay and Filament's existing package discovery load Drove without a provider patch.",
                 "Drove preserves baseline semantics for all 705 cases, including the 677-case nonserial cohort at 1, 2, 4, and 8 processes.",
-                "Shared-host wall times are diagnostics only; no performance claim is recorded."
+                "The curated selection is not a whole-suite compatibility claim.",
+                "Shared-host measurements are diagnostics only; no performance claim is recorded."
             ]
         }
     ]

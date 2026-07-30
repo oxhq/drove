@@ -16,7 +16,7 @@ use Throwable;
 final readonly class LifecycleExecutor
 {
     /**
-     * @param  Closure(string): (Closure|array<string, mixed>)  $testResolver
+     * @param  Closure(string, ScopeContext=): (Closure|array<string, mixed>)  $testResolver
      * @param  null|Closure(ScopeContext, list<array<string, mixed>>): void  $beforeDispatch
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $enterDescendant
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $leaveDescendant
@@ -53,7 +53,20 @@ final readonly class LifecycleExecutor
             [],
         );
         $finishedNs = hrtime(true);
-        $events = [[
+        $testIndexes = [];
+
+        foreach ($result['tests'] as $testIndex => &$test) {
+            unset($test['events']);
+
+            if (is_string($test['id'] ?? null)) {
+                $testIndexes[$test['id']] = $testIndex;
+            }
+        }
+
+        unset($test);
+        $events = $result['events'];
+        unset($result['events']);
+        array_unshift($events, [
             'type' => 'run.started',
             'scope_id' => $root['id'],
             'test_id' => null,
@@ -62,7 +75,8 @@ final readonly class LifecycleExecutor
             'status' => 'running',
             'failure' => null,
             'pid' => getmypid(),
-        ], ...$result['events'], [
+        ]);
+        $events[] = [
             'type' => 'run.finished',
             'scope_id' => $root['id'],
             'test_id' => null,
@@ -71,7 +85,7 @@ final readonly class LifecycleExecutor
             'status' => $result['scope']['status'],
             'failure' => $result['scope']['failure'],
             'pid' => getmypid(),
-        ]];
+        ];
 
         foreach ($events as $sequence => &$event) {
             $event = [
@@ -79,6 +93,13 @@ final readonly class LifecycleExecutor
                 'run_id' => $this->scheduler->runId(),
                 'sequence' => $sequence,
             ] + $event;
+
+            $testId = $event['test_id'] ?? null;
+            $testIndex = is_string($testId) ? ($testIndexes[$testId] ?? null) : null;
+
+            if (is_int($testIndex) && ($event['phase'] ?? null) !== 'scheduler') {
+                $result['tests'][$testIndex]['events'][] = &$event;
+            }
         }
 
         unset($event);
@@ -282,7 +303,16 @@ final readonly class LifecycleExecutor
         ];
         $nextLevels = [...$levels, $currentLevel];
         $jobs = [];
+        $frames = [
+            $scopeId => [
+                'context' => $context,
+                'levels' => $nextLevels,
+                'scope_ids' => $scopeIds,
+            ],
+        ];
         $tasks = [];
+        $directTestIds = [];
+        $children = [];
 
         foreach ($node['tests'] ?? [] as $test) {
             if (! is_array($test)) {
@@ -290,7 +320,12 @@ final readonly class LifecycleExecutor
             }
 
             $id = $this->string($test, 'id');
-            $jobs[$id] = ['kind' => 'test', 'node' => $test];
+            $directTestIds[] = $id;
+            $jobs[$id] = [
+                'kind' => 'test',
+                'node' => $test,
+                'frame_id' => $scopeId,
+            ];
             $tasks[] = [
                 'id' => $id,
                 'kind' => 'test',
@@ -307,46 +342,80 @@ final readonly class LifecycleExecutor
             }
 
             $id = $this->string($child, 'id');
-            $jobs[$id] = ['kind' => 'scope', 'node' => $child];
-            $tasks[] = [
-                'id' => $id,
-                'kind' => 'scope',
-                'scope_id' => $id,
-                'scopes' => [...$scopeIds, $id],
-                'timeout_ms' => $child['timeout_ms'] ?? 0,
-                'permit' => false,
-            ];
+
+            if ($this->isInertScope($child)) {
+                $flattened = $this->flattenInertScope(
+                    $child,
+                    $context,
+                    $nextLevels,
+                    $scopeIds,
+                );
+
+                foreach ($flattened['jobs'] as $jobId => $job) {
+                    $jobs[$jobId] = $job;
+                }
+
+                foreach ($flattened['frames'] as $frameId => $frame) {
+                    $frames[$frameId] = $frame;
+                }
+
+                array_push($tasks, ...$flattened['tasks']);
+                $children[] = ['kind' => 'inert', 'tree' => $flattened['tree']];
+            } else {
+                $jobs[$id] = [
+                    'kind' => 'scope',
+                    'node' => $child,
+                    'frame_id' => $scopeId,
+                ];
+                $tasks[] = [
+                    'id' => $id,
+                    'kind' => 'scope',
+                    'scope_id' => $id,
+                    'scopes' => [...$scopeIds, $id],
+                    'timeout_ms' => $child['timeout_ms'] ?? 0,
+                    'permit' => false,
+                ];
+                $children[] = ['kind' => 'scope', 'id' => $id];
+            }
         }
 
+        $tasks = $this->dispatchTasks($tasks);
         $beforeDispatchFailure = null;
 
-        try {
-            $this->beforeDispatch?->__invoke($context, $tasks);
-        } catch (Throwable $throwable) {
-            $beforeDispatchFailure = $this->failure($throwable, 'before_dispatch', null);
-            $scopeFailures[] = $beforeDispatchFailure;
+        if ($tasks !== []) {
+            try {
+                $this->beforeDispatch?->__invoke($context, $tasks);
+            } catch (Throwable $throwable) {
+                $beforeDispatchFailure = $this->failure($throwable, 'before_dispatch', null);
+                $scopeFailures[] = $beforeDispatchFailure;
+            }
         }
 
         $mapFailure = null;
         $mapped = ['results' => [], 'completion_order' => []];
 
-        if ($beforeDispatchFailure === null) {
+        if ($beforeDispatchFailure === null && $tasks !== []) {
             try {
                 $mapped = $this->scheduler->map(
                     $tasks,
-                    function (array $task) use ($jobs, $context, $nextLevels): array {
+                    function (array $task) use ($jobs, $frames): array {
                         $job = $jobs[$task['id']];
-                        $descendantContext = $job['kind'] === 'test'
-                            ? $context->child(['test_id' => $task['id']])
-                            : $this->scopeContext($job['node'], $context);
+                        $frame = $frames[$job['frame_id']];
+                        $jobContext = $frame['context'];
+                        $jobNode = $job['node'];
+                        $jobKind = $job['kind'];
+                        $jobLevels = $frame['levels'];
+                        $descendantContext = $jobKind === 'test'
+                            ? $jobContext->child(['test_id' => $task['id']])
+                            : $this->scopeContext($jobNode, $jobContext);
                         $result = null;
                         $primaryFailure = null;
 
                         try {
                             $this->enterDescendant?->__invoke($descendantContext, $task);
-                            $result = $job['kind'] === 'test'
-                                ? $this->runTest($job['node'], $nextLevels, $descendantContext)
-                                : $this->runScope($job['node'], $descendantContext, $nextLevels);
+                            $result = $jobKind === 'test'
+                                ? $this->runTest($jobNode, $jobLevels, $descendantContext)
+                                : $this->runScope($jobNode, $descendantContext, $jobLevels);
                         } catch (Throwable $throwable) {
                             $primaryFailure = $throwable;
                         } finally {
@@ -371,10 +440,12 @@ final readonly class LifecycleExecutor
             }
         }
 
-        try {
-            $this->afterDispatch?->__invoke($context, $tasks);
-        } catch (Throwable $throwable) {
-            $scopeFailures[] = $this->failure($throwable, 'after_dispatch', null);
+        if ($tasks !== []) {
+            try {
+                $this->afterDispatch?->__invoke($context, $tasks);
+            } catch (Throwable $throwable) {
+                $scopeFailures[] = $this->failure($throwable, 'after_dispatch', null);
+            }
         }
 
         if ($mapFailure instanceof Throwable) {
@@ -388,40 +459,51 @@ final readonly class LifecycleExecutor
         $scopes = $blocked['scopes'];
         array_push($events, ...$blocked['events']);
         $completionOrder = $mapped['completion_order'];
+        $mappedResults = $mapped['results'];
+        $mappedResultCount = count($mappedResults);
+        $mappedResultCursor = 0;
+        unset($mapped, $tasks);
 
-        foreach ($mapped['results'] as $transport) {
-            $job = $jobs[$transport['id']];
-            $events[] = $this->taskEvent('task.started', $transport);
-
-            if ($job['kind'] === 'test') {
-                $test = $transport['status'] === 'passed' && is_array($transport['value'])
-                    ? $transport['value']
-                    : $this->transportTestFailure($job['node'], $scopeIds, $transport);
-                $test['telemetry'] = $transport['telemetry'];
-                $test['stdout'] = ($test['stdout'] ?? '').($transport['stdout'] ?? '');
-                $test['stderr'] = ($test['stderr'] ?? '').($transport['stderr'] ?? '');
-                $tests[] = $test;
-                array_push($events, ...$test['events']);
-            } else {
-                $child = $transport['status'] === 'passed' && is_array($transport['value'])
-                    ? $transport['value']
-                    : $this->transportScopeFailure($job['node'], $transport);
-                $child['scope']['telemetry'] = $transport['telemetry'];
-                $child['scopes'][0]['telemetry'] = $transport['telemetry'];
-
-                foreach (['stdout', 'stderr'] as $stream) {
-                    $child['scope'][$stream] = ($child['scope'][$stream] ?? '').($transport[$stream] ?? '');
-                    $child['scopes'][0][$stream] = $child['scope'][$stream];
-                }
-
-                array_push($tests, ...$child['tests']);
-                array_push($scopes, ...$child['scopes']);
-                array_push($events, ...$child['events']);
-                array_push($completionOrder, ...$child['completion_order']);
+        if ($beforeDispatchFailure === null) {
+            foreach ($directTestIds as $testId) {
+                $descendant = $this->scheduledTestResult(
+                    $testId,
+                    $mappedResults,
+                    $mappedResultCursor,
+                    $jobs,
+                    $frames,
+                );
+                array_push($tests, ...$descendant['tests']);
+                array_push($events, ...$descendant['events']);
             }
 
-            $events[] = $this->taskEvent('task.finished', $transport);
+            foreach ($children as $child) {
+                $descendant = $child['kind'] === 'inert'
+                    ? $this->inertScopeResult(
+                        $child['tree'],
+                        $mappedResults,
+                        $mappedResultCursor,
+                        $jobs,
+                        $frames,
+                    )
+                    : $this->scheduledScopeResult(
+                        $child['id'],
+                        $mappedResults,
+                        $mappedResultCursor,
+                        $jobs,
+                    );
+                array_push($tests, ...$descendant['tests']);
+                array_push($scopes, ...$descendant['scopes']);
+                array_push($events, ...$descendant['events']);
+                array_push($completionOrder, ...$descendant['completion_order']);
+            }
+
+            if ($mappedResultCursor !== $mappedResultCount) {
+                throw new RuntimeException('Drove scheduler returned unconsumed lifecycle results.');
+            }
         }
+
+        unset($frames, $jobs, $mappedResults);
 
         $this->scheduler->withPermit($scopeIds, function () use (
             $hooks,
@@ -505,7 +587,7 @@ final readonly class LifecycleExecutor
         }
 
         $scopeId = $levels[count($levels) - 1]['id'];
-        ['closure' => $body, 'runtime' => $runtime] = $this->test($testId);
+        ['closure' => $body, 'runtime' => $runtime] = $this->test($testId, $context);
         $events = [$this->event('test.started', $scopeId, $testId, status: 'running')];
         $completed = [];
         $primaryFailure = null;
@@ -635,6 +717,17 @@ final readonly class LifecycleExecutor
                 }
             }
         }
+
+        $deferred = $this->runDeferred(
+            $context,
+            array_column($levels, 'id'),
+            $scopeId,
+            $testId,
+            alreadyPermitted: true,
+        );
+        array_push($events, ...$deferred['events']);
+        array_push($teardownFailures, ...$deferred['failures']);
+        $primaryFailure ??= $deferred['failures'][0] ?? null;
 
         $stdout = '';
 
@@ -889,25 +982,35 @@ final readonly class LifecycleExecutor
         ScopeContext $context,
         array $scopeIds,
         string $scopeId,
+        ?string $testId = null,
+        bool $alreadyPermitted = false,
     ): array {
         $events = [];
         $failures = [];
 
-        $this->scheduler->withPermit($scopeIds, function () use (
+        $drain = function () use (
             $context,
             $scopeId,
+            $testId,
             &$events,
             &$failures,
         ): void {
             foreach ($context->drainDeferred() as $ordinal => $cleanup) {
                 $hookId = sprintf('defer:%s:%d', $scopeId, $ordinal);
-                $events[] = $this->event('hook.started', $scopeId, hookId: $hookId, phase: 'defer');
+                $events[] = $this->event(
+                    'hook.started',
+                    $scopeId,
+                    testId: $testId,
+                    hookId: $hookId,
+                    phase: 'defer',
+                );
 
                 try {
                     $this->invoke($cleanup, $context);
                     $events[] = $this->event(
                         'hook.finished',
                         $scopeId,
+                        testId: $testId,
                         hookId: $hookId,
                         phase: 'defer',
                         status: 'passed',
@@ -918,6 +1021,7 @@ final readonly class LifecycleExecutor
                     $events[] = $this->event(
                         'hook.finished',
                         $scopeId,
+                        testId: $testId,
                         hookId: $hookId,
                         phase: 'defer',
                         status: 'failed',
@@ -925,7 +1029,13 @@ final readonly class LifecycleExecutor
                     );
                 }
             }
-        });
+        };
+
+        if ($alreadyPermitted) {
+            $drain();
+        } else {
+            $this->scheduler->withPermit($scopeIds, $drain);
+        }
 
         return ['events' => $events, 'failures' => $failures];
     }
@@ -1006,6 +1116,502 @@ final readonly class LifecycleExecutor
     }
 
     /**
+     * @param  list<array<string, mixed>>  $tasks
+     * @return list<array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: int, permit: bool}>
+     */
+    private function dispatchTasks(array $tasks): array
+    {
+        $dispatch = [];
+
+        foreach ($tasks as $task) {
+            $id = $task['id'] ?? null;
+            $kind = $task['kind'] ?? null;
+            $scopeId = $task['scope_id'] ?? null;
+            $timeoutMs = $task['timeout_ms'] ?? null;
+            $permit = $task['permit'] ?? null;
+
+            if (! is_string($id)
+                || ! in_array($kind, ['scope', 'test'], true)
+                || ! is_string($scopeId)
+                || ! is_int($timeoutMs)
+                || ! is_bool($permit)) {
+                throw new RuntimeException('Drove received an invalid flattened dispatch task.');
+            }
+
+            $dispatch[] = [
+                'id' => $id,
+                'kind' => $kind,
+                'scope_id' => $scopeId,
+                'scopes' => $this->scopeIds($task['scopes'] ?? null),
+                'timeout_ms' => $timeoutMs,
+                'permit' => $permit,
+            ];
+        }
+
+        return $dispatch;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function scopeIds(mixed $scopeIds): array
+    {
+        if (! is_array($scopeIds)
+            || ! array_is_list($scopeIds)
+            || array_any(
+                $scopeIds,
+                static fn (mixed $scopeId): bool => ! is_string($scopeId) || $scopeId === '',
+            )) {
+            throw new RuntimeException('Drove received invalid flattened scope IDs.');
+        }
+
+        return $scopeIds;
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  list<array{id: string, before_each: list<string>, after_each: list<string>}>  $levels
+     * @param  list<string>  $ancestorScopeIds
+     * @return array{
+     *     jobs: array<string, array{
+     *         kind: 'scope'|'test',
+     *         node: array<string, mixed>,
+     *         frame_id: string
+     *     }>,
+     *     frames: array<string, array{
+     *         context: ScopeContext,
+     *         levels: list<array{id: string, before_each: list<string>, after_each: list<string>}>,
+     *         scope_ids: list<string>
+     *     }>,
+     *     tasks: list<array{id: string, kind: 'scope'|'test', scope_id: string, scopes: list<string>, timeout_ms: mixed, permit: bool}>,
+     *     tree: array<string, mixed>
+     * }
+     */
+    private function flattenInertScope(
+        array $node,
+        ScopeContext $parentContext,
+        array $levels,
+        array $ancestorScopeIds,
+    ): array {
+        $scopeId = $this->string($node, 'id');
+        $hooks = $this->hooks($node);
+        $scopeType = $this->string($node, 'type');
+
+        if (($node['tests'] ?? []) === [] && ($node['children'] ?? []) === []) {
+            return [
+                'jobs' => [],
+                'frames' => [],
+                'tasks' => [],
+                'tree' => [
+                    'scope' => [
+                        'id' => $scopeId,
+                        'type' => $scopeType,
+                        'concurrency' => $node['concurrency'] ?? null,
+                    ],
+                    'tests' => [],
+                    'children' => [],
+                ],
+            ];
+        }
+
+        $context = $this->scopeContext($node, $parentContext);
+        $scopeIds = [...$ancestorScopeIds, $scopeId];
+        $nextLevels = [...$levels, [
+            'id' => $scopeId,
+            'before_each' => $hooks['before_each'],
+            'after_each' => $hooks['after_each'],
+        ]];
+        $jobs = [];
+        $frames = [
+            $scopeId => [
+                'context' => $context,
+                'levels' => $nextLevels,
+                'scope_ids' => $scopeIds,
+            ],
+        ];
+        $tasks = [];
+        $testIds = [];
+        $children = [];
+
+        foreach ($node['tests'] ?? [] as $test) {
+            if (! is_array($test)) {
+                throw new InvalidArgumentException('Drove Scope IR contains an invalid test node.');
+            }
+
+            $id = $this->string($test, 'id');
+            $testIds[] = $id;
+            $jobs[$id] = [
+                'kind' => 'test',
+                'node' => $test,
+                'frame_id' => $scopeId,
+            ];
+            $tasks[] = [
+                'id' => $id,
+                'kind' => 'test',
+                'scope_id' => $scopeId,
+                'scopes' => $scopeIds,
+                'timeout_ms' => $test['timeout_ms'] ?? 1_000,
+                'permit' => true,
+            ];
+        }
+
+        foreach ($node['children'] ?? [] as $child) {
+            if (! is_array($child)) {
+                throw new InvalidArgumentException('Drove Scope IR contains an invalid child scope.');
+            }
+
+            $id = $this->string($child, 'id');
+
+            if ($this->isInertScope($child)) {
+                $flattened = $this->flattenInertScope(
+                    $child,
+                    $context,
+                    $nextLevels,
+                    $scopeIds,
+                );
+
+                foreach ($flattened['jobs'] as $jobId => $job) {
+                    $jobs[$jobId] = $job;
+                }
+
+                foreach ($flattened['frames'] as $frameId => $frame) {
+                    $frames[$frameId] = $frame;
+                }
+
+                array_push($tasks, ...$flattened['tasks']);
+                $children[] = ['kind' => 'inert', 'tree' => $flattened['tree']];
+
+                continue;
+            }
+
+            $jobs[$id] = [
+                'kind' => 'scope',
+                'node' => $child,
+                'frame_id' => $scopeId,
+            ];
+            $tasks[] = [
+                'id' => $id,
+                'kind' => 'scope',
+                'scope_id' => $id,
+                'scopes' => [...$scopeIds, $id],
+                'timeout_ms' => $child['timeout_ms'] ?? 0,
+                'permit' => false,
+            ];
+            $children[] = ['kind' => 'scope', 'id' => $id];
+        }
+
+        return [
+            'jobs' => $jobs,
+            'frames' => $frames,
+            'tasks' => $tasks,
+            'tree' => [
+                'scope' => [
+                    'id' => $scopeId,
+                    'type' => $scopeType,
+                    'concurrency' => $node['concurrency'] ?? null,
+                ],
+                'tests' => $testIds,
+                'children' => $children,
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function record(mixed $value): array
+    {
+        if (! is_array($value)
+            || array_any(array_keys($value), static fn (mixed $key): bool => ! is_string($key))) {
+            throw new RuntimeException('Drove received an invalid flattened result record.');
+        }
+
+        return $value;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function recordList(mixed $values): array
+    {
+        if (! is_array($values) || ! array_is_list($values)) {
+            throw new RuntimeException('Drove received an invalid flattened result list.');
+        }
+
+        foreach ($values as $value) {
+            $this->record($value);
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $mappedResults
+     * @return array<string, mixed>
+     */
+    private function nextTransport(
+        string $expectedId,
+        string $expectedKind,
+        array &$mappedResults,
+        int &$cursor,
+    ): array {
+        $transport = $mappedResults[$cursor] ?? null;
+        unset($mappedResults[$cursor]);
+        $cursor++;
+
+        if (! is_array($transport)
+            || ($transport['id'] ?? null) !== $expectedId
+            || ($transport['kind'] ?? null) !== $expectedKind) {
+            throw new RuntimeException(sprintf(
+                'Drove scheduler omitted %s result %s.',
+                $expectedKind,
+                $expectedId,
+            ));
+        }
+
+        return $this->record($transport);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $mappedResults
+     * @param  array<string, array<string, mixed>>  $jobs
+     * @param  array<string, array{context: ScopeContext, levels: list<array{id: string, before_each: list<string>, after_each: list<string>}>, scope_ids: list<string>}>  $frames
+     * @return array{scopes: list<array<string, mixed>>, tests: list<array<string, mixed>>, events: list<array<string, mixed>>, completion_order: list<string>}
+     */
+    private function scheduledTestResult(
+        string $testId,
+        array &$mappedResults,
+        int &$cursor,
+        array &$jobs,
+        array &$frames,
+    ): array {
+        $job = $jobs[$testId] ?? null;
+        unset($jobs[$testId]);
+
+        if (! is_array($job)
+            || ($job['kind'] ?? null) !== 'test'
+            || ! is_array($job['node'] ?? null)
+            || ! is_string($job['frame_id'] ?? null)
+            || ! is_array($frames[$job['frame_id']] ?? null)) {
+            throw new RuntimeException(sprintf(
+                'Drove omitted flattened test job %s.',
+                $testId,
+            ));
+        }
+
+        $transport = $this->nextTransport($testId, 'test', $mappedResults, $cursor);
+        $taskStarted = $this->taskEvent('task.started', $transport);
+        $telemetry = $this->record($transport['telemetry'] ?? null);
+        $memoryPeakBytes = $transport['memory_peak_bytes'] ?? null;
+        $telemetry['memory_peak_bytes'] = is_int($memoryPeakBytes) && $memoryPeakBytes >= 0
+            ? $memoryPeakBytes
+            : null;
+        $value = $transport['value'] ?? null;
+        unset($transport['value']);
+        $result = ($transport['status'] ?? null) === 'passed' && is_array($value)
+            ? $this->record($value)
+            : $this->transportTestFailure(
+                $job['node'],
+                $this->scopeIds($frames[$job['frame_id']]['scope_ids']),
+                $transport,
+            );
+        $result['telemetry'] = $telemetry;
+        $result['stdout'] = ($result['stdout'] ?? '').($transport['stdout'] ?? '');
+        $result['stderr'] = ($result['stderr'] ?? '').($transport['stderr'] ?? '');
+        $resultEvents = $this->recordList($result['events'] ?? null);
+
+        return [
+            'scopes' => [],
+            'tests' => [$result],
+            'events' => [
+                $taskStarted,
+                ...$resultEvents,
+                $this->taskEvent('task.finished', $transport),
+            ],
+            'completion_order' => [],
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $mappedResults
+     * @param  array<string, array<string, mixed>>  $jobs
+     * @return array{scopes: list<array<string, mixed>>, tests: list<array<string, mixed>>, events: list<array<string, mixed>>, completion_order: list<string>}
+     */
+    private function scheduledScopeResult(
+        string $scopeId,
+        array &$mappedResults,
+        int &$cursor,
+        array &$jobs,
+    ): array {
+        $job = $jobs[$scopeId] ?? null;
+        unset($jobs[$scopeId]);
+
+        if (! is_array($job)
+            || ($job['kind'] ?? null) !== 'scope'
+            || ! is_array($job['node'] ?? null)) {
+            throw new RuntimeException(sprintf(
+                'Drove omitted flattened scope job %s.',
+                $scopeId,
+            ));
+        }
+
+        $transport = $this->nextTransport($scopeId, 'scope', $mappedResults, $cursor);
+        $taskStarted = $this->taskEvent('task.started', $transport);
+        $telemetry = $this->record($transport['telemetry'] ?? null);
+        $memoryPeakBytes = $transport['memory_peak_bytes'] ?? null;
+        $telemetry['memory_peak_bytes'] = is_int($memoryPeakBytes) && $memoryPeakBytes >= 0
+            ? $memoryPeakBytes
+            : null;
+        $value = $transport['value'] ?? null;
+        unset($transport['value']);
+        $result = ($transport['status'] ?? null) === 'passed' && is_array($value)
+            ? $this->record($value)
+            : $this->transportScopeFailure($job['node'], $transport);
+        $scope = $this->record($result['scope'] ?? null);
+        $resultScopes = $this->recordList($result['scopes'] ?? null);
+        $scope['telemetry'] = $telemetry;
+        $resultScopes[0]['telemetry'] = $telemetry;
+
+        foreach (['stdout', 'stderr'] as $stream) {
+            $scope[$stream] = ($scope[$stream] ?? '').($transport[$stream] ?? '');
+            $resultScopes[0][$stream] = $scope[$stream];
+        }
+
+        $result['scope'] = $scope;
+        $result['scopes'] = $resultScopes;
+        $scopes = $resultScopes;
+        $tests = $this->recordList($result['tests'] ?? null);
+        $resultEvents = $this->recordList($result['events'] ?? null);
+        $completionOrder = $this->scopeIds($result['completion_order'] ?? null);
+
+        return [
+            'scopes' => $scopes,
+            'tests' => $tests,
+            'events' => [
+                $taskStarted,
+                ...$resultEvents,
+                $this->taskEvent('task.finished', $transport),
+            ],
+            'completion_order' => $completionOrder,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $tree
+     * @param  array<int, array<string, mixed>>  $mappedResults
+     * @param  array<string, array<string, mixed>>  $jobs
+     * @param  array<string, array{context: ScopeContext, levels: list<array{id: string, before_each: list<string>, after_each: list<string>}>, scope_ids: list<string>}>  $frames
+     * @return array{scopes: list<array<string, mixed>>, tests: list<array<string, mixed>>, events: list<array<string, mixed>>, completion_order: list<string>}
+     */
+    private function inertScopeResult(
+        array $tree,
+        array &$mappedResults,
+        int &$cursor,
+        array &$jobs,
+        array &$frames,
+    ): array {
+        $scope = $tree['scope'] ?? null;
+        $testIds = $tree['tests'] ?? null;
+        $children = $tree['children'] ?? null;
+
+        if (! is_array($scope)
+            || ! is_array($testIds)
+            || ! array_is_list($testIds)
+            || ! is_array($children)
+            || ! array_is_list($children)) {
+            throw new RuntimeException('Drove received an invalid flattened scope result tree.');
+        }
+
+        $scopeId = $this->string($scope, 'id');
+        $events = [$this->event('scope.started', $scopeId, status: 'running')];
+        $tests = [];
+        $scopes = [];
+        $completionOrder = [];
+
+        foreach ($testIds as $testId) {
+            if (! is_string($testId)) {
+                throw new RuntimeException('Drove received an invalid flattened test result ID.');
+            }
+
+            $descendant = $this->scheduledTestResult(
+                $testId,
+                $mappedResults,
+                $cursor,
+                $jobs,
+                $frames,
+            );
+            array_push($tests, ...$descendant['tests']);
+            array_push($events, ...$descendant['events']);
+        }
+
+        foreach ($children as $child) {
+            if (! is_array($child) || ! in_array($child['kind'] ?? null, ['inert', 'scope'], true)) {
+                throw new RuntimeException('Drove received an invalid flattened child result.');
+            }
+
+            $descendant = $child['kind'] === 'inert'
+                ? $this->inertScopeResult(
+                    is_array($child['tree'] ?? null) ? $child['tree'] : [],
+                    $mappedResults,
+                    $cursor,
+                    $jobs,
+                    $frames,
+                )
+                : $this->scheduledScopeResult(
+                    is_string($child['id'] ?? null) ? $child['id'] : '',
+                    $mappedResults,
+                    $cursor,
+                    $jobs,
+                );
+            array_push($tests, ...$descendant['tests']);
+            array_push($scopes, ...$descendant['scopes']);
+            array_push($events, ...$descendant['events']);
+            array_push($completionOrder, ...$descendant['completion_order']);
+        }
+
+        $failedDescendant = array_find(
+            [...$tests, ...$scopes],
+            static fn (array $result): bool => $result['failure'] !== null,
+        );
+        $failure = is_array($failedDescendant) ? $failedDescendant['failure'] : null;
+        $scopeResult = [
+            'id' => $scopeId,
+            'type' => $this->string($scope, 'type'),
+            'status' => $failure === null ? 'passed' : 'failed',
+            'failure' => $failure,
+            'failures' => [],
+            'initialized' => true,
+            'concurrency' => $scope['concurrency'] ?? null,
+        ];
+        $events[] = $this->event(
+            'scope.finished',
+            $scopeId,
+            status: $scopeResult['status'],
+            failure: $failure,
+        );
+
+        return [
+            'scopes' => [$scopeResult, ...$scopes],
+            'tests' => $tests,
+            'events' => $events,
+            'completion_order' => $completionOrder,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     */
+    private function isInertScope(array $node): bool
+    {
+        $hooks = $this->hooks($node);
+
+        return ($node['state_policy'] ?? null) === 'inherit'
+            && ($node['timeout_ms'] ?? 0) === 0
+            && $hooks['before_all'] === []
+            && $hooks['after_all'] === [];
+    }
+
+    /**
      * @param  array<string, mixed>  $node
      * @return array{before_all: list<string>, before_each: list<string>, after_each: list<string>, after_all: list<string>}
      */
@@ -1040,9 +1646,9 @@ final readonly class LifecycleExecutor
     /**
      * @return array{closure: Closure, runtime: ?object}
      */
-    private function test(string $id): array
+    private function test(string $id, ScopeContext $context): array
     {
-        $test = ($this->testResolver)($id);
+        $test = ($this->testResolver)($id, $context);
 
         if ($test instanceof Closure) {
             return ['closure' => $test, 'runtime' => null];

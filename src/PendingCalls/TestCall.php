@@ -10,12 +10,10 @@ use Pest\Exceptions\InvalidArgumentException;
 use Pest\Exceptions\TestDescriptionMissing;
 use Pest\Factories\Attribute;
 use Pest\Factories\TestCaseMethodFactory;
-use Pest\Mutate\Repositories\ConfigurationRepository;
 use Pest\PendingCalls\Concerns\Describable;
 use Pest\Plugins\Environment;
 use Pest\Plugins\Only;
 use Pest\Support\Backtrace;
-use Pest\Support\Container;
 use Pest\Support\Exporter;
 use Pest\Support\HigherOrderCallables;
 use Pest\Support\NullClosure;
@@ -627,14 +625,6 @@ final class TestCall // @phpstan-ignore-line
             );
         }
 
-        /** @var ConfigurationRepository $configurationRepository */
-        $configurationRepository = Container::getInstance()->get(ConfigurationRepository::class);
-        $paths = $configurationRepository->cliConfiguration->toArray()['paths'] ?? false;
-
-        if (! is_array($paths)) {
-            $configurationRepository->globalConfiguration('default')->class(...$classes); // @phpstan-ignore-line
-        }
-
         return $this;
     }
 
@@ -648,14 +638,6 @@ final class TestCall // @phpstan-ignore-line
                 CoversTrait::class,
                 [$trait],
             );
-        }
-
-        /** @var ConfigurationRepository $configurationRepository */
-        $configurationRepository = Container::getInstance()->get(ConfigurationRepository::class);
-        $paths = $configurationRepository->cliConfiguration->toArray()['paths'] ?? false;
-
-        if (! is_array($paths)) {
-            $configurationRepository->globalConfiguration('default')->class(...$traits); // @phpstan-ignore-line
         }
 
         return $this;

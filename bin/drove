@@ -3,6 +3,9 @@
 
 declare(strict_types=1);
 
+use Drove\Bridge\Pest\Bootstrap;
+use Drove\CompatibilityRegistry;
+use Drove\Native\Command;
 use Drove\Pest\Runner;
 
 $proxyAutoload = $GLOBALS['_composer_autoload_path'] ?? null;
@@ -26,7 +29,7 @@ while (! file_exists($rootPath.'/composer.json')) {
     $parent = dirname($rootPath);
 
     if ($parent === $rootPath) {
-        fwrite(STDERR, "Drove could not locate the Composer project root.".PHP_EOL);
+        fwrite(STDERR, 'Drove could not locate the Composer project root.'.PHP_EOL);
 
         exit(2);
     }
@@ -34,4 +37,41 @@ while (! file_exists($rootPath.'/composer.json')) {
     $rootPath = $parent;
 }
 
-exit(Runner::main($_SERVER['argv'], $rootPath));
+$arguments = array_slice($_SERVER['argv'], 1);
+$native = array_search('--native', $arguments, true);
+$pest = array_search('--pest', $arguments, true);
+
+if ($native !== false && $pest !== false) {
+    fwrite(STDERR, 'Drove accepts only one frontend: remove either --native or --pest.'.PHP_EOL);
+
+    exit(2);
+}
+
+if (in_array('--compatibility', $arguments, true)) {
+    fwrite(STDOUT, CompatibilityRegistry::json());
+
+    exit(0);
+}
+
+if ($pest !== false) {
+    unset($arguments[$pest]);
+
+    try {
+        Bootstrap::boot();
+    } catch (RuntimeException $exception) {
+        fwrite(STDERR, $exception->getMessage().PHP_EOL);
+
+        exit(2);
+    }
+
+    exit(Runner::main([
+        $_SERVER['argv'][0],
+        ...array_values($arguments),
+    ], $rootPath));
+}
+
+if ($native !== false) {
+    unset($arguments[$native]);
+}
+
+exit(Command::main(array_values($arguments), $rootPath));

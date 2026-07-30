@@ -40,6 +40,7 @@ $resetDirectory($guardDirectory);
 $command = [
     PHP_BINARY,
     __DIR__.'/vendor/bin/drove',
+    '--pest',
     '--configuration=phpunit.testbench.xml',
     '--parallel',
     '--processes='.$processes,

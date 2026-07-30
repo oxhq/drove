@@ -2,6 +2,12 @@
     "schema": 1,
     "release_channel": "experimental-alpha",
     "drove_version": null,
+    "release_policy": {
+        "evaluation_tag": "v0.4.0-alpha.2",
+        "candidate_tag": "v0.4.0-alpha.3",
+        "evaluation_requires_design_partner_evidence": false,
+        "candidate_requires_design_partner_evidence": true
+    },
     "platforms": {
         "linux-gnu-x86_64": {
             "status": "supported-alpha",
@@ -55,7 +61,8 @@
         "sqlite-memory-fork-inheritance": "supported-alpha",
         "mysql-test-rollback": "limited-alpha",
         "environment-plan": "supported-alpha",
-        "coverage-aggregation": "beta",
+        "pest-phpunit-bridge-coverage": "beta",
+        "native-coverage": "unsupported",
         "signal-and-timeout-cleanup": "beta",
         "replay-metadata": "beta",
         "drove-plugin-observers": "alpha",
@@ -94,8 +101,8 @@
         ]
     },
     "proof": {
-        "phase_gates": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.1/.github/workflows/phase-one.yml",
-        "external_corpus": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.1/benchmarks/corpus/manifest.json",
+        "phase_gates": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.2/.github/workflows/phase-one.yml",
+        "external_corpus": "https://github.com/oxhq/drove/blob/v0.4.0-alpha.2/benchmarks/corpus/manifest.json",
         "limitations": "docs/migration-from-pest.md"
     }
 }

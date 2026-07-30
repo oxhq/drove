@@ -369,6 +369,13 @@ if ($workerId === null) {
 $worker = $tests[$workerId];
 $assert($worker['status'] === 'passed', 'A parallel worker failed.');
 $assert($worker['stdout'] === 'worker:0', 'Worker output was not captured exactly once.');
+$assert(
+    is_int($worker['telemetry']['memory_peak_bytes'] ?? null)
+        && $worker['telemetry']['memory_peak_bytes'] > 0
+        && is_int($scopes[$fileId]['telemetry']['memory_peak_bytes'] ?? null)
+        && $scopes[$fileId]['telemetry']['memory_peak_bytes'] > 0,
+    'Scheduler PHP memory peaks were not preserved for test and scope descendants.',
+);
 $workerAfterEach = array_values(array_filter(
     $worker['events'],
     static fn (array $event): bool => $event['type'] === 'hook.finished'
@@ -471,6 +478,11 @@ $assert($test('runs sentinel after failures')['stdout'] === 'sentinel passed', '
 
 foreach ([$sequential, $parallel] as $run) {
     $timedOut = array_column($run['tests'], null, 'id')[$timeoutId];
+    $assert(
+        array_key_exists('memory_peak_bytes', $timedOut['telemetry'])
+            && $timedOut['telemetry']['memory_peak_bytes'] === null,
+        'An unavailable timed-out descendant memory peak was not preserved as null.',
+    );
     usleep(300_000);
     $assert(
         ! file_exists('/tmp/drove-timeout-tree-'.$timedOut['telemetry']['pid']),

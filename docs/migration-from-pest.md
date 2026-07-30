@@ -2,24 +2,40 @@
 
 Drove keeps a deliberately small Pest surface while Drove owns scope planning,
 scope lifecycle, native scheduling, result aggregation, and rendering. The
-live [GitHub release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.1),
+technical evaluation [GitHub release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2),
 [Packagist package](https://packagist.org/packages/oxhq/drove), and
-[hosted workflows](https://github.com/oxhq/drove/actions) are the authorities
-for the exact `v0.4.0-alpha.1` artifacts and proof.
+[hosted workflows](https://github.com/oxhq/drove/actions) become authorities
+for the exact `v0.4.0-alpha.2` artifacts only after those artifacts exist and
+their technical gates pass. This release intentionally precedes external
+validation; evidence collected with it gates candidate `v0.4.0-alpha.3`.
+Source documentation alone is not publication proof.
 
 ## Install
 
 ```bash
-composer config --no-plugins allow-plugins.pestphp/pest-plugin true
 composer require --dev oxhq/drove:^0.4@alpha
 vendor/bin/drove-install-native
 vendor/bin/drove --version
 vendor/bin/drove --compatibility
 ```
 
-Composer requires that explicit trust decision because this alpha still uses
-`pestphp/pest-plugin` for plugin discovery. A consumer's `allow-plugins`
-configuration is not inherited from Drove.
+This native installation neither installs nor trusts Pest's Composer plugin.
+
+To run unchanged Pest/PHPUnit sources through the explicit bridge:
+
+```bash
+composer config --no-plugins allow-plugins.pestphp/pest-plugin true
+composer require --dev \
+  brianium/paratest:^7.23.0 \
+  nunomaduro/collision:^8.9.5 \
+  nunomaduro/termwind:^2.4.0 \
+  pestphp/pest-plugin:^5.0.0 \
+  phpunit/phpunit:13.2.4 \
+  symfony/process:^8.1.0
+vendor/bin/drove --pest --version
+```
+
+The bridge checks this compatible dependency set before loading Pest code.
 
 The native installer supports GNU/Linux with glibc 2.31 or newer and macOS on
 x86_64 and aarch64. It downloads from the exact installed Drove tag, verifies
@@ -33,7 +49,7 @@ To build from source, use the tagged repository checkout. Building the library
 additionally requires Rust 1.88:
 
 ```bash
-git clone --branch v0.4.0-alpha.1 --depth 1 \
+git clone --branch v0.4.0-alpha.2 --depth 1 \
   https://github.com/oxhq/drove.git
 cd drove
 composer install
@@ -45,22 +61,63 @@ export DROVER_LIBRARY="$PWD/native/drover/target/release/libdrover.so"
 # macOS:
 # export DROVER_LIBRARY="$PWD/native/drover/target/release/libdrover.dylib"
 
-php bin/drove
-php bin/drove --parallel --processes=8
-php bin/drove --filter=Invoice
-php bin/drove --group=slow
-php bin/drove --exclude-group=integration
-php bin/drove --testsuite=Feature
+php bin/drove --pest
+php bin/drove --pest --parallel --processes=8
+php bin/drove --pest --filter=Invoice
+php bin/drove --pest --group=slow
+php bin/drove --pest --exclude-group=integration
+php bin/drove --pest --testsuite=Feature
 ```
 
 When this checkout is installed into a disposable project through a Composer
-path repository, invoke `vendor/bin/drove` and point `DROVER_LIBRARY` at the
-library built from this checkout. The package is named `oxhq/drove` and
+path repository, invoke `vendor/bin/drove --pest` and point `DROVER_LIBRARY` at
+the library built from this checkout. The package is named `oxhq/drove` and
 declares that it replaces Pest 5.0.1 for plugin compatibility.
 
-Keep `vendor/bin/pest` in CI while evaluating the alpha. Run both commands
-against the same selected suite and treat a semantic difference as a
-compatibility bug.
+### Compare against an honest baseline
+
+`oxhq/drove` replaces `pestphp/pest` in Composer, and Drove's packaged
+`vendor/bin/pest` is a compatibility alias. It is not an independent Pest
+baseline. Run Pest and Drove from separate clean worktrees or containers bound
+to the same project revision and selected case IDs. Preserve the original
+Pest `composer.json` and lock for the baseline; install Drove only in the
+evaluation checkout. A semantic or assertion difference is a compatibility
+bug.
+
+### Troubleshoot an installation
+
+```bash
+composer show oxhq/drove
+php -r 'foreach (["ffi", "pcntl", "posix", "openssl", "Phar", "zlib"] as $extension) { printf("%s=%s\n", $extension, extension_loaded($extension) ? "yes" : "no"); }'
+php -r 'printf("ffi.enable=%s\n", ini_get("ffi.enable"));'
+vendor/bin/drove --version
+vendor/bin/drove --compatibility
+```
+
+FFI must be enabled for the CLI that runs Drove. GNU/Linux must use glibc
+2.31+; Windows and musl are unsupported. If `DROVER_LIBRARY` is set, verify
+that it names the library built for the current OS and architecture, or unset
+it and rerun `vendor/bin/drove-install-native`. Preserve a failing run with
+`--replay=/private/path/run.json`; replay artifacts omit test output and use
+private permissions, but should still be reviewed before sharing.
+
+### Roll back to Pest
+
+The safest rollback is restoring the pre-evaluation Composer files from the
+project's own version control and reinstalling them:
+
+```bash
+git restore -- composer.json composer.lock
+composer install
+vendor/bin/pest --version
+```
+
+Alternatively, remove `oxhq/drove-laravel` when installed, remove
+`oxhq/drove`, and require the project's intended Pest version with dependency
+updates. Remove Drove-only CI commands, `DROVE_*` variables, and native
+extension manifests. `drove-install-native` writes only inside the installed
+Drove package, so removing that package removes its downloaded library; unset
+an external `DROVER_LIBRARY` separately.
 
 ## Declared compatibility
 
@@ -84,10 +141,12 @@ compatibility bug.
 | Other PHPUnit `failOn*` / all `stopOn*` policies | Unsupported | XML opt-ins are rejected rather than silently changing exit or scheduling semantics. |
 | PHPUnit warnings | Compatible exit policy | Planning and per-test warnings are detected; `failOnPhpunitWarning` is preserved, while output is a stable summary rather than PHPUnit's full issue printer. |
 | PHPUnit extensions / non-default execution order | Unsupported | XML configuration is rejected before execution. |
-| PHPUnit coverage reports | Beta | Fork-local fragments are merged before PHPUnit generates Clover, Cobertura, Crap4J, HTML, PHP, text, or XML reports. PCOV or Xdebug is required. |
-| PHPUnit strict global state, strict coverage, and output modes | Unsupported | Strict modes and conflicting coverage metadata are rejected before execution. |
+| PHPUnit coverage reports | Beta bridge-only | `drove --pest` merges fork-local fragments before PHPUnit generates reports. Only PCOV 1.0.12 line coverage with `--coverage-php` is release-gated. |
+| PHPUnit strict global state and strict coverage modes | Unsupported | Strict modes and conflicting coverage metadata are rejected before execution. |
+| PHPUnit `disallowTestOutput` / `--disallow-test-output` | Compatible | Unexpected output marks an otherwise successful case risky; expected output is accepted and `failOnRisky` preserves the exit policy. |
 | Profiling, alternate printers, mutation, browser, and watch modes | Unsupported | Recognized CLI modes exit 2. |
-| Drove plugin observers | Alpha | `Bootable`, `InspectsPlan`, and `ReportsRun` observe immutable inputs; runner mutation is unsupported. |
+| Legacy Pest-bridge plugin observers | Alpha bridge-only | `Bootable`, `InspectsPlan`, and `ReportsRun` observe immutable inputs for packages discovered by the inherited Pest plugin loader. They are not Drove's native extension API. |
+| Typed native extensions | Alpha | `Drove\Extension` manifests and typed contributions are the native front door; extensions cannot intercept raw runner internals. |
 | Environment planning | Alpha | Providers declare resource kinds, capabilities, and atomic or best-effort coordination. Only the three Laravel database providers are implemented. |
 | GNU/Linux | Alpha | Native release archives target glibc 2.31+ on x86_64/aarch64. musl is unsupported. |
 | macOS | Beta | Native release archives target x86_64/aarch64; verify the exact tag's hosted run and checksums. |
@@ -97,22 +156,104 @@ Higher-order tests, repetitions, architecture tests, snapshots, and third-party
 plugins are not part of the declared alpha surface. Detection is not yet
 exhaustive, so the dual-run comparison remains required.
 
-## Coverage aggregation
+## Phase 6 bridge and migration boundary
 
-Drove starts PHPUnit's configured coverage driver in each selected test child,
-serializes one fragment per case, merges the fragments in the root process, and
-then delegates report generation to PHPUnit. Use the ordinary PHPUnit report
-options:
+The compatibility output now embeds `surface_registry`, a versioned data-only
+registry whose public status vocabulary is exactly `supported`, `unsupported`,
+or `bridge-only`. Maturity labels in the older release registry remain release
+metadata; they are not semantic compatibility guarantees.
 
-```bash
-vendor/bin/drove --coverage-text
-vendor/bin/drove --coverage-clover=build/coverage.xml
-vendor/bin/drove --parallel --processes=8 --coverage-html=build/coverage
+Pest, PHPUnit, and Orchestra Testbench have separate, explicitly loaded bridge
+entrypoints. Loading an entrypoint checks identity and Scope IR schema without
+registering hooks or activating a compiler. Pest and PHPUnit are frontend
+bridges over the existing `ScopeCompiler` and `TestCaseRuntime`; Testbench is
+an optional environment bridge in `oxhq/drove-laravel`. These adapters do not
+own kernel lifecycle or scheduling.
+
+The migration API scans source with PHP tokens and never executes the file:
+
+```php
+use Drove\Bridge\CompatibilityRegistry;
+use Drove\Migration\CodemodOptions;
+use Drove\Migration\Migrator;
+use Drove\Migration\Scanner;
+
+$scanner = new Scanner(CompatibilityRegistry::load());
+$migrator = new Migrator($scanner);
+$result = $migrator->migrate(
+    file_get_contents('tests/Feature/InvoiceTest.php'),
+    'tests/Feature/InvoiceTest.php',
+    new CodemodOptions(
+        environments: [
+            'Tests\\TestCase' => [
+                'name' => 'laravel',
+                'factory' => 'static fn () => NativeLaravel::environment()',
+                'declaration_path' => 'tests/Feature/InvoiceTest.php',
+            ],
+        ],
+        matchers: [
+            'toBeUuid' => ['owner' => 'acme.uuid', 'matcher' => 'uuid'],
+        ],
+    ),
+);
 ```
 
-The report must remain semantically equivalent at concurrency 1 and higher.
-The bare `--coverage` switch, strict coverage metadata/contribution modes, and
-conflicting coverage declarations are rejected rather than approximated.
+Portable unqualified or explicitly `Pest`-qualified declarations, lifecycle
+hooks, datasets, and `toBe`/`toEqual` expectations are qualified to
+`Drove\Native`. A bare `uses(TestCase::class)` changes only when the caller
+provides one exact suite-environment factory and the one source path that owns
+the declaration. Class imports and `as` aliases are resolved before that exact
+mapping is selected. A custom expectation call changes only when its method has
+an explicit typed-extension owner and matcher key.
+
+Those constraints are intentional:
+
+- local function declarations and function imports are ambiguous and are not
+  rewritten;
+- files with multiple namespace declarations keep `uses()` bridge-only because
+  class imports cannot be resolved safely without a position-aware import map;
+- `uses()->in()` is directory-scoped and remains bridge-only because a native
+  environment is suite-wide;
+- `expect()->extend()` definitions remain bridge-only and must become typed
+  matcher entrypoints before their mapped call sites are usable;
+- unsupported or later chained modifiers prevent partial conversion of the
+  owning call; and
+- applying the same codemod twice produces the same bytes and no second edit.
+
+The deterministic local proof is:
+
+```bash
+php experiments/native-phase-6-bridges/proof.php
+```
+
+It loads all three entrypoints, lowers one ordinary PHPUnit case through Scope
+IR, checks installed and missing Testbench dependency states, reruns the native
+dependency guard after bridge loading, and proves migration idempotence plus
+stable blockers. It is a bridge/migration proof, not the external corpus exit
+gate; the full Phase 6 gate still ends with the pinned Filament run.
+
+## Pest/PHPUnit bridge coverage
+
+With the Pest/PHPUnit bridge selected, Drove starts PHPUnit's configured
+coverage driver in each selected test child, serializes one fragment per case,
+merges the fragments in the root process, and then delegates report generation
+to PHPUnit. Use `--pest` with the ordinary PHPUnit report options:
+
+```bash
+vendor/bin/drove --pest --coverage-text
+vendor/bin/drove --pest --coverage-clover=build/coverage.xml
+vendor/bin/drove --pest --parallel --processes=8 --coverage-html=build/coverage
+```
+
+Only PCOV 1.0.12 line coverage with PHPUnit's `--coverage-php` artifact is
+release-gated at C1, C2, C4, C8, C16, and C30. The other bridge report formats
+and Xdebug remain experimental. The bare `--coverage` switch, strict coverage
+metadata/contribution modes, and conflicting coverage declarations are
+rejected rather than approximated.
+
+The native frontend has no coverage implementation or declared coverage
+surface. It rejects PHPUnit/Pest coverage flags as unknown native options; the
+bridge gate does not prove native coverage.
 
 ## Deadlines, interruption, and diagnostic replay
 
@@ -124,32 +265,43 @@ stop new scheduling and are classified separately from a child crash.
 Use a replay artifact when a failure is hard to reproduce:
 
 ```bash
-vendor/bin/drove --parallel --processes=8 \
+vendor/bin/drove --pest --parallel --processes=8 \
   --replay-on-failure=build/drove-replay.json
 ```
 
 The destination directory must already exist, and Drove never overwrites an
 existing artifact. The JSON records a plan hash, counts, failure kinds,
-completion order, concurrency, platform, and redacted arguments. It omits
-outputs, values, environment variables, and failure messages. Inspect it
-before sharing because paths and non-secret command arguments remain visible.
+completion order, concurrency, sampled PHP memory, platform, redacted
+arguments, and a whitelist-only projection of environment providers and
+capabilities. It omits outputs, values, environment variables, failure
+messages, and unknown environment fields. Inspect it before sharing because
+paths and non-secret command arguments remain visible. PHP memory is the
+maximum of the root and available descendant process peaks, not aggregate RSS.
 This is diagnostic metadata, not an executable replay file.
 
-## Plugin observers and registry
+## Native extensions, legacy bridge observers, and registry
 
 `vendor/bin/drove --compatibility` prints the package's versioned compatibility
-registry. A Composer plugin already discoverable through the inherited Pest
-plugin loader may opt into these Drove contracts:
+registry. Native integrations enter through `Drove\Extension`: discovery reads
+data-only manifests before loading code, negotiates an API version, then
+registers typed matcher, context, planner, resource-provider, reporter, or CLI
+contributions. The API does not expose raw `argv`, lifecycle interception,
+autoload callbacks, renderer mutation, or exit-policy control.
+
+For migration only, a Composer plugin already discoverable through the
+inherited Pest plugin loader may opt into these legacy bridge contracts:
 
 - `Drove\Contracts\Plugins\Bootable::bootDrove()`;
 - `Drove\Contracts\Plugins\InspectsPlan::inspectDrovePlan()`; and
 - `Drove\Contracts\Plugins\ReportsRun::reportDroveRun()`.
 
-All three are observer-only alpha hooks. Arguments and arrays are passed for
-inspection; changes do not alter Drove's plan, run, renderer, or exit code. An
-observer exception fails the run with exit 1 and is recorded as crash metadata
-when replay is enabled. Plugins that intercept Pest/PHPUnit CLI internals remain
-unsupported unless the compatibility registry explicitly lists them.
+All three are observer-only alpha hooks. They belong to
+`Drove\Plugins\Manager`, the legacy Pest compatibility bridge, not the native
+plugin API. Arguments and arrays are passed for inspection; changes do not
+alter Drove's plan, run, renderer, or exit code. An observer exception fails
+the run with exit 1 and is recorded as crash metadata when replay is enabled.
+Plugins that intercept Pest/PHPUnit CLI internals remain unsupported unless
+the compatibility registry explicitly lists them.
 
 ## Lifecycle differences to audit
 

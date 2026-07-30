@@ -1,0 +1,65 @@
+{
+    "schema": 1,
+    "api": 1,
+    "surface": "drove-native",
+    "functions": {
+        "declaration": [
+            "describe",
+            "it",
+            "test"
+        ],
+        "dataset": [
+            "dataset"
+        ],
+        "environment": [
+            "environment"
+        ],
+        "expectation": [
+            "expect"
+        ],
+        "hook": [
+            "afterAll",
+            "afterEach",
+            "beforeAll",
+            "beforeEach"
+        ]
+    },
+    "methods": {
+        "context": [
+            "app",
+            "assertWith",
+            "defer",
+            "extensionValue"
+        ],
+        "declaration": [
+            "group",
+            "skip",
+            "timeout",
+            "todo",
+            "with"
+        ],
+        "expectation": [
+            "toBe",
+            "toEqual"
+        ]
+    },
+    "unsupported": {
+        "functions": {
+            "arch": "DROVE_NATIVE_UNSUPPORTED_ARCHITECTURE",
+            "uses": "DROVE_NATIVE_UNSUPPORTED_USES"
+        },
+        "methods": {
+            "depends": "DROVE_NATIVE_UNSUPPORTED_DEPENDENCY",
+            "repeat": "DROVE_NATIVE_UNSUPPORTED_REPETITION",
+            "toMatchSnapshot": "DROVE_NATIVE_UNSUPPORTED_SNAPSHOT"
+        }
+    },
+    "diagnostics": {
+        "declaration_method": "DROVE_NATIVE_UNSUPPORTED_DECLARATION_MODIFIER",
+        "expectation_method": "DROVE_NATIVE_UNSUPPORTED_EXPECTATION",
+        "frontend": "DROVE_NATIVE_UNSUPPORTED_FRONTEND",
+        "function_alias": "DROVE_NATIVE_UNSUPPORTED_FUNCTION_ALIAS",
+        "higher_order": "DROVE_NATIVE_UNSUPPORTED_HIGHER_ORDER",
+        "parse": "DROVE_NATIVE_SCAN_PARSE_ERROR"
+    }
+}

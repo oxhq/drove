@@ -26,6 +26,15 @@ use Pest\Support\HigherOrderTapProxy;
 use Pest\TestSuite;
 use PHPUnit\Framework\TestCase;
 
+if (! function_exists('arch')) {
+    function arch(?string $description = null, ?Closure $closure = null): never
+    {
+        throw new InvalidArgumentException(
+            'DROVE_MIGRATION_UNSUPPORTED_ARCHITECTURE: architecture tests are not supported by Drove.',
+        );
+    }
+}
+
 if (! function_exists('expect')) {
     /**
      * Creates a new expectation.
@@ -256,19 +265,6 @@ if (! function_exists('covers')) {
         $beforeEachCall = (new BeforeEachCall(TestSuite::getInstance(), $filename));
 
         $beforeEachCall->covers(...$classesOrFunctions);
-        $beforeEachCall->group('__pest_mutate_only');
-
-        /** @var MutationTestRunner $runner */
-        $runner = Container::getInstance()->get(MutationTestRunner::class);
-        /** @var ConfigurationRepository $configurationRepository */
-        $configurationRepository = Container::getInstance()->get(ConfigurationRepository::class);
-        $everything = $configurationRepository->cliConfiguration->toArray()['everything'] ?? false;
-        $classes = $configurationRepository->cliConfiguration->toArray()['classes'] ?? false;
-        $paths = $configurationRepository->cliConfiguration->toArray()['paths'] ?? false;
-
-        if ($runner->isEnabled() && ! $everything && ! is_array($classes) && ! is_array($paths)) {
-            $beforeEachCall->only('__pest_mutate_only');
-        }
     }
 }
 
@@ -280,6 +276,13 @@ if (! function_exists('mutates')) {
      */
     function mutates(array|string ...$targets): void
     {
+        if (! interface_exists(MutationTestRunner::class)
+            || ! class_exists(ConfigurationRepository::class)) {
+            throw new InvalidArgumentException(
+                'DROVE_COMPATIBILITY_UNSUPPORTED_MUTATION_TESTING: mutation testing is not supported by Drove.',
+            );
+        }
+
         $filename = Backtrace::testFile();
 
         $beforeEachCall = (new BeforeEachCall(TestSuite::getInstance(), $filename));

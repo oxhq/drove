@@ -1,0 +1,65 @@
+name: Bridge Coverage
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: drove-bridge-coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pcov:
+    name: Pest/PHPUnit PCOV aggregation C1-C30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+    - name: Build pinned PCOV proof image
+      run: docker build --tag drove-bridge-coverage --file experiments/phase-2-cli/Dockerfile .
+
+    - name: Prove parity, fault survival, and explicit rejection
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        mkdir -p build/bridge-coverage
+        docker run --rm \
+          --env DROVE_EVIDENCE_REVISION="$EXPECTED_SHA" \
+          drove-bridge-coverage \
+          php coverage-proof.php > build/bridge-coverage/evidence.json
+        jq -e --arg revision "$EXPECTED_SHA" '
+          .schema == 1
+          and .status == "passed"
+          and .revision == $revision
+          and .frontend == "pest-phpunit-bridge"
+          and .driver.name == "pcov"
+          and (.matrix | keys) == ["c1", "c16", "c2", "c30", "c4", "c8"]
+          and .mixed_terminal_states.report == "valid"
+          and .rejections.no_driver == "explicit"
+          and .rejections.native_frontend == "explicit"
+        ' build/bridge-coverage/evidence.json
+
+    - name: Upload normalized coverage evidence
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: bridge-coverage-${{ github.event.pull_request.head.sha || github.sha }}
+        path: build/bridge-coverage/evidence.json
+        if-no-files-found: error
+        retention-days: 30

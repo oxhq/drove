@@ -45,8 +45,14 @@ final class Cache implements HandlesArguments
             }
 
             if (! $xmlConfiguration->phpunit()->hasCacheDirectory()) {
+                $cacheDirectory = realpath(self::TEMPORARY_FOLDER);
+
+                if (! is_string($cacheDirectory)) {
+                    $cacheDirectory = $this->fallbackCacheDirectory();
+                }
+
                 $arguments = $this->pushArgument('--cache-directory', $arguments);
-                $arguments = $this->pushArgument((string) realpath(self::TEMPORARY_FOLDER), $arguments);
+                $arguments = $this->pushArgument($cacheDirectory, $arguments);
             }
         }
 
@@ -55,5 +61,41 @@ final class Cache implements HandlesArguments
         }
 
         return $arguments;
+    }
+
+    private function fallbackCacheDirectory(): string
+    {
+        $workingDirectory = getcwd();
+
+        if (! is_string($workingDirectory)) {
+            throw new \RuntimeException('DROVE_PEST_CACHE_DIRECTORY_UNSAFE: Drove could not resolve the current working directory.');
+        }
+
+        $cacheDirectory = sys_get_temp_dir()
+            .DIRECTORY_SEPARATOR
+            .'drove-pest-'.hash('sha256', $workingDirectory);
+        $created = @mkdir($cacheDirectory, 0700);
+
+        clearstatcache(true, $cacheDirectory);
+
+        if (! $created && ! file_exists($cacheDirectory) && ! is_link($cacheDirectory)) {
+            throw new \RuntimeException('DROVE_PEST_CACHE_DIRECTORY_UNSAFE: Drove could not create the Pest bridge cache directory.');
+        }
+
+        $owner = @fileowner($cacheDirectory);
+        $permissions = @fileperms($cacheDirectory);
+
+        if (is_link($cacheDirectory)
+            || ! is_dir($cacheDirectory)
+            || ! is_int($owner)
+            || $owner !== posix_geteuid()
+            || ! is_int($permissions)
+            || ($permissions & 0777) !== 0700) {
+            throw new \RuntimeException(
+                'DROVE_PEST_CACHE_DIRECTORY_UNSAFE: The Pest bridge cache path must be a private directory owned by the current user with mode 0700.',
+            );
+        }
+
+        return $cacheDirectory;
     }
 }

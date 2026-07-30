@@ -76,6 +76,59 @@ jobs:
         php -d ffi.enable=true native/drover/proof.php
         php -d ffi.enable=true bin/drove --version
 
+    - name: Prove exported cache fallback on macOS
+      run: |
+        set -euo pipefail
+        source_temp="$RUNNER_TEMP/drove-source-temp-${{ matrix.arch }}"
+        probe_directory="$RUNNER_TEMP/drove-cache-probe-${{ matrix.arch }}"
+        mv .temp "$source_temp"
+        restore_source_temp() {
+          test ! -e .temp
+          mv "$source_temp" .temp
+        }
+        trap restore_source_temp EXIT
+
+        mkdir -m 700 "$probe_directory"
+        cat > "$probe_directory/cache-boundary.php" <<'PHP'
+        <?php
+
+        require $argv[2];
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        $arguments = (new Pest\Plugins\Cache)->handleArguments([]);
+        $cacheArgument = array_search('--cache-directory', $arguments, true);
+
+        if (! is_int($cacheArgument)
+            || ($arguments[$cacheArgument + 1] ?? null) !== $argv[1]) {
+            throw new RuntimeException('The Pest bridge did not select its private cache directory.');
+        }
+        PHP
+        cache_directory="$(
+          cd "$probe_directory"
+          php -r 'echo sys_get_temp_dir().DIRECTORY_SEPARATOR."drove-pest-".hash("sha256", (string) getcwd());'
+        )"
+        test ! -e "$cache_directory"
+        test ! -L "$cache_directory"
+        (
+          cd "$probe_directory"
+          php cache-boundary.php "$cache_directory" "$GITHUB_WORKSPACE/vendor/autoload.php"
+        )
+        test ! -L "$cache_directory"
+        test -d "$cache_directory"
+        test "$(stat -f '%u' "$cache_directory")" = "$(id -u)"
+        test "$(stat -f '%Lp' "$cache_directory")" = 700
+        cache_inode="$(stat -f '%i' "$cache_directory")"
+        (
+          cd "$probe_directory"
+          php cache-boundary.php "$cache_directory" "$GITHUB_WORKSPACE/vendor/autoload.php"
+        )
+        test "$(stat -f '%i' "$cache_directory")" = "$cache_inode"
+        rmdir "$cache_directory"
+
+        restore_source_temp
+        trap - EXIT
+
     - name: Install Laravel and Testbench proof
       env:
         COMPOSER_ROOT_VERSION: 0.4.0-alpha.1
@@ -111,6 +164,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        fetch-depth: 0
         persist-credentials: false
 
     - name: Verify exact checkout
@@ -125,6 +179,48 @@ jobs:
         tools: composer:v2
         coverage: none
         extensions: ffi, pcntl, posix
+
+    - name: Prove design-partner release verifier
+      run: |
+        php scripts/verify-design-partners-self-test.php
+        php scripts/collect-design-partners-self-test.php
+
+    - name: Prove release cycle identity and anti-bypass policy
+      run: |
+        set -euo pipefail
+        php scripts/verify-release-version.php \
+          > "$RUNNER_TEMP/release-candidate.json"
+        grep -Fq '"requested_tag": "v0.4.0-alpha.3"' \
+          "$RUNNER_TEMP/release-candidate.json"
+        grep -Fq '"release_role": "evidence-gated-candidate"' \
+          "$RUNNER_TEMP/release-candidate.json"
+        grep -Fq '"requires_design_partner_evidence": true' \
+          "$RUNNER_TEMP/release-candidate.json"
+        php scripts/verify-release-version.php v0.4.0-alpha.3 \
+          --github-output > "$RUNNER_TEMP/release-candidate.output"
+        php scripts/verify-release-version.php v0.4.0-alpha.2 \
+          --github-output > "$RUNNER_TEMP/release-evaluation.output"
+        test "$(
+          cat "$RUNNER_TEMP/release-candidate.output"
+        )" = $'release_role=evidence-gated-candidate\nrequires_design_partner_evidence=true'
+        test "$(
+          cat "$RUNNER_TEMP/release-evaluation.output"
+        )" = $'release_role=technical-evaluation\nrequires_design_partner_evidence=false'
+        for rejected in v0.4.0-alpha.1 v0.4.0-alpha.4
+        do
+          set +e
+          php scripts/verify-release-version.php "$rejected" \
+            > "$RUNNER_TEMP/release-version-mismatch.txt" 2>&1
+          mismatch_exit="$?"
+          set -e
+          test "$mismatch_exit" -ne 0
+          grep -Fq \
+            "DROVE_RELEASE_VERSION_MISMATCH: expected v0.4.0-alpha.2 or v0.4.0-alpha.3, received $rejected." \
+            "$RUNNER_TEMP/release-version-mismatch.txt"
+        done
+
+    - name: Prove native and bridge package boundary
+      run: composer test:package-boundary
 
     - name: Prove installable archive contents
       run: |
@@ -160,13 +256,20 @@ jobs:
           LICENSE.md \
           README.md \
           bin/drove \
+          bin/drove-evaluate \
           bin/drove-install-native \
           bin/pest \
           composer.json \
+          docs/design-partner-evidence.json \
+          docs/design-partner-evidence.schema.json \
           docs/design-partner-validation.md \
           docs/migration-from-pest.md \
+          docs/package-boundary.md \
           native/drover/README.md \
+          resources/release.json \
           resources/drove-compatibility.json \
+          src/Drove/Evaluation/Collector.php \
+          src/Drove/Bridge/Pest/Bootstrap.php \
           src/Drove/Kernel/DroverScheduler.php \
           src/Drove/Kernel/NativeLibrary.php
         do
@@ -177,12 +280,13 @@ jobs:
         sha256sum "$archive_directory/drove.tar" "$contents"
 
         package="$RUNNER_TEMP/drove-package"
-        consumer="$RUNNER_TEMP/drove-consumer"
-        mkdir -p "$package" "$consumer"
+        native_consumer="$RUNNER_TEMP/drove-native-consumer"
+        bridge_consumer="$RUNNER_TEMP/drove-bridge-consumer"
+        mkdir -p "$package" "$native_consumer" "$bridge_consumer"
         tar -xf "$archive_directory/drove.tar" -C "$package"
-        cat > "$consumer/composer.json" <<JSON
+        cat > "$native_consumer/composer.json" <<JSON
         {
-          "name": "drove/archive-consumer",
+          "name": "drove/native-archive-consumer",
           "type": "project",
           "repositories": [
             {
@@ -191,27 +295,65 @@ jobs:
               "options": {
                 "symlink": false,
                 "versions": {
-                  "oxhq/drove": "0.4.0-alpha.1"
+                  "oxhq/drove": "0.4.0-alpha.2"
                 }
               }
             }
           ],
-          "require-dev": {
-            "oxhq/drove": "0.4.0-alpha.1"
-          },
-          "config": {
-            "allow-plugins": {
-              "pestphp/pest-plugin": true
-            }
+          "require": {
+            "oxhq/drove": "0.4.0-alpha.2"
           }
         }
         JSON
-        composer --working-dir="$consumer" install \
-          --no-interaction --no-progress --prefer-dist --optimize-autoloader
-        test ! -L "$consumer/vendor/oxhq/drove"
-        test "$("$consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.1"
-        "$consumer/vendor/bin/drove" --compatibility \
-          > "$consumer/compatibility.json"
+        composer --working-dir="$native_consumer" install \
+          --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+        test ! -L "$native_consumer/vendor/oxhq/drove"
+        php scripts/verify-package-boundary.php \
+          "$package/composer.json" \
+          "$package/resources/drove-bridge-compatibility.json"
+        for bridge_dependency in \
+          brianium/paratest \
+          nunomaduro/collision \
+          nunomaduro/termwind \
+          pestphp/pest-plugin \
+          phpunit/phpunit \
+          symfony/process
+        do
+          if composer --working-dir="$native_consumer" show "$bridge_dependency" \
+            >/dev/null 2>&1
+          then
+            echo "$bridge_dependency leaked into the native package" >&2
+            exit 1
+          fi
+        done
+        cat > "$native_consumer/native-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        if (! function_exists('Drove\Native\test')
+            || function_exists('test')
+            || function_exists('expect')
+            || class_exists('Pest\Kernel')
+            || class_exists('PHPUnit\Framework\TestCase')) {
+            throw new RuntimeException('The native package autoloaded a compatibility frontend.');
+        }
+        PHP
+        php "$native_consumer/native-boundary.php"
+        test "$("$native_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$native_consumer/vendor/bin/drove" --native --version)" = "Drove 0.4.0-alpha.2"
+        "$native_consumer/vendor/bin/drove" --help \
+          | grep -Fq 'Drove native'
+        set +e
+        "$native_consumer/vendor/bin/drove" --pest --version \
+          >"$native_consumer/missing-bridge.txt" 2>&1
+        missing_bridge_exit="$?"
+        set -e
+        test "$missing_bridge_exit" -eq 2
+        grep -Fq 'DROVE_PEST_BRIDGE_MISSING_DEPENDENCIES' \
+          "$native_consumer/missing-bridge.txt"
+        "$native_consumer/vendor/bin/drove" --compatibility \
+          > "$native_consumer/compatibility.json"
         php -r '
           $registry = json_decode(
               file_get_contents($argv[1]),
@@ -220,8 +362,153 @@ jobs:
           );
           exit(
               ($registry["schema"] ?? null) === 1
-              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.1"
+              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.2"
                   ? 0
                   : 1,
           );
-        ' "$consumer/compatibility.json"
+        ' "$native_consumer/compatibility.json"
+
+        cat > "$bridge_consumer/composer.json" <<JSON
+        {
+          "name": "drove/bridge-archive-consumer",
+          "type": "project",
+          "repositories": [
+            {
+              "type": "path",
+              "url": "$package",
+              "options": {
+                "symlink": false,
+                "versions": {
+                  "oxhq/drove": "0.4.0-alpha.2"
+                }
+              }
+            }
+          ],
+          "require-dev": {
+            "brianium/paratest": "7.23.0",
+            "nunomaduro/collision": "8.9.5",
+            "nunomaduro/termwind": "2.4.0",
+            "oxhq/drove": "0.4.0-alpha.2",
+            "pestphp/pest-plugin": "5.0.0",
+            "phpunit/phpunit": "13.2.4",
+            "symfony/process": "8.1.0"
+          },
+          "config": {
+            "allow-plugins": {
+              "pestphp/pest-plugin": true
+            }
+          }
+        }
+        JSON
+        composer --working-dir="$bridge_consumer" install \
+          --no-interaction --no-progress --prefer-dist --optimize-autoloader
+        test ! -L "$bridge_consumer/vendor/oxhq/drove"
+        test ! -e "$bridge_consumer/vendor/oxhq/drove/.temp"
+        cat > "$bridge_consumer/bridge-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        if (function_exists('test')) {
+            throw new RuntimeException('The Pest bridge was autoloaded before explicit boot.');
+        }
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        if (! function_exists('test') || ! class_exists(Pest\Kernel::class)) {
+            throw new RuntimeException('The explicit Pest bridge did not boot.');
+        }
+        PHP
+        php "$bridge_consumer/bridge-boundary.php"
+        test "$("$bridge_consumer/vendor/bin/drove" --pest --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$bridge_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
+        mkdir -p "$bridge_consumer/tests"
+        cat > "$bridge_consumer/tests/PackageBoundaryTest.php" <<'PHP'
+        <?php
+
+        test('Pest is an explicit compatibility bridge', function (): void {
+            expect(class_exists(Drove\Bridge\Pest\Bridge::class))->toBeTrue();
+        });
+        PHP
+        cat > "$bridge_consumer/cache-boundary.php" <<'PHP'
+        <?php
+
+        require __DIR__.'/vendor/autoload.php';
+
+        Drove\Bridge\Pest\Bootstrap::boot();
+
+        $arguments = (new Pest\Plugins\Cache)->handleArguments([]);
+        $cacheArgument = array_search('--cache-directory', $arguments, true);
+
+        if (! is_int($cacheArgument)
+            || ($arguments[$cacheArgument + 1] ?? null) !== ($argv[1] ?? null)) {
+            throw new RuntimeException('The Pest bridge did not select its private cache directory.');
+        }
+        PHP
+        cache_directory="$(
+          cd "$bridge_consumer"
+          php -r 'echo sys_get_temp_dir().DIRECTORY_SEPARATOR."drove-pest-".hash("sha256", (string) getcwd());'
+        )"
+        test ! -e "$cache_directory"
+        test ! -L "$cache_directory"
+
+        expect_cache_rejection() {
+          local case_name="$1"
+          local output="$RUNNER_TEMP/drove-cache-$case_name.txt"
+          set +e
+          (
+            cd "$bridge_consumer"
+            php cache-boundary.php "$cache_directory"
+          ) >"$output" 2>&1
+          local case_exit="$?"
+          set -e
+          test "$case_exit" -ne 0
+          grep -Fq 'DROVE_PEST_CACHE_DIRECTORY_UNSAFE' "$output"
+        }
+
+        cache_decoy="$RUNNER_TEMP/drove-cache-decoy"
+        mkdir -m 700 "$cache_decoy"
+        ln -s "$cache_decoy" "$cache_directory"
+        expect_cache_rejection symlink
+        test -z "$(find "$cache_decoy" -mindepth 1 -maxdepth 1 -print -quit)"
+        unlink "$cache_directory"
+        rmdir "$cache_decoy"
+
+        mkdir -m 755 "$cache_directory"
+        expect_cache_rejection wrong-mode
+        rmdir "$cache_directory"
+
+        sudo install -d -m 700 -o root -g root "$cache_directory"
+        test "$(stat -c '%u' "$cache_directory")" != "$(id -u)"
+        expect_cache_rejection wrong-owner
+        sudo rmdir "$cache_directory"
+
+        (
+          cd "$bridge_consumer"
+          set +e
+          php cache-boundary.php "$cache_directory" \
+            >"$RUNNER_TEMP/drove-cache-race-a.txt" 2>&1 &
+          cache_a_pid="$!"
+          php cache-boundary.php "$cache_directory" \
+            >"$RUNNER_TEMP/drove-cache-race-b.txt" 2>&1 &
+          cache_b_pid="$!"
+          wait "$cache_a_pid"
+          cache_a_exit="$?"
+          wait "$cache_b_pid"
+          cache_b_exit="$?"
+          set -e
+          if test "$cache_a_exit" -ne 0 || test "$cache_b_exit" -ne 0
+          then
+            cat "$RUNNER_TEMP/drove-cache-race-a.txt"
+            cat "$RUNNER_TEMP/drove-cache-race-b.txt"
+            exit 1
+          fi
+        )
+        test ! -L "$cache_directory"
+        test -d "$cache_directory"
+        test "$(stat -c '%u' "$cache_directory")" = "$(id -u)"
+        test "$(stat -c '%a' "$cache_directory")" = 700
+        (
+          cd "$bridge_consumer"
+          vendor/bin/pest --colors=never --compact
+        )

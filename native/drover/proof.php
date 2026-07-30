@@ -86,6 +86,17 @@ $ffi = FFI::cdef(<<<'C'
         char message[256];
     } DroverAction;
 
+    typedef struct {
+        uint32_t schema;
+        uint64_t forks;
+        uint64_t scope_workers;
+        uint64_t executor_workers;
+        uint64_t process_anchors;
+        uint32_t peak_live_pids;
+        uint32_t peak_outstanding_tasks;
+        uint32_t outstanding_task_limit;
+    } DroverTopology;
+
     uint32_t drover_protocol_version(void);
     size_t drover_protocol_max_frame_bytes(void);
     void *drover_engine_new(
@@ -112,6 +123,7 @@ $ffi = FFI::cdef(<<<'C'
     size_t drover_map_last_result_len(void *map);
     int32_t drover_map_copy_last_result(void *map, char *destination, size_t capacity);
     uint32_t drover_map_max_active(void *map);
+    int32_t drover_map_topology(void *map, DroverTopology *topology);
     void drover_map_free(void *map);
     void drover_child_exit(int32_t status);
     int32_t drover_emit_frame(
@@ -193,6 +205,14 @@ $crashEscapedPath = $crashProbe.'.escaped';
 @unlink($crashEscapedPath);
 $prepared = ['items' => ['root']];
 $tasks = [
+    [
+        'id' => 'scope:prepared-host',
+        'kind' => 'scope',
+        'scope_id' => 'scope:prepared',
+        'scopes' => ['scope:root', 'scope:prepared'],
+        'timeout_ms' => 1_000,
+        'callback' => static fn (): array => ['prepared' => true],
+    ],
     [
         'id' => 'task:slow-a',
         'kind' => 'test',
@@ -437,13 +457,64 @@ while (true) {
 }
 
 $maxActive = $ffi->drover_map_max_active($map);
+$topologyValue = $ffi->new('DroverTopology');
+$assert(
+    $ffi->drover_map_topology($map, FFI::addr($topologyValue)) === 0,
+    'Drover could not copy ABI topology telemetry.',
+);
+$topology = [
+    'schema' => (int) $topologyValue->schema,
+    'forks' => (int) $topologyValue->forks,
+    'scope_workers' => (int) $topologyValue->scope_workers,
+    'executor_workers' => (int) $topologyValue->executor_workers,
+    'process_anchors' => (int) $topologyValue->process_anchors,
+    'peak_live_pids' => (int) $topologyValue->peak_live_pids,
+    'peak_outstanding_tasks' => (int) $topologyValue->peak_outstanding_tasks,
+    'outstanding_task_limit' => (int) $topologyValue->outstanding_task_limit,
+];
 $ffi->drover_map_free($map);
 $ffi->drover_engine_free($engine);
 
 $assert(count($results) === count($tasks), 'Drover lost an ABI smoke result.');
-$assert($maxActive === 2, 'Drover did not reserve global permits before fork.');
+$assert($maxActive === 2, 'Drover did not cap started executors at the global permit width.');
+$assert(
+    $topology === [
+        'schema' => 1,
+        'forks' => count($tasks),
+        'scope_workers' => 1,
+        'executor_workers' => count($tasks) - 1,
+        'process_anchors' => 0,
+        'peak_live_pids' => 3,
+        'peak_outstanding_tasks' => count($tasks),
+        'outstanding_task_limit' => count($tasks),
+    ],
+    'Drover ABI topology did not prove one fork per task within the pre-armed executor window.',
+);
+$assert(
+    array_all(
+        $results,
+        static fn (array $result): bool => ($result['telemetry']['forks'] ?? null) === 1
+            && ($result['telemetry']['scope_workers'] ?? null)
+                === ($result['kind'] === 'scope' ? 1 : 0)
+            && ($result['telemetry']['executor_workers'] ?? null)
+                === ($result['kind'] === 'test' ? 1 : 0)
+            && ($result['telemetry']['process_anchors'] ?? null) === 0
+            && ($result['telemetry']['pid'] ?? null) === ($result['telemetry']['pgid'] ?? null),
+    ),
+    'Drover emitted inconsistent per-task worker topology.',
+);
 $assert($prepared['items'] === ['root'], 'A child mutation escaped into the prepared PHP host.');
-$assert($results['task:slow-a']['value']['after'] === ['root', 'slow-a'], 'Prepared state was not inherited.');
+$slowResult = $results['task:slow-a'] ?? [];
+$slowFailure = $slowResult['failure'] ?? [];
+$assert(
+    ($slowResult['value']['after'] ?? null) === ['root', 'slow-a'],
+    sprintf(
+        'Prepared state was not inherited (status=%s; failure_kind=%s; failure_message=%s).',
+        $slowResult['status'] ?? 'missing',
+        $slowFailure['kind'] ?? 'missing',
+        $slowFailure['message'] ?? 'missing',
+    ),
+);
 $assert($results['task:php-exception']['failure']['kind'] === 'php_exception', 'PHP failure drifted.');
 $timeoutFailure = $results['task:timeout-tree']['failure'] ?? [];
 $assert(
@@ -458,8 +529,8 @@ $readyState = $readDescendantState($readyPath, 'The timeout descendant');
 $assert(
     $readyState['pgid'] === ($results['task:timeout-tree']['telemetry']['pgid'] ?? null)
         && ($results['task:timeout-tree']['telemetry']['pid'] ?? null)
-            !== ($results['task:timeout-tree']['telemetry']['pgid'] ?? null),
-    'The timeout executor did not run beneath its dedicated process-group anchor.',
+            === ($results['task:timeout-tree']['telemetry']['pgid'] ?? null),
+    'The timeout executor did not lead its dedicated process group.',
 );
 $assertProcessGone($readyState['pid'], 'A timed-out descendant remained alive after cleanup.');
 $escapedState = @file_get_contents($escapedPath);
@@ -483,8 +554,8 @@ $crashState = $readDescendantState($crashReadyPath, 'The crash descendant');
 $assert(
     $crashState['pgid'] === ($results['task:crash-tree']['telemetry']['pgid'] ?? null)
         && ($results['task:crash-tree']['telemetry']['pid'] ?? null)
-            !== ($results['task:crash-tree']['telemetry']['pgid'] ?? null),
-    'The crashed executor did not run beneath its dedicated process-group anchor.',
+            === ($results['task:crash-tree']['telemetry']['pgid'] ?? null),
+    'The crashed executor did not lead its dedicated process group.',
 );
 $assertProcessGone($crashState['pid'], 'A crashed executor descendant remained alive after cleanup.');
 $assert(! file_exists($crashEscapedPath), 'A crashed executor descendant escaped its process group.');
@@ -592,6 +663,15 @@ $assert(
     'Drover did not preserve active interruption identity.',
 );
 $assert(
+    ($interruptionResult['telemetry']['forks'] ?? null) === 1
+        && ($interruptionResult['telemetry']['scope_workers'] ?? null) === 0
+        && ($interruptionResult['telemetry']['executor_workers'] ?? null) === 1
+        && ($interruptionResult['telemetry']['process_anchors'] ?? null) === 0
+        && ($interruptionResult['telemetry']['pid'] ?? null)
+            === ($interruptionResult['telemetry']['pgid'] ?? null),
+    'Drover interruption topology did not preserve its executor-led process group.',
+);
+$assert(
     $ffi->drover_engine_acquire($interruptionEngine, '[]') === 0
         && $ffi->drover_engine_release($interruptionEngine, '[]') === 0,
     'An active interruption leaked its concurrency permit.',
@@ -620,6 +700,7 @@ fwrite(STDOUT, json_encode([
     'golden_vectors' => count($validVectors) + 1,
     'completed' => count($results),
     'max_active' => $maxActive,
+    'topology' => $topology,
     'failure_kinds' => array_values(array_filter(array_map(
         static fn (array $result): ?string => $result['failure']['kind'] ?? null,
         $results,

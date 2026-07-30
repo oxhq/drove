@@ -1,0 +1,96 @@
+name: Native Extensions
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: native-extensions-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  extensions:
+    name: PHP 8.4 - Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: '8.4'
+        tools: composer:v2
+        coverage: none
+        extensions: ffi, pcntl, posix
+
+    - name: Get Composer cache directory
+      id: composer-cache
+      shell: bash
+      run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: native-extensions-php-8.4-composer-${{ hashFiles('**/composer.json', '**/composer.lock') }}
+        restore-keys: |
+          native-extensions-php-8.4-composer-
+
+    - name: Install PHP dependencies
+      env:
+        COMPOSER_ROOT_VERSION: 0.4.x-dev
+      run: composer install --no-interaction --no-progress --ansi
+
+    - name: Validate package metadata
+      run: composer validate --strict && composer check-platform-reqs
+
+    - name: Native extension static analysis
+      run: composer test:native-phase-2:static
+
+    - name: Native extension C1-C30 parity
+      shell: bash
+      env:
+        DROVE_EVIDENCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        artifact_dir="${RUNNER_TEMP}/native-phase-2"
+        mkdir -p "$artifact_dir"
+        summaries=()
+
+        for processes in 1 2 4 8 16 30
+        do
+          summary="${artifact_dir}/drove-native-extensions-c${processes}.json"
+          DROVE_NATIVE_SCHEDULER=pcntl \
+            DROVE_NATIVE_PROCESSES="$processes" \
+            php experiments/native-phase-2/proof.php > "$summary"
+          summaries+=("$summary")
+        done
+
+        php experiments/native-phase-2/compare.php \
+          "${summaries[@]}" \
+          "${artifact_dir}/drove-native-extensions-comparison.json"
+
+    - name: Upload native extension evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: native-extensions-${{ github.event.pull_request.head.sha || github.sha }}-php84-ubuntu
+        path: ${{ runner.temp }}/native-phase-2/*.json
+        if-no-files-found: error
+        retention-days: 90

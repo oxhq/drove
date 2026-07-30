@@ -1,2 +1,4 @@
 *.sh text eol=lf
+*.xml text eol=lf
+locks/*.json text eol=lf
 locks/*.lock text eol=lf

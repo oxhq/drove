@@ -26,7 +26,7 @@ final class Artifact
 
     private bool $written = false;
 
-    /** @var array{sha256: string, tests: int, scopes: int}|null */
+    /** @var array{sha256: string, tests: int, scopes: int, case_identity: array<string, mixed>, environment: ?array<string, mixed>, extensions: ?array<string, mixed>}|null */
     private ?array $plan = null;
 
     /**
@@ -106,6 +106,9 @@ final class Artifact
             'sha256' => hash('sha256', $encoded),
             'tests' => $this->countNodes($plan, 'tests'),
             'scopes' => $this->countScopes($plan),
+            'case_identity' => $this->caseIdentity($plan),
+            'environment' => $this->environmentProjection($plan),
+            'extensions' => $this->extensionProjection($plan),
         ];
     }
 
@@ -120,6 +123,7 @@ final class Artifact
 
         $counts = [];
         $failures = [];
+        $memoryPeaks = [memory_get_peak_usage(true)];
 
         foreach (is_array($run['scopes'] ?? null) ? $run['scopes'] : [] as $scope) {
             if (! is_array($scope)) {
@@ -132,6 +136,11 @@ final class Artifact
             $signal = $telemetry['interrupted_signal']
                 ?? $telemetry['signal']
                 ?? null;
+            $memoryPeakBytes = $telemetry['memory_peak_bytes'] ?? null;
+
+            if (is_int($memoryPeakBytes) && $memoryPeakBytes >= 0) {
+                $memoryPeaks[] = $memoryPeakBytes;
+            }
 
             foreach (is_array($scope['failures'] ?? null) ? $scope['failures'] : [] as $failure) {
                 if (! is_array($failure)) {
@@ -156,11 +165,16 @@ final class Artifact
             $status = is_string($test['status'] ?? null) ? $test['status'] : 'invalid';
             $counts[$status] = ($counts[$status] ?? 0) + 1;
             $failure = $test['failure'] ?? null;
+            $telemetry = is_array($test['telemetry'] ?? null)
+                ? $test['telemetry']
+                : [];
+            $memoryPeakBytes = $telemetry['memory_peak_bytes'] ?? null;
+
+            if (is_int($memoryPeakBytes) && $memoryPeakBytes >= 0) {
+                $memoryPeaks[] = $memoryPeakBytes;
+            }
 
             if (is_array($failure)) {
-                $telemetry = is_array($test['telemetry'] ?? null)
-                    ? $test['telemetry']
-                    : [];
                 $signal = $telemetry['interrupted_signal']
                     ?? $telemetry['signal']
                     ?? null;
@@ -179,6 +193,8 @@ final class Artifact
         $this->write([
             ...$this->base('run'),
             'plan' => $this->plan,
+            'memory_peak_bytes' => max($memoryPeaks),
+            'memory_peak_sample_count' => count($memoryPeaks),
             'result' => [
                 'exit_code' => is_int($run['exit_code'] ?? null) ? $run['exit_code'] : 1,
                 'status' => is_string($run['status'] ?? null) ? $run['status'] : 'unknown',
@@ -199,6 +215,8 @@ final class Artifact
         $this->write([
             ...$this->base('crash'),
             'plan' => $this->plan,
+            'memory_peak_bytes' => memory_get_peak_usage(true),
+            'memory_peak_sample_count' => 1,
             'crash' => [
                 'class' => $throwable::class,
                 'message_sha256' => hash('sha256', $throwable->getMessage()),
@@ -233,6 +251,8 @@ final class Artifact
         $this->write([
             ...$this->base('fatal'),
             'plan' => $this->plan,
+            'memory_peak_bytes' => memory_get_peak_usage(true),
+            'memory_peak_sample_count' => 1,
             'fatal' => [
                 'type' => $error['type'],
                 'message_sha256' => hash('sha256', $error['message']),
@@ -365,6 +385,174 @@ final class Artifact
         }
 
         return $count;
+    }
+
+    /**
+     * @param  array<string, mixed>  $plan
+     * @return array{
+     *     schema: 1,
+     *     cases: list<array{execution_id: string, frontend_id: string}>,
+     *     frontend_ids_sha256: string
+     * }
+     */
+    private function caseIdentity(array $plan): array
+    {
+        $cases = [];
+        $this->collectCaseIdentity($plan, $cases);
+        usort(
+            $cases,
+            static fn (array $left, array $right): int => $left['execution_id'] <=> $right['execution_id'],
+        );
+        $frontendIds = array_column($cases, 'frontend_id');
+        sort($frontendIds, SORT_STRING);
+
+        return [
+            'schema' => 1,
+            'cases' => $cases,
+            'frontend_ids_sha256' => hash(
+                'sha256',
+                json_encode(
+                    $frontendIds,
+                    JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+                ),
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @param  list<array{execution_id: string, frontend_id: string}>  $cases
+     */
+    private function collectCaseIdentity(array $node, array &$cases): void
+    {
+        foreach (is_array($node['tests'] ?? null) ? $node['tests'] : [] as $test) {
+            if (! is_array($test)) {
+                continue;
+            }
+            if (! is_string($test['id'] ?? null)) {
+                continue;
+            }
+            $cases[] = [
+                'execution_id' => $test['id'],
+                'frontend_id' => is_string($test['frontend_id'] ?? null)
+                    ? $test['frontend_id']
+                    : $test['id'],
+            ];
+        }
+
+        foreach (is_array($node['children'] ?? null) ? $node['children'] : [] as $child) {
+            if (is_array($child)) {
+                $this->collectCaseIdentity($child, $cases);
+            }
+        }
+
+        if (is_array($node['root'] ?? null)) {
+            $this->collectCaseIdentity($node['root'], $cases);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $plan
+     * @return array<string, mixed>|null
+     */
+    private function environmentProjection(array $plan): ?array
+    {
+        $environment = $plan['environment'] ?? null;
+
+        if (! is_array($environment)
+            || ($environment['schema'] ?? null) !== 1
+            || ! is_string($environment['coordination'] ?? null)
+            || ! is_array($environment['resources'] ?? null)) {
+            return null;
+        }
+
+        $resources = [];
+
+        foreach ($environment['resources'] as $key => $resource) {
+            if (! is_string($key)
+                || ! is_array($resource)
+                || ! is_string($resource['kind'] ?? null)
+                || (($resource['provider'] ?? null) !== null
+                    && ! is_string($resource['provider']))
+                || ! is_array($resource['capabilities'] ?? null)
+                || ! array_is_list($resource['capabilities'])
+                || array_any(
+                    $resource['capabilities'],
+                    static fn (mixed $capability): bool => ! is_string($capability),
+                )
+                || ! is_array($resource['limitations'] ?? null)
+                || ! array_is_list($resource['limitations'])
+                || array_any(
+                    $resource['limitations'],
+                    static fn (mixed $limitation): bool => ! is_string($limitation),
+                )) {
+                return null;
+            }
+
+            $provider = $resource['provider'] ?? null;
+
+            if (is_string($provider)
+                && (strlen($provider) > 64
+                    || preg_match('/^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$/i', $provider) !== 1)) {
+                $provider = '[REDACTED]';
+            }
+
+            $resources[$key] = [
+                'kind' => $resource['kind'],
+                'provider' => $provider,
+                'capabilities' => $resource['capabilities'],
+            ];
+        }
+
+        return [
+            'schema' => 1,
+            'coordination' => $environment['coordination'],
+            'resources' => $resources,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $plan
+     * @return array{schema: 1, extensions: list<array{id: string, api_version: int}>}|null
+     */
+    private function extensionProjection(array $plan): ?array
+    {
+        $metadata = $plan['root']['metadata']['extensions'] ?? null;
+
+        if (! is_array($metadata)
+            || ($metadata['schema'] ?? null) !== 1
+            || ! is_array($metadata['extensions'] ?? null)
+            || ! array_is_list($metadata['extensions'])) {
+            return null;
+        }
+
+        $extensions = [];
+
+        foreach ($metadata['extensions'] as $extension) {
+            if (! is_array($extension)
+                || ! is_string($extension['id'] ?? null)
+                || preg_match(
+                    '~^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$~D',
+                    $extension['id'],
+                ) !== 1
+                || ! is_int($extension['api_version'] ?? null)
+                || $extension['api_version'] < 1) {
+                return null;
+            }
+
+            if (isset($extensions[$extension['id']])) {
+                return null;
+            }
+
+            $extensions[$extension['id']] = [
+                'id' => $extension['id'],
+                'api_version' => $extension['api_version'],
+            ];
+        }
+
+        ksort($extensions, SORT_STRING);
+
+        return ['schema' => 1, 'extensions' => array_values($extensions)];
     }
 
     /**

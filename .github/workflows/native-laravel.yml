@@ -1,0 +1,114 @@
+name: Native Laravel
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: native-laravel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  laravel:
+    name: Laravel 13 - PHP 8.4 - Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        test -z "$(git status --porcelain)"
+
+    - name: Build pinned Laravel proof image
+      env:
+        IMAGE: drove-native-laravel
+      run: |
+        set -euo pipefail
+        docker build \
+          --file experiments/phase-3-laravel/Dockerfile \
+          --tag "$IMAGE" \
+          .
+        test "$(
+          docker run --rm --entrypoint getconf "$IMAGE" GNU_LIBC_VERSION
+        )" = "glibc 2.41"
+
+    - name: Native Laravel static syntax
+      env:
+        IMAGE: drove-native-laravel
+      run: |
+        set -euo pipefail
+        docker run --rm "$IMAGE" bash -lc '
+          set -euo pipefail
+          for file in native-phase-4/*.php
+          do
+            php -l "$file"
+          done
+          composer validate --strict
+          composer check-platform-reqs
+        '
+
+    - name: Native Laravel state matrix
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        IMAGE: drove-native-laravel
+      run: |
+        set -euo pipefail
+        artifact_dir="${RUNNER_TEMP}/native-laravel"
+        mkdir -p "$artifact_dir"
+        docker run --rm \
+          --env DROVE_EVIDENCE_REVISION="$EXPECTED_SHA" \
+          --volume "$artifact_dir:/artifacts" \
+          "$IMAGE" bash -lc '
+            set -euo pipefail
+            matrix_args=""
+
+            for provider in sqlite-memory sqlite-copy
+            do
+              for processes in 1 2 4 8 16 30
+              do
+                summary="/artifacts/drove-native-laravel-${provider}-c${processes}.json"
+                DROVE_LARAVEL_PROVIDER="$provider" \
+                  DROVE_NATIVE_PROCESSES="$processes" \
+                  php -d ffi.enable=true -d memory_limit=512M \
+                    native-phase-4/proof.php > "$summary"
+                matrix_args="$matrix_args $summary"
+              done
+            done
+
+            php -d ffi.enable=true -d memory_limit=512M \
+              native-phase-4/faults.php \
+              > /artifacts/drove-native-laravel-faults.json
+            php -d ffi.enable=true \
+              native-phase-4/preflight.php \
+              > /artifacts/drove-native-laravel-preflight.json
+            php native-phase-4/compare.php \
+              $matrix_args \
+              /artifacts/drove-native-laravel-faults.json \
+              /artifacts/drove-native-laravel-preflight.json \
+              /artifacts/drove-native-laravel-comparison.json
+          '
+        test -z "$(git status --porcelain)"
+
+    - name: Upload native Laravel evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: native-laravel-${{ github.event.pull_request.head.sha || github.sha }}-php84-ubuntu
+        path: ${{ runner.temp }}/native-laravel/*.json
+        if-no-files-found: error
+        retention-days: 90

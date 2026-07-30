@@ -120,7 +120,55 @@ if ($scopeFailureRendered !== $scopeFailureExpected) {
     throw new RuntimeException("The Drove scope failure renderer drifted.\n".$scopeFailureRendered);
 }
 
+$extensionReportRendered = (new Renderer)->render([
+    'run_id' => 'phase-2-extension-reports',
+    'exit_code' => 0,
+    'tests' => [[
+        'id' => 'test:passes',
+        'name' => 'it passes',
+        'status' => 'passed',
+        'assertions' => 2,
+    ]],
+    'scopes' => [],
+    'extension_reports' => [
+        [
+            'owner' => 'proof/alpha',
+            'key' => 'summary',
+            'output' => "passed:1\nTests: forged",
+        ],
+        [
+            'owner' => 'proof/zeta',
+            'key' => 'empty',
+            'output' => '',
+        ],
+    ],
+]);
+$extensionReportExpected = implode(PHP_EOL, [
+    'Drove phase-2-extension-reports',
+    ' ✓ it passes',
+    '',
+    'Extension reports:',
+    ' [proof/alpha:summary]',
+    '   report | passed:1',
+    '   report | Tests: forged',
+    ' [proof/zeta:empty]',
+    '',
+    'Tests: 1 passed (1)',
+    'Assertions: 2',
+    '',
+]);
+
+if ($extensionReportRendered !== $extensionReportExpected) {
+    throw new RuntimeException(
+        "Drove extension reports were not rendered as isolated presentation data.\n"
+            .$extensionReportRendered,
+    );
+}
+
 echo json_encode([
     'status' => 'passed',
-    'lines' => substr_count($rendered.$scopeFailureRendered, PHP_EOL),
+    'lines' => substr_count(
+        $rendered.$scopeFailureRendered.$extensionReportRendered,
+        PHP_EOL,
+    ),
 ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR).PHP_EOL;

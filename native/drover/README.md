@@ -11,10 +11,17 @@ Rust owns:
   pools shared by every descendant;
 - atomic acquisition of every task permit before `fork()`;
 - a fresh bounded map for each scheduling wave;
-- `fork()`, one inert live process-group anchor per task, and nonblocking
-  parent transport;
+- exactly one `fork()` per task, with the PHP executor as process-group leader,
+  zero inert anchors, and nonblocking parent transport;
 - monotonic task deadlines and `SIGTERM` to `SIGKILL` group escalation;
-- `waitpid()`, result aggregation, interruption, and cancellation cleanup;
+- `waitid(..., WNOWAIT)` exit observation, descendant cleanup before executor
+  reap, result aggregation, interruption, and cancellation cleanup;
+- an engine-rooted, fixed-record ownership registry that retires identities
+  before reap and cleans Drove-owned nested process groups transitively when a
+  scope host dies;
+- a fallible cancellation ABI that completes all cleanup attempts before
+  returning one stable aggregate diagnostic; `Scheduler::drop` is
+  best-effort and writes any teardown failure to stderr without unwinding;
 - validation of the canonical versioned ChildProtocol frames.
 
 PHP retains the prepared application memory and executes inherited closures.
@@ -25,13 +32,16 @@ and permit policy to Rust; a forked PHP child emits the shared protocol through
 
 Scope hosts do not consume a global test permit. Nested maps use the same
 engine-backed permit pools, so concurrency one can enter a scope and still run
-its descendants without a self-deadlock.
+its descendants without a self-deadlock. The configured process count is
+therefore the hard cap on active test bodies/executor lanes, not on total OS
+PIDs. Stateful scope hosts are lazily bounded and reported separately; inert
+scopes create zero hosts. Aggregate PID and memory telemetry includes both.
 
 ## Proof from source
 
 The Composer archive includes this runtime note but excludes Rust sources and
 development fixtures. Run these commands from the matching tagged
-[source checkout](https://github.com/oxhq/drove/tree/v0.4.0-alpha.1).
+[source checkout](https://github.com/oxhq/drove/tree/v0.4.0-alpha.2).
 
 The standalone ABI smoke is:
 
@@ -65,8 +75,10 @@ tree cleanup, and native child `_exit` behavior.
   groups.
 - FFI remains the native bridge; Drove is not a PHP extension.
 - The scheduler is single-threaded and uses `poll()`, not pidfds/epoll.
-- Cleanup contains descendants that remain in the task process group; code
-  that creates a new session or process group requires a stronger OS sandbox.
+- Cleanup contains descendants in the task process group and nested groups
+  created through the same Drove engine. User code that creates an unregistered
+  session or process group with `setsid()`/`setpgid()` requires a stronger OS
+  sandbox.
 - The host must keep the default `SIGCHLD` disposition while a map runs.
 - Bail policy and a general output artifact store remain outside this slice.
 - Protocol v1 limits an individual frame to 1 MiB and aggregate stdout,

@@ -39,6 +39,7 @@ $execute = static function (array $command, ?string $workingDirectory = null): a
 $run = static fn (string ...$arguments): array => $execute([
     PHP_BINARY,
     __DIR__.'/vendor/bin/drove',
+    '--pest',
     ...$arguments,
 ]);
 $readJson = static function (string $path): array {
@@ -95,7 +96,8 @@ try {
             && is_array($registry)
             && ($registry['schema'] ?? null) === 1
             && ($registry['platforms']['windows']['status'] ?? null) === 'unsupported'
-            && ($registry['capabilities']['coverage-aggregation'] ?? null) === 'beta'
+            && ($registry['capabilities']['pest-phpunit-bridge-coverage'] ?? null) === 'beta'
+            && ($registry['capabilities']['native-coverage'] ?? null) === 'unsupported'
             && ($registry['capabilities']['drove-plugin-observers'] ?? null) === 'alpha'
             && ($registry['environment_contract']['schema'] ?? null) === 1
             && in_array(
@@ -156,7 +158,7 @@ PHP,
         $customConsumer,
     );
     $customRun = $execute(
-        [PHP_BINARY, $customBin.'drove', 'tests/SmokeTest.php'],
+        [PHP_BINARY, $customBin.'drove', '--pest', 'tests/SmokeTest.php'],
         $customConsumer,
     );
     $customPest = $execute(
@@ -210,6 +212,11 @@ PHP,
             && ($successArtifact['kind'] ?? null) === 'run'
             && ($successArtifact['result']['exit_code'] ?? null) === 0
             && is_string($successArtifact['plan']['sha256'] ?? null)
+            && ($successArtifact['plan']['tests'] ?? null) === 3
+            && ($successArtifact['result']['counts']['passed'] ?? null) === 3
+            && is_int($successArtifact['memory_peak_bytes'] ?? null)
+            && $successArtifact['memory_peak_bytes'] > 0
+            && ($successArtifact['memory_peak_sample_count'] ?? null) === 4
             && (fileperms($successReplay) & 0777) === 0600,
         'Plugin observers or the successful replay artifact drifted: '.$success['stderr'],
     );
@@ -226,7 +233,10 @@ PHP,
         $pluginFailure['exit'] === 1
             && str_contains($pluginFailure['stderr'], 'Drove beta observer failure.')
             && ($pluginFailureArtifact['kind'] ?? null) === 'crash'
-            && ($pluginFailureArtifact['crash']['class'] ?? null) === RuntimeException::class,
+            && ($pluginFailureArtifact['crash']['class'] ?? null) === RuntimeException::class
+            && is_int($pluginFailureArtifact['memory_peak_bytes'] ?? null)
+            && $pluginFailureArtifact['memory_peak_bytes'] > 0
+            && ($pluginFailureArtifact['memory_peak_sample_count'] ?? null) === 1,
         'A failing plugin observer did not fail fast with stable crash metadata.',
     );
 
@@ -274,10 +284,12 @@ PHP,
     );
 
     $environmentSafePluginMarker = $workspace.'/environment-safe-plugin.log';
+    $environmentSafeReplay = $workspace.'/environment-safe-replay.json';
     putenv('DROVE_PLUGIN_PROOF='.$environmentSafePluginMarker);
     $environmentSafe = $execute([
         PHP_BINARY,
         __DIR__.'/environment-preflight.php',
+        '--replay='.$environmentSafeReplay,
         'unsupported/environment/FirstTest.php',
     ]);
     putenv('DROVE_PLUGIN_PROOF');
@@ -285,10 +297,22 @@ PHP,
         $environmentSafePluginMarker,
         FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES,
     );
+    $environmentSafeArtifact = $readJson($environmentSafeReplay);
     $expect(
         $environmentSafe['exit'] === 0
             && is_array($environmentSafeEvents)
-            && in_array('environment:1', $environmentSafeEvents, true),
+            && in_array('environment:1', $environmentSafeEvents, true)
+            && ($environmentSafeArtifact['plan']['tests'] ?? null) === 1
+            && ($environmentSafeArtifact['plan']['scopes'] ?? null) === 2
+            && ($environmentSafeArtifact['plan']['environment']['schema'] ?? null) === 1
+            && ($environmentSafeArtifact['plan']['environment']['coordination'] ?? null)
+                === 'best-effort'
+            && ($environmentSafeArtifact['plan']['environment']['resources']['database']
+                ?? null) === [
+                    'kind' => 'database',
+                    'provider' => 'proof-leaf',
+                    'capabilities' => ['leaf-isolated'],
+                ],
         'The environment schema was not attached before plugin inspection: '
             .$environmentSafe['stdout'].$environmentSafe['stderr'],
     );
@@ -334,6 +358,20 @@ PHP,
         0,
     );
     $redaction->recordPlan([
+        'environment' => [
+            'schema' => 1,
+            'coordination' => 'best-effort',
+            'secret' => 'environment-secret-do-not-record',
+            'resources' => [
+                'database' => [
+                    'kind' => 'database',
+                    'provider' => 'mysql://environment-secret-do-not-record',
+                    'capabilities' => ['leaf-isolated'],
+                    'limitations' => ['environment-secret-do-not-record'],
+                    'secret' => 'environment-secret-do-not-record',
+                ],
+            ],
+        ],
         'root' => [
             'id' => 'scope:root',
             'type' => 'suite',
@@ -349,8 +387,14 @@ PHP,
     $redacted = (string) file_get_contents($redactionPath);
     $expect(
         str_contains($redacted, '--api-token=[REDACTED]')
-            && ! str_contains($redacted, 'do-not-record'),
-        'Replay argument redaction drifted.',
+            && ! str_contains($redacted, 'do-not-record')
+            && ($readJson($redactionPath)['plan']['environment']['resources']['database']
+                ?? null) === [
+                    'kind' => 'database',
+                    'provider' => '[REDACTED]',
+                    'capabilities' => ['leaf-isolated'],
+                ],
+        'Replay argument or environment projection redaction drifted.',
     );
 
     $phase('timeout and crash classification');
@@ -388,6 +432,7 @@ PHP,
     $command = [
         PHP_BINARY,
         __DIR__.'/vendor/bin/drove',
+        '--pest',
         '--replay-on-failure='.$interruptionReplay,
         'unsupported/InterruptionTest.php',
     ];
@@ -525,10 +570,12 @@ PHP,
 
     $remove = static function (string $directory) use (&$remove): void {
         foreach (scandir($directory) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
+            if ($entry === '.') {
                 continue;
             }
-
+            if ($entry === '..') {
+                continue;
+            }
             $path = $directory.'/'.$entry;
 
             if (is_dir($path) && ! is_link($path)) {

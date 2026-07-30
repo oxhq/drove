@@ -67,6 +67,7 @@ $process = new Process([
     'artisan',
     'drove',
     '--',
+    '--pest',
     'tests/Feature/PreparedApplicationTest.php',
     '--parallel',
     '--processes=2',

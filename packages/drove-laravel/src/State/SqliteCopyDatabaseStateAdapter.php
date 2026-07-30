@@ -27,9 +27,6 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
 
     private ?string $copyPrefix = null;
 
-    /** @var array<string, string> */
-    private array $pendingCopies = [];
-
     private ?int $dispatchPid = null;
 
     private ?int $descendantPid = null;
@@ -158,7 +155,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         $this->assertTasks($tasks);
         $pid = $this->pid('beforeDispatch');
 
-        if ($this->dispatchPid === $pid || $this->pendingCopies !== []) {
+        if ($this->dispatchPid !== null) {
             throw new StateAdapterException('An SQLite copy dispatch is already active.');
         }
 
@@ -167,23 +164,6 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         $this->assertSqliteConnection($connection, $this->databasePath(), 'beforeDispatch');
         $this->disconnect();
         $this->dispatchPid = $pid;
-
-        try {
-            foreach ($tasks as $ordinal => $task) {
-                $this->pendingCopies[$task['id']] = $this->copyDatabase(
-                    $this->databasePath(),
-                    $task['id'],
-                    $ordinal,
-                );
-            }
-        } catch (Throwable $throwable) {
-            $this->cleanupCopies(array_values($this->pendingCopies));
-            $this->pendingCopies = [];
-            $this->dispatchPid = null;
-            $this->reconnect();
-
-            throw $throwable;
-        }
     }
 
     /**
@@ -199,25 +179,33 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
             throw new StateAdapterException('An SQLite copy descendant is already active.');
         }
 
-        $copy = $this->pendingCopies[$task['id']] ?? null;
-
-        if (! is_string($copy)) {
-            throw new StateAdapterException(sprintf(
-                'No SQLite copy was prepared for descendant %s.',
-                $task['id'],
-            ));
+        if ($this->dispatchPid === null) {
+            throw new StateAdapterException('No SQLite copy dispatch is active.');
         }
 
         $parent = $this->databasePath();
-        $this->pendingCopies = [];
+        $copy = $this->copyDatabase($parent, $task['id']);
         $this->dispatchPid = null;
         $this->descendantPid = $pid;
         $this->descendantId = $task['id'];
         $this->descendantDatabase = $copy;
         $this->parentDatabase = $parent;
-        $this->configureDatabase($copy);
-        $connection = $this->reconnect();
-        $this->assertSqliteConnection($connection, $copy, 'enterDescendant');
+
+        try {
+            $this->configureDatabase($copy);
+            $connection = $this->reconnect();
+            $this->assertSqliteConnection($connection, $copy, 'enterDescendant');
+        } catch (Throwable $throwable) {
+            $this->purge();
+            $this->configureDatabase($parent);
+            $this->cleanupCopies([$copy]);
+            $this->descendantPid = null;
+            $this->descendantId = null;
+            $this->descendantDatabase = null;
+            $this->parentDatabase = null;
+
+            throw $throwable;
+        }
     }
 
     /**
@@ -289,10 +277,6 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         $pid = getmypid();
 
         if ($this->dispatchPid === null) {
-            $copies = array_values($this->pendingCopies);
-            $this->pendingCopies = [];
-            $this->cleanupCopies($copies);
-
             return;
         }
 
@@ -302,10 +286,7 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
             throw new StateAdapterException('The SQLite copy dispatch lifecycle is unbalanced.');
         }
 
-        $copies = array_values($this->pendingCopies);
-        $this->pendingCopies = [];
         $this->dispatchPid = null;
-        $this->cleanupCopies($copies);
         $this->configureDatabase($this->databasePath());
         $connection = $this->reconnect();
         $this->assertSqliteConnection($connection, $this->databasePath(), 'afterDispatch');
@@ -430,15 +411,24 @@ final class SqliteCopyDatabaseStateAdapter extends AbstractDatabaseStateAdapter
         }
     }
 
-    private function copyDatabase(string $source, string $taskId, int $ordinal): string
+    private function copyDatabase(string $source, string $taskId): string
     {
         $name = $this->copyPrefix().hash(
             'sha256',
-            getmypid()."\0".$ordinal."\0".$taskId."\0".bin2hex(random_bytes(8)),
+            getmypid()."\0".$taskId."\0".bin2hex(random_bytes(8)),
         ).'.sqlite';
         $destination = $this->workspace().'/'.$name;
 
-        if (file_exists($destination) || ! copy($source, $destination)) {
+        if (file_exists($destination)) {
+            throw new StateAdapterException(sprintf(
+                'Drove could not copy SQLite state for descendant %s.',
+                $taskId,
+            ));
+        }
+
+        if (! copy($source, $destination)) {
+            @unlink($destination);
+
             throw new StateAdapterException(sprintf(
                 'Drove could not copy SQLite state for descendant %s.',
                 $taskId,

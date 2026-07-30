@@ -10,8 +10,10 @@ by the lifecycle kernel, and scheduled through the Rust-backed Drover engine.
 The Composer package is `oxhq/drove`; it replaces Pest 5.0.1 only to keep the
 compatible plugin surface installable during the extraction.
 
-> **Experimental alpha:** `v0.4.0-alpha.1` is not a stable compatibility
-> promise. Use the live authorities below to verify package availability,
+> **Experimental alpha:** `v0.4.0-alpha.2` is not a stable compatibility
+> promise. It is the technical evaluation release and does not claim external
+> validation. The candidate `v0.4.0-alpha.3` remains gated by design-partner
+> evidence. Use the live authorities below to verify package availability,
 > native assets, and hosted evidence for an exact release.
 
 | Public artifact | Live authority |
@@ -31,7 +33,7 @@ The proven compatibility surface includes:
 - one native PHPUnit `TestCase` class per file, including datasets, groups,
   class lifecycle, and mixed Pest/PHPUnit suites;
 - skips, todos, filters, groups, excluded groups, and test suites;
-- fork-local code-coverage aggregation into PHPUnit's report generators;
+- fork-local PCOV line coverage for the Pest/PHPUnit bridge;
 - explicit per-test deadlines, signal/crash classification, and diagnostic
   replay metadata;
 - an observer-only Drove plugin API and machine-readable compatibility
@@ -46,17 +48,31 @@ The proven compatibility surface includes:
 Install the tagged packages from Packagist:
 
 ```bash
-composer config --no-plugins allow-plugins.pestphp/pest-plugin true
 composer require --dev oxhq/drove:^0.4@alpha
 vendor/bin/drove-install-native
 vendor/bin/drove --version
 vendor/bin/drove --compatibility
 ```
 
-The explicit Composer opt-in trusts the inherited Pest plugin-discovery
-package used by this alpha. Consumer projects do not inherit Drove's own
-`allow-plugins` setting, so noninteractive installation fails closed without
-that command.
+The native install does not install or trust Pest, PHPUnit, ParaTest,
+Collision, Termwind, Symfony Process, or the Pest Composer plugin.
+
+The Pest compatibility bridge is a separate opt-in inside this alpha:
+
+```bash
+composer config --no-plugins allow-plugins.pestphp/pest-plugin true
+composer require --dev \
+  brianium/paratest:^7.23.0 \
+  nunomaduro/collision:^8.9.5 \
+  nunomaduro/termwind:^2.4.0 \
+  pestphp/pest-plugin:^5.0.0 \
+  phpunit/phpunit:13.2.4 \
+  symfony/process:^8.1.0
+vendor/bin/drove --pest --version
+```
+
+`vendor/bin/drove --pest` verifies that complete compatible set before loading
+Pest code. Missing or incompatible dependencies fail explicitly.
 
 `drove-install-native` is explicit: Composer does not download executable
 artifacts during install. It selects GNU/Linux (glibc 2.31 or newer) or macOS
@@ -75,6 +91,10 @@ Laravel/Testbench users will also install the matching alpha:
 ```bash
 composer require --dev oxhq/drove-laravel:^0.4@alpha
 ```
+
+Drove's packaged `vendor/bin/pest` is a bridge alias, not an independent Pest
+baseline. Use separate dependency trees for comparisons. See the
+[migration, troubleshooting, and rollback guide](docs/migration-from-pest.md).
 
 ## Run the compatibility gate
 
@@ -104,6 +124,9 @@ for passing, failing, and explicitly unsupported input.
 
 See [`docs/migration-from-pest.md`](docs/migration-from-pest.md) for source
 installation, the compatibility matrix, and declared limitations.
+The independent [`native DSL`](docs/native-dsl.md) is the forward product
+surface; it lowers directly to Scope IR without generated Pest or PHPUnit
+cases.
 
 ## Laravel alpha
 
@@ -129,40 +152,66 @@ execution because they can commit schema changes outside the adapter
 transaction.
 
 The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
+Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
-nonserial cohort at 1, 2, 4, and 8 Drove processes plus its 28-case
-filesystem-sensitive cohort at 1. A release requires a successful exact-SHA
-hosted full-ladder run; inspect the workflow authority above for its result and
-artifacts. Nucleus is deliberately excluded because its Docker/MySQL suite is
-not part of this portable corpus. The tagged
-[corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.1/benchmarks/corpus)
+nonserial cohort at 1, 2, 4, 8, 16, and 30 Drove processes plus its 28-case
+filesystem-sensitive cohort at 1. The exact-SHA full ladder is accepted in
+[GitHub Actions #30565701071](https://github.com/oxhq/drove/actions/runs/30565701071);
+the stored
+[compatibility benchmark](benchmarks/results/2026-07-30-corpus-2146dd4b.md)
+retains requested/observed lanes, counts, milliseconds, and memory sources as a
+single-sample diagnostic rather than a performance claim. Nucleus is
+deliberately excluded because its Docker/MySQL suite is not part of this
+portable corpus. The tagged
+[corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.2/benchmarks/corpus)
 records revisions, selections, dependency overlays, and normalization rules.
 
-## Coverage, interruption, and replay
+## Bridge coverage, interruption, and replay
 
-Drove can merge coverage collected independently in forked test processes and
-then use PHPUnit's standard `--coverage-clover`, `--coverage-cobertura`,
-`--coverage-crap4j`, `--coverage-html`, `--coverage-php`, `--coverage-text`,
-and `--coverage-xml` report generators. A supported coverage driver such as
-PCOV or Xdebug is still required. Strict coverage metadata/contribution modes
-and the ambiguous bare `--coverage` option remain explicit rejections.
+`drove --pest` can merge coverage collected independently in forked
+Pest/PHPUnit bridge processes. The bridge-gated configuration is PCOV 1.0.12
+line coverage with PHPUnit's `--coverage-php` report. Xdebug and the other
+PHPUnit report formats remain experimental until they pass the same
+concurrency and fault matrix. Strict coverage metadata/contribution modes and
+the ambiguous bare `--coverage` option remain explicit bridge rejections.
+
+The native Drove frontend does not implement or advertise coverage. Native
+coverage options are rejected, and the Bridge Coverage gate is not evidence of
+native-frontend coverage.
 
 `--drove-timeout-ms=N` assigns one positive default deadline to every selected
 test; omitting it leaves deadlines disabled. On timeout, SIGINT, or SIGTERM,
 Drover stops scheduling new work, terminates active process groups, escalates
-when needed, and reports a stable failure classification. An inert per-task
-group anchor remains live until cleanup, so a PHP executor crash cannot strand
-same-group descendants.
-Native runs require the default `SIGCHLD` disposition so executor and anchor
-children remain waitable.
+when needed, and reports a stable failure classification. Each task uses one
+fork: the PHP executor is also its process-group leader, and no inert anchor is
+created. Drover observes executor exit with `waitid(..., WNOWAIT)`, completes
+same-group descendant cleanup, and only then reaps the executor. Native runs
+require the default `SIGCHLD` disposition so executor children remain waitable.
+Nested Drove maps register each executor group with the original engine before
+child readiness. The root cleans that ownership graph transitively if a
+stateful scope host crashes, including when PHP shutdown handlers cannot run.
+An explicit `DroverScheduler::requestCancellation()` is latched and executed
+at the next safe PHP/native boundary. Native cancellation is fallible: cleanup
+continues across every active map, then any drain, signal, reap, registry, or
+permit-release failure is propagated with a stable diagnostic. Destructors and
+fatal shutdown handlers use the same cleanup path best-effort, report failures
+to stderr, and never throw from teardown.
+The configured process count is a hard cap on active test bodies/executor
+lanes, not on every OS process. Stateful scopes add separately reported,
+lazily created scope hosts that own their semantic snapshots; inert scopes add
+none. Aggregate PID and memory telemetry includes both executors and scope
+hosts.
 
 `--replay=path.json` writes one no-overwrite diagnostic artifact.
 `--replay-on-failure=path.json` writes only for a nonzero run. The artifact
 contains version/platform data, redacted arguments, a plan hash, status counts,
-failure kinds, completion order, and observed concurrency. It excludes test
-output, values, environment variables, and failure messages, but should still
-be inspected before sharing. It is metadata for reproducing a run; Drove does
-not yet consume it to rerun the suite.
+failure kinds, completion order, observed concurrency, sampled PHP memory, and
+a whitelist-only projection of environment providers and capabilities. It
+excludes test output, values, environment variables, failure messages, and
+unknown environment fields, but should still be inspected before sharing. It
+records the maximum of the root and available descendant PHP-process peaks,
+not aggregate RSS. It is metadata for reproducing a run; Drove does not yet
+consume it to rerun the suite.
 
 ## Plugin and compatibility boundary
 
@@ -193,8 +242,9 @@ mutate runner internals are outside the declared alpha surface.
 Drove uses exit 1 for any test failure or runtime error and exit 2 for invalid
 or explicitly unsupported input. It does not preserve PHPUnit's separate
 runtime-error exit code. Native cleanup covers descendants that remain in the
-task process group; `setsid()`, `setpgid()`, or privilege changes require an OS
-sandbox and are outside this alpha.
+task process group and Drove-owned nested groups in the root ownership
+registry. User code that deliberately escapes with `setsid()`, `setpgid()`, or
+privilege changes requires an OS sandbox and is outside this alpha.
 
 Packagist, GitHub Releases, and the hosted workflows above are the live
 publication and proof authorities; a source branch alone is not release

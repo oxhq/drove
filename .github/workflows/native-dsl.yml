@@ -1,0 +1,130 @@
+name: Native DSL
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: native-dsl-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dsl:
+    name: PHP 8.4 - Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout exact head
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+
+    - name: Verify exact checkout
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        test -z "$(git status --porcelain)"
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: '8.4'
+        tools: composer:v2
+        coverage: none
+        extensions: ffi, pcntl, posix
+
+    - name: Build local Drover library
+      env:
+        NATIVE_IMAGE: drove-native-dsl
+      run: |
+        set -euo pipefail
+        docker build \
+          --file native/drover/Dockerfile \
+          --tag "$NATIVE_IMAGE" \
+          .
+        test "$(
+          docker run --rm --entrypoint getconf "$NATIVE_IMAGE" GNU_LIBC_VERSION
+        )" = "glibc 2.31"
+        docker run --rm "$NATIVE_IMAGE"
+        container="$(docker create "$NATIVE_IMAGE")"
+        trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+        mkdir -p native/drover/target/release
+        docker cp \
+          "$container:/usr/local/lib/libdrover.so" \
+          native/drover/target/release/libdrover.so
+        test -f native/drover/target/release/libdrover.so
+
+    - name: Get Composer cache directory
+      id: composer-cache
+      shell: bash
+      run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Composer dependencies
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+      with:
+        path: ${{ steps.composer-cache.outputs.dir }}
+        key: native-dsl-php-8.4-composer-${{ hashFiles('**/composer.json', '**/composer.lock') }}
+        restore-keys: |
+          native-dsl-php-8.4-composer-
+
+    - name: Install PHP dependencies
+      env:
+        COMPOSER_ROOT_VERSION: 0.4.x-dev
+      run: composer install --no-interaction --no-progress --ansi
+
+    - name: Validate package metadata
+      run: composer validate --strict && composer check-platform-reqs
+
+    - name: Native DSL static analysis
+      run: composer test:native-phase-3:static
+
+    - name: Native DSL conformance and stress
+      shell: bash
+      env:
+        DROVE_EVIDENCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        DROVER_LIBRARY: ${{ github.workspace }}/native/drover/target/release/libdrover.so
+      run: |
+        set -euo pipefail
+        artifact_dir="${RUNNER_TEMP}/native-phase-3"
+        mkdir -p "$artifact_dir"
+        summaries=()
+
+        for processes in 1 2 4 8 16 30
+        do
+          summary="${artifact_dir}/drove-native-dsl-c${processes}.json"
+          DROVE_NATIVE_FIXTURE=conformance \
+            DROVE_NATIVE_SCHEDULER=drover \
+            DROVE_NATIVE_PROCESSES="$processes" \
+            php -d ffi.enable=true experiments/native-phase-3/proof.php > "$summary"
+          summaries+=("$summary")
+        done
+
+        stress="${artifact_dir}/drove-native-dsl-stress-c30.json"
+        DROVE_NATIVE_FIXTURE=stress \
+          DROVE_NATIVE_SCHEDULER=drover \
+          DROVE_NATIVE_PROCESSES=30 \
+          php -d ffi.enable=true -d memory_limit=512M \
+            experiments/native-phase-3/proof.php > "$stress"
+
+        php experiments/native-phase-3/compare.php \
+          "${summaries[@]}" \
+          "$stress" \
+          "${artifact_dir}/drove-native-dsl-comparison.json"
+
+    - name: Upload native DSL evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: native-dsl-${{ github.event.pull_request.head.sha || github.sha }}-php84-ubuntu
+        path: ${{ runner.temp }}/native-phase-3/*.json
+        if-no-files-found: error
+        retention-days: 90
