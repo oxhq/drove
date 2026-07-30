@@ -547,7 +547,7 @@
                 "sha256": "d54b9564f5364cd57f6b0c37eaa4e910abe4f3bf611e19f43b6713cc2862ce52"
             },
             "dependency_overlay": {
-                "composer_json_sha256": "b0e1de98f3df3d3ff124dbe6935a82b0840a1178deb493aeef7162f5eab33cec",
+                "composer_json_sha256": "d86f98cb5b52b58349dac27ba8ffbc760497421fc9b588e4e5c33d07d69c7a79",
                 "tracked_paths": [
                     "composer.json"
                 ]
@@ -757,7 +757,7 @@
                 "sha256": "07470ae723c2b11e5ac330e9ee3d54676fabb3ee58fb83e98a27834d19d4797b"
             },
             "dependency_overlay": {
-                "composer_json_sha256": "73f7f3e4ab9516b4810a3c33866c460d8004a6ed08c83d782c343ea0ddd9b914",
+                "composer_json_sha256": "69fd1ab05e6092350de8f7be51627a9206f6adc32518c85d3568d889e8312a23",
                 "tracked_paths": [
                     "composer.json",
                     "composer.lock"
