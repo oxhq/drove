@@ -85,7 +85,7 @@ jobs:
           extensions: ffi, pcntl
           coverage: none
 
-      - name: Verify candidate release identity
+      - name: Verify release identity
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
@@ -267,6 +267,15 @@ jobs:
           fi
           test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
 
+      - name: Resolve release publication policy
+        id: release_policy
+        run: |
+          set -euo pipefail
+          php scripts/verify-release-version.php \
+            "$GITHUB_REF_NAME" \
+            --github-output \
+            >> "$GITHUB_OUTPUT"
+
       - name: Require successful full corpus at release SHA
         env:
           GH_TOKEN: ${{ github.token }}
@@ -320,6 +329,7 @@ jobs:
           done
 
       - name: Require external design-partner evidence
+        if: steps.release_policy.outputs.requires_design_partner_evidence == 'true'
         run: |
           set -euo pipefail
           php scripts/verify-design-partners.php \
@@ -338,6 +348,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ROLE: ${{ steps.release_policy.outputs.release_role }}
+          REQUIRES_DESIGN_PARTNER_EVIDENCE: ${{ steps.release_policy.outputs.requires_design_partner_evidence }}
         run: |
           set -euo pipefail
           cd release
@@ -400,6 +412,14 @@ jobs:
             echo "Bridge Coverage gates PCOV 1.0.12 line coverage only through the Pest/PHPUnit bridge. The native frontend rejects coverage options and does not declare coverage support."
             echo
             echo "Native guarantees, bridge-only compatibility, unsupported surfaces, and migration guidance are versioned in the tagged README and docs. CI artifacts do not by themselves establish the external design-partner gate."
+            echo
+            if [[ "$REQUIRES_DESIGN_PARTNER_EVIDENCE" == true ]]; then
+              test "$RELEASE_ROLE" = evidence-gated-candidate
+              echo "This candidate passed the external design-partner gate recorded by its immutable ledger."
+            else
+              test "$RELEASE_ROLE" = technical-evaluation
+              echo "This technical evaluation release intentionally makes no external-validation claim; it exists so unaffiliated teams can produce evidence for the later candidate."
+            fi
             echo
             echo "Historical repository tags through v5.0.1 belong to the Pest lineage and are not prior Drove releases."
           } > "$notes"

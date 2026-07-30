@@ -2,6 +2,12 @@
     "schema": 1,
     "release_channel": "experimental-alpha",
     "drove_version": null,
+    "release_policy": {
+        "evaluation_tag": "v0.4.0-alpha.2",
+        "candidate_tag": "v0.4.0-alpha.3",
+        "evaluation_requires_design_partner_evidence": false,
+        "candidate_requires_design_partner_evidence": true
+    },
     "platforms": {
         "linux-gnu-x86_64": {
             "status": "supported-alpha",

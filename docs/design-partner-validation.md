@@ -4,6 +4,12 @@ Drove's public repositories in the compatibility corpus are test inputs, not
 design partners. A partner counts only when an unaffiliated team evaluates a
 tagged Drove build in its own suite and reports the outcome.
 
+`v0.4.0-alpha.2` is the installable technical evaluation release; it does not
+require or claim external evidence about itself.
+`v0.4.0-alpha.3` is the evidence-gated candidate; only it requires three
+completed external evaluations plus two meaningful migrations retained in CI
+for at least 14 days.
+
 ## Ledger
 
 Status as of 2026-07-29:
@@ -20,16 +26,16 @@ ledger.
 
 The machine-readable source of truth is
 [`design-partner-evidence.json`](design-partner-evidence.json). Counts in this
-page are informational and never satisfy the release gate. For an annotated
-release tag, `scripts/verify-design-partners.php` requires three unique external
-teams and repositories with scanner and benchmark artifacts bound to that exact
-Drove evaluation tag and revision. `resources/release.json` fixes that
-evaluation tag for the candidate; every entry must use it. The evaluation tag
-must be annotated, its recorded revision must match the repository tag, and
-that revision must be a strict ancestor of the release candidate. It also
-requires two meaningful migrations whose artifact-backed CI timestamps span at
-least 14 complete days. Every evidence artifact is downloaded without redirects
-and checked against its recorded SHA-256 hash.
+page are informational and never satisfy the candidate release gate. For the
+annotated candidate tag, `scripts/verify-design-partners.php` requires three
+unique external teams and repositories with scanner and benchmark artifacts
+bound to the exact Drove evaluation tag and revision. `resources/release.json`
+fixes that evaluation tag for the candidate; every entry must use it. The
+evaluation tag must be annotated, its recorded revision must match the
+repository tag, and that revision must be a strict ancestor of the release
+candidate. It also requires two meaningful migrations whose artifact-backed CI
+timestamps span at least 14 complete days. Every evidence artifact is
+downloaded without redirects and checked against its recorded SHA-256 hash.
 
 Partner evaluation therefore happens against an earlier installable alpha and
 gates a later release candidate. Requiring evidence for the not-yet-published
@@ -80,8 +86,9 @@ does not count as execution.
 
 This is Phase 7's only irreducibly external gate. Code, fixtures, or corpus runs
 owned by Drove cannot manufacture it. Until the ledger contains reviewable
-partner evidence, tag publication is intentionally blocked while ordinary
-workflow-dispatch native builds remain available.
+partner evidence, candidate tag publication is intentionally blocked. The
+earlier technical evaluation tag is governed by technical release gates and
+must not claim that this external validation already exists.
 
 `php scripts/verify-design-partners-self-test.php` exercises valid and
 adversarial fixtures without network access. Release verification uses the real

@@ -11,7 +11,9 @@ The Composer package is `oxhq/drove`; it replaces Pest 5.0.1 only to keep the
 compatible plugin surface installable during the extraction.
 
 > **Experimental alpha:** `v0.4.0-alpha.2` is not a stable compatibility
-> promise. Use the live authorities below to verify package availability,
+> promise. It is the technical evaluation release and does not claim external
+> validation. The candidate `v0.4.0-alpha.3` remains gated by design-partner
+> evidence. Use the live authorities below to verify package availability,
 > native assets, and hosted evidence for an exact release.
 
 | Public artifact | Live authority |

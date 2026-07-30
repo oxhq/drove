@@ -52,7 +52,7 @@ The following invariants apply to every feature declared supported:
 | 4. Native Laravel prepared runtime | **IMPLEMENTED — HOSTED GATE PENDING** | Local Docker C1–C30 matrix, provider faults, preflight, and cleanup proofs pass; exact hosted artifact remains pending |
 | 5. Bounded one-fork execution | **IMPLEMENTED — HOSTED GATE PENDING** | Local topology, telemetry, reliability, cancellation, and controlled performance gates pass; the exact hosted artifact has not yet been observed |
 | 6. Bridges and migration corpus | **IMPLEMENTED — HOSTED GATE PENDING** | Local bridge, migration, source-identity, and exact pinned Pest proofs pass; the required hosted ladder ending with Filament has not yet been observed |
-| 7. Public experimental release | **IMPLEMENTED — EXTERNAL/PUBLICATION GATES PENDING** | Local native/bridge archive consumers and bridge coverage pass; candidate `v0.4.0-alpha.2`, hosted packages, 3 design partners, and 2 retained migrations remain pending |
+| 7. Public experimental release | **IMPLEMENTED — PUBLICATION/EVIDENCE GATES PENDING** | The technical evaluation release `v0.4.0-alpha.2` may publish after technical gates; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -368,11 +368,22 @@ Exit gates:
 - Public release notes distinguish native guarantees, bridge compatibility,
   known unsupported surfaces, and evidence that remains local or experimental.
 
-The `v0.4.0-alpha.2` candidate is not published. Its local archive consumers
-and PCOV bridge matrix pass, but the external ledger currently records 0 of 3
-design partners and 0 of 2 retained migrations. The release workflow therefore
-blocks tag assets and Packagist verification rather than manufacturing
-repository-owned evidence for this gate.
+The technical evaluation release `v0.4.0-alpha.2` is not yet proven published.
+Its local archive consumers and PCOV bridge matrix pass, so it may publish
+after the technical release gates without claiming external validation. It is
+the installable build that unaffiliated teams evaluate.
+
+The candidate `v0.4.0-alpha.3` remains blocked: the external ledger currently
+records 0 of 3 design partners and 0 of 2 retained migrations. Its release path
+requires two artifact-backed migrations retained for at least 14 days. Drove
+does not manufacture repository-owned evidence or apply that irreducibly
+external gate to the build needed to collect it.
+
+An alpha tag can become visible to Packagist before post-tag CI finishes.
+Candidate tag creation must therefore be protected and occur only after the
+design-partner verifier passes on the exact candidate commit. The release and
+published-package workflows rerun that gate, but source code cannot prove or
+replace the hosted tag-protection rule.
 
 ## Non-goals
 

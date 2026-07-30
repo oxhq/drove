@@ -21,6 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   attestations: read
   contents: read
 
@@ -58,6 +59,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify exact clean checkout
@@ -105,6 +107,30 @@ jobs:
           tools: composer:2.10.2
           coverage: none
           extensions: ffi, openssl, pcntl, phar, posix, zlib
+
+      - name: Resolve release publication policy
+        id: release_policy
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          php scripts/verify-release-version.php \
+            "$RELEASE_VERSION" \
+            --github-output \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Require candidate design-partner evidence
+        if: steps.release_policy.outputs.requires_design_partner_evidence == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          php scripts/verify-design-partners.php \
+            docs/design-partner-evidence.json \
+            "$RELEASE_VERSION" \
+            "$RELEASE_COMMIT"
 
       - name: Resolve both tagged packages from Packagist
         env:
