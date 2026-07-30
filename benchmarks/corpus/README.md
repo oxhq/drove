@@ -124,11 +124,11 @@ execution result remains `selection.mode=curated` and
   order and Filament's complete serial/parallel cohort evidence.
 
 The hosted runner is pinned to `ubuntu-24.04`. The uploaded artifact name
-includes the exact Drove commit; `evidence-metadata.json` repeats that identity
-plus the workflow run, attempt, image, and tier. `SHA256SUMS` seals every
-uploaded file. A full artifact also contains `benchmark-report.md`; its renderer
-revalidates the sealed raw result matrix with `verify.php --complete` before
-emitting the diagnostic table.
+includes the exact Drove commit and workflow attempt;
+`evidence-metadata.json` repeats that identity plus the workflow run, attempt,
+image, and tier. `SHA256SUMS` seals every uploaded file. A full artifact also
+contains `benchmark-report.md`; its renderer revalidates the sealed raw result
+matrix with `verify.php --complete` before emitting the diagnostic table.
 
 Selected hosted reports are promoted permanently under
 [`benchmarks/results/`](../results/); each snapshot links its source workflow,
