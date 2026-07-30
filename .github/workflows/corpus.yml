@@ -718,7 +718,11 @@ jobs:
 
           if [ "$RUN_FULL" = true ]; then
             summary="$RUNNER_TEMP/drove-corpus-benchmark-report.md"
-            php benchmarks/results/render-corpus.php results "$EXPECTED_SHA" \
+            docker run --rm \
+              --volume "$PWD/results:/results" \
+              drove-corpus \
+              php /drove/benchmarks/results/render-corpus.php \
+                /results "$EXPECTED_SHA" \
               >"$summary"
             mv "$summary" results/benchmark-report.md
             (

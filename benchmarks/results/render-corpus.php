@@ -385,7 +385,16 @@ function verifyCompleteCorpus(array $paths): array
     $exit = proc_close($process);
 
     if ($exit !== 0 || ! is_string($stdout)) {
-        fail('Complete corpus verification failed: '.trim((string) $stderr));
+        $details = trim((string) $stderr);
+
+        if ($details === '') {
+            $failed = json_decode((string) $stdout, true);
+            $details = is_array($failed) && is_array($failed['errors'] ?? null)
+                ? json_encode($failed['errors'], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+                : trim((string) $stdout);
+        }
+
+        fail('Complete corpus verification failed: '.$details);
     }
 
     $decoded = json_decode($stdout, true, flags: JSON_THROW_ON_ERROR);
