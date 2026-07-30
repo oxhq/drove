@@ -387,16 +387,21 @@ jobs:
           set -euo pipefail
           release_sha="$(git rev-parse HEAD)"
           artifact_name="corpus-full-$release_sha"
-          run_id="$(
-            gh api "repos/$GH_REPO/actions/artifacts?name=$artifact_name&per_page=100" \
-              --jq "[.artifacts[] | select(.name == \"$artifact_name\" and .expired == false and .workflow_run.head_sha == \"$release_sha\")][0].workflow_run.id // empty"
+          details="$(
+            gh api "repos/$GH_REPO/actions/workflows/corpus.yml/runs?branch=develop&event=workflow_dispatch&head_sha=$release_sha&per_page=1" \
+              --jq '.workflow_runs[0] | [.id, .conclusion, .event, .path, .head_sha] | @tsv'
           )"
+          IFS=$'\t' read -r run_id conclusion event path head_sha <<<"$details"
           test -n "$run_id"
-          run="$(
-            gh api "repos/$GH_REPO/actions/runs/$run_id" \
-              --jq '[.conclusion, .event, .path, .head_sha] | @tsv'
+          test "$conclusion" = success
+          test "$event" = workflow_dispatch
+          test "$path" = ".github/workflows/corpus.yml"
+          test "$head_sha" = "$release_sha"
+          artifact_id="$(
+            gh api "repos/$GH_REPO/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq "[.artifacts[] | select(.name == \"$artifact_name\" and .expired == false)][0].id // empty"
           )"
-          test "$run" = "success	workflow_dispatch	.github/workflows/corpus.yml	$release_sha"
+          test -n "$artifact_id"
           echo "Full corpus release gate: run $run_id"
 
       - name: Require successful develop workflows at release SHA
@@ -419,7 +424,7 @@ jobs:
           )
           for workflow in "${workflows[@]}"; do
             details="$(
-              gh api "repos/$GH_REPO/actions/workflows/$workflow/runs?branch=develop&event=push&head_sha=$release_sha&status=success&per_page=1" \
+              gh api "repos/$GH_REPO/actions/workflows/$workflow/runs?branch=develop&event=push&head_sha=$release_sha&per_page=1" \
                 --jq '.workflow_runs[0] | [.id, .conclusion, .event, .path, .head_sha] | @tsv'
             )"
             IFS=$'\t' read -r run_id conclusion event path head_sha <<<"$details"
