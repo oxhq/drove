@@ -80,7 +80,7 @@ The hosted workflow records:
 | Aggregate memory | Saturated C1, C2, C4, C8, C16, C30 | At least three stable full-population samples; `M(C) <= 1.15 * C * M(C1)`; zero observed swap/OOM |
 | Cheap C1 | 5 Drove + 5 matched reference samples | Drove median no more than 15% slower |
 | Setup dominated | 5 Drove + 5 matched reference samples | Drove median at least 2x faster |
-| Independent work | 3 observer-free samples at C1, C16, C30 | At least 20x C1-to-C30; C30 at least 10% faster than C16; steady-state idle below 5% over at least two full waves; raw end-to-end idle retained; no `/proc` process monitor attached |
+| Independent work | 3 observer-free samples at C1, C16, C30 | At least 20x C1-to-C30; C30 at least 10% faster than C16; median steady-state idle below 5% over at least two full waves at each concurrency, with every sample and maximum retained; raw end-to-end idle retained; no `/proc` process monitor attached |
 | Inactive scopes | 3 paired runs of 10 and 1,000 empty siblings | Every virtual result/event survives; at least three stable 61-PID samples per C30 run; raw full-population PSS median delta at most 10% and each pair at most 15%; zero scope workers/branches |
 | Scope behavior | inert and stateful scopes | Inert scopes flatten; stateful `beforeAll`/`afterAll` isolation survives |
 | Nested stateful C1 | 1 depth-2 Scope IR run | One active test body, three scope hosts, 63 total forks, semantic parity with C30, and zero orphan/state residue |

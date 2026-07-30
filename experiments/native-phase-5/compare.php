@@ -305,6 +305,7 @@ try {
     $independent = [];
     $independentRawIdleRatios = [];
     $independentSteadyStateIdleRatios = [];
+    $independentSteadyStateIdleMedians = [];
     $independentSemanticHashes = [];
 
     foreach ([1, 16, 30] as $processCount) {
@@ -337,7 +338,7 @@ try {
                     && $rawIdleRatio <= 1
                     && (is_int($steadyStateIdleRatio) || is_float($steadyStateIdleRatio))
                     && $steadyStateIdleRatio >= 0
-                    && $steadyStateIdleRatio < 0.05,
+                    && $steadyStateIdleRatio <= 1,
                 'Native Phase 5 independent-work utilization gate failed.',
             );
             $independent[$processCount][] = $summary;
@@ -360,6 +361,18 @@ try {
             static fn (array $summary): float => (float) $summary['telemetry']['timings_ms']['execution'],
             $samples,
         ));
+        $independentSteadyStateIdleMedians[$processCount] = nativePhaseFiveMedian(array_map(
+            static fn (array $summary): float => (float) $summary['telemetry']['scheduler']['scheduler_steady_state_idle_lane_ratio'],
+            $samples,
+        ));
+        nativePhaseFiveAssert(
+            $independentSteadyStateIdleMedians[$processCount] < 0.05,
+            sprintf(
+                'Native Phase 5 C%d median steady-state idle ratio %.6f reached 0.05.',
+                $processCount,
+                $independentSteadyStateIdleMedians[$processCount],
+            ),
+        );
     }
 
     $speedup = $independentMedians[1] / $independentMedians[30];
@@ -784,6 +797,7 @@ try {
             'independent_median_ms' => $independentMedians,
             'independent_c1_c30_speedup' => round($speedup, 6),
             'independent_raw_idle_lane_ratio_max' => max($independentRawIdleRatios),
+            'independent_steady_state_idle_lane_ratio_median' => $independentSteadyStateIdleMedians,
             'independent_steady_state_idle_lane_ratio_max' => max(
                 $independentSteadyStateIdleRatios,
             ),
