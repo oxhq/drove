@@ -56,6 +56,7 @@ function designPartnerFixtureEvidence(
     $telemetry = [
         'frontend' => $frontend,
         'runtime' => $runtime,
+        'exit_code' => 0,
         'memory_source' => 'rss',
         'peak_memory_bytes' => 64_000_000,
     ];
@@ -142,11 +143,12 @@ function designPartnerFixtureEntry(
         $evidence,
         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
     ).PHP_EOL;
+    $evidenceRevision = hash('sha1', strtolower("{$owner}/{$repository}/evidence"));
     $url = sprintf(
         'https://raw.githubusercontent.com/%s/%s/%s/.drove/evaluation.json',
         $owner,
         $repository,
-        $evidence['project_revision'],
+        $evidenceRevision,
     );
     $artifacts[$url] = $contents;
 
@@ -156,6 +158,7 @@ function designPartnerFixtureEntry(
         'repository' => $evidence['repository'],
         'drove' => $evidence['drove'],
         'project_revision' => $evidence['project_revision'],
+        'evidence_revision' => $evidenceRevision,
         'evidence' => [
             'url' => $url,
             'sha256' => hash('sha256', $contents),
@@ -344,6 +347,24 @@ $comparisons = [
         '9c1450739d30c9b0b223ad6512be2a33f8f62f96',
     ),
 ];
+
+foreach ($ledger['evaluations'] as $evaluation) {
+    $repository = designPartnerRepository(
+        $evaluation['repository'],
+        "{$evaluation['id']}.repository",
+    );
+    $key = strtolower(sprintf(
+        '%s/%s/%s/%s',
+        $repository['owner'],
+        $repository['repository'],
+        $evaluation['project_revision'],
+        $evaluation['evidence_revision'],
+    ));
+    $comparisons[$key] = designPartnerFixtureComparison(
+        $evaluation['project_revision'],
+        $evaluation['evidence_revision'],
+    );
+}
 $artifactLoader = static fn (string $url): string => $artifacts[$url]
     ?? throw new RuntimeException("Missing self-test artifact: {$url}");
 $runLoader = static fn (string $owner, string $repository, string $runId): array => $runs[strtolower("{$owner}/{$repository}/{$runId}")]
@@ -463,9 +484,64 @@ $expectFailure(
     ),
     'must identify the configured v0.4.0-alpha.1 evaluation tag',
 );
+$sameRevisionLedger = $ledger;
+$sameRevisionLedger['evaluations'][0]['evidence_revision']
+    = $sameRevisionLedger['evaluations'][0]['project_revision'];
+$expectFailure(
+    fn (): array => $verify(
+        $sameRevisionLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+    ),
+    'evidence_revision must be a distinct lowercase 40-character Git SHA',
+);
+$wrongEvidenceUrlLedger = $ledger;
+$wrongEvidenceUrlLedger['evaluations'][0]['evidence']['url'] = str_replace(
+    $wrongEvidenceUrlLedger['evaluations'][0]['evidence_revision'],
+    $wrongEvidenceUrlLedger['evaluations'][0]['project_revision'],
+    $wrongEvidenceUrlLedger['evaluations'][0]['evidence']['url'],
+);
+$expectFailure(
+    fn (): array => $verify(
+        $wrongEvidenceUrlLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+    ),
+    'evidence.url must match the external repository and expected revision',
+);
+$badEvidenceComparisons = $comparisons;
+$invoiceEvidenceComparisonKey = strtolower(sprintf(
+    'invoiceshelf/invoiceshelf/%s/%s',
+    $ledger['evaluations'][0]['project_revision'],
+    $ledger['evaluations'][0]['evidence_revision'],
+));
+$badEvidenceComparisons[$invoiceEvidenceComparisonKey]['status'] = 'diverged';
+$expectFailure(
+    fn (): array => $verify(
+        $ledger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        static fn (
+            string $owner,
+            string $repository,
+            string $base,
+            string $head,
+        ): array => $badEvidenceComparisons[strtolower("{$owner}/{$repository}/{$base}/{$head}")],
+    ),
+    'evidence.revision_comparison must prove the start revision is a strict ancestor',
+);
 $expectFailure(
     fn () => designPartnerVerifyEvaluationRevision($head['output'], $head['output'], 'fixture.drove revision'),
     'must be a strict ancestor of the release revision',
+);
+$expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): string => $evidence['project_revision'] = str_repeat('0', 40),
+    'evidence identity does not match ledger field project_revision',
 );
 $expectInvoiceEvidenceFailure(
     static fn (array &$evidence) => $evidence['scanner']['bridge_only']++,
@@ -518,6 +594,17 @@ $expectInvoiceEvidenceFailure(
         '--version',
     ],
     'command_argv must execute tests',
+);
+$expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): int => $evidence['benchmark']['runs'][0]['exit_code'] = 1,
+    'exit_code must be zero',
+);
+$expectInvoiceEvidenceFailure(
+    static function (array &$evidence): void {
+        $evidence['benchmark']['runs'][0]['passed']--;
+        $evidence['benchmark']['runs'][0]['failed']++;
+    },
+    'must contain no failed tests',
 );
 $expectInvoiceEvidenceFailure(
     static function (array &$evidence): void {

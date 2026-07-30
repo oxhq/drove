@@ -236,7 +236,7 @@ function designPartnerEvidenceUrl(
         || in_array('.', $pathSegments, true)
         || in_array('..', $pathSegments, true)
         || str_contains($matches[4], '\\')) {
-        designPartnerFail("{$field} must match the external repository and project revision.");
+        designPartnerFail("{$field} must match the external repository and expected revision.");
     }
 
     return [
@@ -774,6 +774,7 @@ function verifyDesignPartnerLedger(
         $repositoryUrl = $evaluation['repository'] ?? null;
         $drove = $evaluation['drove'] ?? null;
         $projectRevision = $evaluation['project_revision'] ?? null;
+        $evidenceRevision = $evaluation['evidence_revision'] ?? null;
 
         if (! is_string($id) || preg_match('/\A[a-z0-9][a-z0-9-]{2,63}\z/', $id) !== 1) {
             designPartnerFail("evaluations[{$index}].id must be a stable lowercase slug.");
@@ -840,6 +841,26 @@ function verifyDesignPartnerLedger(
             designPartnerFail("{$id}.project_revision must be a lowercase 40-character Git SHA.");
         }
 
+        if (! is_string($evidenceRevision)
+            || preg_match('/\A[0-9a-f]{40}\z/', $evidenceRevision) !== 1
+            || $evidenceRevision === $projectRevision) {
+            designPartnerFail(
+                "{$id}.evidence_revision must be a distinct lowercase 40-character Git SHA.",
+            );
+        }
+
+        designPartnerVerifyComparison(
+            $comparisonLoader(
+                $repository['owner'],
+                $repository['repository'],
+                $projectRevision,
+                $evidenceRevision,
+            ),
+            $projectRevision,
+            $evidenceRevision,
+            "{$id}.evidence.revision_comparison",
+        );
+
         $evidenceDescriptor = $evaluation['evidence'] ?? null;
         $evidenceUrl = is_array($evidenceDescriptor) ? ($evidenceDescriptor['url'] ?? null) : null;
         $evidenceHash = is_array($evidenceDescriptor) ? ($evidenceDescriptor['sha256'] ?? null) : null;
@@ -852,7 +873,7 @@ function verifyDesignPartnerLedger(
             $evidenceUrl,
             $repository['owner'],
             $repository['repository'],
-            $projectRevision,
+            $evidenceRevision,
             "{$id}.evidence.url",
         );
 
@@ -996,6 +1017,7 @@ function verifyDesignPartnerLedger(
             $runtime = $run['runtime'] ?? null;
             $memorySource = $run['memory_source'] ?? null;
             $processes = designPartnerInteger($run, 'processes', $label, 1);
+            $exitCode = designPartnerInteger($run, 'exit_code', $label);
 
             if (! in_array($runner, ['pest', 'phpunit', 'drove'], true)
                 || ! in_array($frontend, ['pest', 'phpunit'], true)
@@ -1003,6 +1025,10 @@ function verifyDesignPartnerLedger(
                 || ! in_array($memorySource, ['rss', 'pss', 'cgroup'], true)
                 || $processes > 30) {
                 designPartnerFail("{$label} has an unsupported runner, frontend, runtime, memory source, or process count.");
+            }
+
+            if ($exitCode !== 0) {
+                designPartnerFail("{$label}.exit_code must be zero.");
             }
 
             designPartnerVerifyCommand($run, $runner, $label);
@@ -1024,6 +1050,10 @@ function verifyDesignPartnerLedger(
             designPartnerInteger($run, 'wall_ms', $label, 1);
             designPartnerInteger($run, 'peak_memory_bytes', $label, 1);
             $semantics = designPartnerRunSemantics($run, $label, $selected);
+
+            if ($semantics['failed'] !== 0) {
+                designPartnerFail("{$label} must contain no failed tests.");
+            }
 
             if ($expectedSemantics === null) {
                 $expectedSemantics = $semantics;

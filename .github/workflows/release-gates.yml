@@ -181,7 +181,9 @@ jobs:
         extensions: ffi, pcntl, posix
 
     - name: Prove design-partner release verifier
-      run: php scripts/verify-design-partners-self-test.php
+      run: |
+        php scripts/verify-design-partners-self-test.php
+        php scripts/collect-design-partners-self-test.php
 
     - name: Prove candidate release identity
       run: |
@@ -234,16 +236,19 @@ jobs:
           LICENSE.md \
           README.md \
           bin/drove \
+          bin/drove-evaluate \
           bin/drove-install-native \
           bin/pest \
           composer.json \
           docs/design-partner-evidence.json \
+          docs/design-partner-evidence.schema.json \
           docs/design-partner-validation.md \
           docs/migration-from-pest.md \
           docs/package-boundary.md \
           native/drover/README.md \
           resources/release.json \
           resources/drove-compatibility.json \
+          src/Drove/Evaluation/Collector.php \
           src/Drove/Bridge/Pest/Bootstrap.php \
           src/Drove/Kernel/DroverScheduler.php \
           src/Drove/Kernel/NativeLibrary.php

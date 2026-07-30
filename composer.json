@@ -105,6 +105,7 @@
     },
     "bin": [
         "bin/drove",
+        "bin/drove-evaluate",
         "bin/drove-install-native",
         "bin/pest"
     ],

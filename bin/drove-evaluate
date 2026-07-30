@@ -1,0 +1,136 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Drove\Evaluation\Collector;
+
+$proxyAutoload = $GLOBALS['_composer_autoload_path'] ?? null;
+$installedAutoload = dirname(__DIR__, 4).'/vendor/autoload.php';
+$localAutoload = dirname(__DIR__).'/vendor/autoload.php';
+$autoload = is_string($proxyAutoload) && file_exists($proxyAutoload)
+    ? $proxyAutoload
+    : (file_exists($installedAutoload) ? $installedAutoload : $localAutoload);
+
+if (! file_exists($autoload)) {
+    fwrite(STDERR, "Drove evidence could not find Composer's autoloader.".PHP_EOL);
+    exit(2);
+}
+
+require_once $autoload;
+
+$root = dirname($autoload);
+
+while (! file_exists($root.'/composer.json')) {
+    $parent = dirname($root);
+
+    if ($parent === $root) {
+        fwrite(STDERR, 'Drove evidence could not locate the Composer project root.'.PHP_EOL);
+        exit(2);
+    }
+
+    $root = $parent;
+}
+
+$arguments = array_slice($_SERVER['argv'], 1);
+$operation = array_shift($arguments);
+$collector = new Collector;
+
+try {
+    if ($operation === 'collect') {
+        if (count($arguments) > 2) {
+            throw new InvalidArgumentException(
+                'usage: drove-evaluate collect [config.json] [evidence.json]',
+            );
+        }
+
+        $configurationPath = $arguments[0] ?? $root.'/.drove/evaluation-config.json';
+        $outputPath = $arguments[1] ?? $root.'/.drove/evaluation.json';
+        $configuration = droveEvaluationJson($configurationPath);
+        $evidence = $collector->collect($root, $configuration);
+        $encoded = droveEvaluationEncode($evidence);
+        $directory = dirname($outputPath);
+
+        if (! is_dir($directory)
+            && ! @mkdir($directory, 0755, true)
+            && ! is_dir($directory)) {
+            throw new RuntimeException('Drove evidence could not create its output directory.');
+        }
+
+        $stream = @fopen($outputPath, 'xb');
+
+        if ($stream === false) {
+            throw new RuntimeException(
+                'Drove evidence refuses to overwrite an existing artifact.',
+            );
+        }
+
+        try {
+            if (fwrite($stream, $encoded) !== strlen($encoded) || ! fflush($stream)) {
+                throw new RuntimeException('Drove evidence could not write its artifact.');
+            }
+        } finally {
+            fclose($stream);
+        }
+
+        fwrite(STDOUT, json_encode([
+            'status' => 'collected',
+            'path' => $outputPath,
+            'sha256' => hash('sha256', $encoded),
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL);
+
+        exit(0);
+    }
+
+    if ($operation === 'seal') {
+        if (count($arguments) > 1) {
+            throw new InvalidArgumentException(
+                'usage: drove-evaluate seal [evidence.json]',
+            );
+        }
+
+        $artifact = $arguments[0] ?? $root.'/.drove/evaluation.json';
+        fwrite(STDOUT, droveEvaluationEncode($collector->seal($root, $artifact)));
+
+        exit(0);
+    }
+
+    throw new InvalidArgumentException(
+        'usage: drove-evaluate <collect|seal> [arguments...]',
+    );
+} catch (Throwable $throwable) {
+    fwrite(STDERR, 'Drove evidence: '.$throwable->getMessage().PHP_EOL);
+
+    exit(2);
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function droveEvaluationJson(string $path): array
+{
+    $contents = @file_get_contents($path);
+
+    if (! is_string($contents)) {
+        throw new RuntimeException("Drove evidence could not read {$path}.");
+    }
+
+    $decoded = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+
+    if (! is_array($decoded)) {
+        throw new RuntimeException("Drove evidence configuration {$path} must be an object.");
+    }
+
+    return $decoded;
+}
+
+/**
+ * @param  array<string, mixed>  $value
+ */
+function droveEvaluationEncode(array $value): string
+{
+    return json_encode(
+        $value,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    ).PHP_EOL;
+}
