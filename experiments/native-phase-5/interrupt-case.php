@@ -136,15 +136,49 @@ try {
         'Native Phase 5 interruption leaked a descendant.',
     );
 
+    $forkedExecutorPids = [];
+    $startedExecutorIntervals = [];
+
     foreach ($results as &$result) {
         $memory = $result['memory_peak_bytes'] ?? null;
+        $telemetry = $result['telemetry'] ?? null;
+        $executorPid = is_array($telemetry) ? ($telemetry['pid'] ?? null) : null;
+        $executorStartedNs = is_array($telemetry) ? ($telemetry['started_ns'] ?? null) : null;
+        $executorFinishedNs = is_array($telemetry) ? ($telemetry['finished_ns'] ?? null) : null;
 
         if (is_int($memory) && $memory > 0) {
             $result['telemetry']['memory_peak_bytes'] = $memory;
         }
+
+        if (is_int($executorPid)) {
+            $forkedExecutorPids[] = $executorPid;
+        }
+
+        if (is_int($executorStartedNs)) {
+            nativePhaseFiveAssert(
+                is_int($executorFinishedNs) && $executorFinishedNs >= $executorStartedNs,
+                'Native Phase 5 interruption observed an invalid started executor interval.',
+            );
+            $startedExecutorIntervals[] = [
+                'started_ns' => $executorStartedNs,
+                'finished_ns' => $executorFinishedNs,
+            ];
+        }
     }
 
     unset($result);
+    $forkedExecutorCount = count(array_unique($forkedExecutorPids, SORT_REGULAR));
+    $startedExecutorCount = count($startedExecutorIntervals);
+    $observedProcessLanes = nativePhaseFivePeakConcurrency($startedExecutorIntervals);
+    nativePhaseFiveAssert(
+        $forkedExecutorCount >= $startedExecutorCount
+            && $forkedExecutorCount <= 16
+            && $startedExecutorCount >= 1
+            && $startedExecutorCount <= 8
+            && $observedProcessLanes >= 1
+            && $observedProcessLanes <= 8,
+        'Native Phase 5 interruption exceeded its forked or active executor bounds.',
+    );
     $replay->writeRun([
         'exit_code' => 1,
         'status' => 'failed',
@@ -152,7 +186,7 @@ try {
         'tests' => $results,
         'completion_order' => $mapped['completion_order'],
         'observed_concurrency' => [
-            'global' => $mapped['telemetry']['topology']['peak_live_pids'],
+            'global' => $observedProcessLanes,
         ],
     ]);
     $replayContents = file_get_contents($replayPath);
@@ -192,10 +226,9 @@ try {
         'signal' => SIGINT,
         'submitted' => 30,
         'terminal_result_count' => 30,
-        'active_executor_count' => count(array_filter(
-            $results,
-            static fn (array $result): bool => is_int($result['telemetry']['pid'] ?? null),
-        )),
+        'forked_executor_count' => $forkedExecutorCount,
+        'started_executor_count' => $startedExecutorCount,
+        'observed_process_lanes' => $observedProcessLanes,
         'descendant_count' => count($descendantPids),
         'orphan_pids' => [],
         'artifact_residue_count' => 0,

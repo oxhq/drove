@@ -76,9 +76,13 @@ try {
     $run = new Runner($scheduler)->run($registry);
     $executionMs = round((hrtime(true) - $executionStartedNs) / 1_000_000, 3);
     $tests = $run['tests'] ?? null;
+    $observedProcessLanes = $run['observed_concurrency']['global'] ?? null;
     nativePhaseFiveAssert(
         ($run['status'] ?? null) === 'passed'
             && ($run['exit_code'] ?? null) === 0
+            && is_int($observedProcessLanes)
+            && $observedProcessLanes >= 2
+            && $observedProcessLanes <= $processes
             && is_array($tests)
             && array_is_list($tests)
             && count($tests) === 10_000
@@ -133,10 +137,10 @@ try {
             && $topology['executor_workers'] === 10_000
             && $topology['process_anchors'] === 0
             && $topology['peak_live_pids'] >= 2
-            && $topology['peak_live_pids'] <= 30
+            && $topology['peak_live_pids'] <= $topology['outstanding_task_limit']
             && $topology['peak_outstanding_tasks'] <= 60
             && $topology['outstanding_task_limit'] === 60,
-        'Native Phase 5 DSL stress violated its exact flat C30 topology.',
+        'Native Phase 5 DSL stress violated its bounded flat C30 topology.',
     );
     nativePhaseFiveAssert(
         NativePhaseFiveDslHeap::$value === 73,
@@ -208,7 +212,7 @@ try {
             ],
             'scheduler' => [
                 'requested_processes' => 30,
-                'observed_process_lanes' => $topology['peak_live_pids'],
+                'observed_process_lanes' => $observedProcessLanes,
             ],
             'topology' => $topology,
             'memory' => [

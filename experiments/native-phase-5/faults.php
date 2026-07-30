@@ -118,11 +118,14 @@ try {
             'crash' => 'php_fatal_error',
         };
         $executorPids = [];
+        $executorIntervals = [];
         $descendantPids = [];
         $failureKinds = [];
 
         foreach ($results as &$result) {
             $telemetry = $result['telemetry'] ?? null;
+            $executorStartedNs = is_array($telemetry) ? ($telemetry['started_ns'] ?? null) : null;
+            $executorFinishedNs = is_array($telemetry) ? ($telemetry['finished_ns'] ?? null) : null;
             nativePhaseFiveAssert(
                 ($result['status'] ?? null) === 'failed'
                     && ($result['failure']['kind'] ?? null) === $expectedFailure
@@ -132,7 +135,10 @@ try {
                     && ($telemetry['forks'] ?? null) === 1
                     && ($telemetry['scope_workers'] ?? null) === 0
                     && ($telemetry['executor_workers'] ?? null) === 1
-                    && ($telemetry['process_anchors'] ?? null) === 0,
+                    && ($telemetry['process_anchors'] ?? null) === 0
+                    && is_int($executorStartedNs)
+                    && is_int($executorFinishedNs)
+                    && $executorFinishedNs >= $executorStartedNs,
                 'Native Phase 5 fault result lost failure or topology identity.',
             );
 
@@ -144,6 +150,10 @@ try {
             }
 
             $executorPids[] = $telemetry['pid'];
+            $executorIntervals[] = [
+                'started_ns' => $executorStartedNs,
+                'finished_ns' => $executorFinishedNs,
+            ];
             $failureKinds[] = $result['failure']['kind'];
             $readyPath = $workspace.'/'.$result['id'].'.ready';
             $escapedPath = $workspace.'/'.$result['id'].'.escaped';
@@ -174,6 +184,11 @@ try {
         }
 
         unset($result);
+        $observedProcessLanes = nativePhaseFivePeakConcurrency($executorIntervals);
+        nativePhaseFiveAssert(
+            $observedProcessLanes >= 1 && $observedProcessLanes <= $processes,
+            'Native Phase 5 fault injection exceeded declared active lanes.',
+        );
         $orphanPids = nativePhaseFiveWaitForExit($descendantPids, 2_000);
         nativePhaseFiveAssert(
             $orphanPids === []
@@ -189,7 +204,7 @@ try {
                 && $topology['executor_workers'] === 100
                 && $topology['process_anchors'] === 0
                 && $topology['peak_live_pids'] >= 1
-                && $topology['peak_live_pids'] <= $processes
+                && $topology['peak_live_pids'] <= $topology['outstanding_task_limit']
                 && $topology['peak_outstanding_tasks'] <= 2 * $processes
                 && $topology['outstanding_task_limit'] === 2 * $processes,
             'Native Phase 5 fault map violated bounded one-executor topology.',
@@ -233,7 +248,7 @@ try {
             'scopes' => [],
             'tests' => $results,
             'completion_order' => $mapped['completion_order'],
-            'observed_concurrency' => ['global' => $topology['peak_live_pids']],
+            'observed_concurrency' => ['global' => $observedProcessLanes],
         ]);
         $replayContents = file_get_contents($replayPath);
         $replayPayload = is_string($replayContents)
@@ -290,6 +305,7 @@ try {
             'descendant_count' => count($descendantPids),
             'orphan_pids' => [],
             'escaped_artifact_count' => 0,
+            'observed_process_lanes' => $observedProcessLanes,
             'topology' => $topology,
             'replay_sha256' => $replayHash,
         ];

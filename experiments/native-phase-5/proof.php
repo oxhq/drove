@@ -403,14 +403,15 @@ try {
                 && $topology['executor_workers'] === $testCount
                 && $topology['process_anchors'] === 0
                 && $topology['peak_live_pids'] >= 1
-                && $topology['peak_live_pids'] <= $processes
+                && $topology['peak_live_pids'] <= $topology['outstanding_task_limit']
                 && $topology['peak_outstanding_tasks'] <= $topology['outstanding_task_limit']
                 && $topology['outstanding_task_limit'] <= 2 * $processes,
             'Drover topology violated the Phase 5 one-fork or bounded-window contract.',
         );
         nativePhaseFiveAssert(
-            $fixture !== 'saturation' || $topology['peak_live_pids'] === $processes,
-            'Drover did not report exact saturation at the declared width.',
+            $fixture !== 'saturation'
+                || $topology['peak_live_pids'] === min($testCount, 2 * $processes),
+            'Drover did not fill its bounded pre-armed executor window.',
         );
         $topologySource = 'kernel';
     } else {
@@ -504,7 +505,7 @@ try {
             ],
             'scheduler' => [
                 'requested_processes' => $processes,
-                'observed_process_lanes' => $topology['peak_live_pids'],
+                'observed_process_lanes' => $observedProcesses,
                 'observed_interval_lanes' => $observedProcesses,
                 'observed_body_lanes' => $observedBodies,
                 'scheduler_idle_lane_ratio' => nativePhaseFiveIdleRatio(

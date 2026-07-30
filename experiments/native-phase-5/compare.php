@@ -128,7 +128,7 @@ try {
                 && $execution['peak_live_pid_aggregate_peak_pss_bytes']
                     <= $execution['aggregate_peak_pss_bytes']
                 && ($execution['peak_live_pid_aggregate_peak_swap_bytes'] ?? null) === 0,
-            'Native Phase 5 did not capture a stable full-lane execution population.',
+            'Native Phase 5 did not capture the expected pre-armed execution-phase process population.',
         );
 
         return $execution;
@@ -166,7 +166,7 @@ try {
                 && $topology['executor_workers'] === $tests
                 && $topology['process_anchors'] === 0
                 && $topology['peak_live_pids'] >= 1
-                && $topology['peak_live_pids'] <= $summary['processes']
+                && $topology['peak_live_pids'] <= $topology['outstanding_task_limit']
                 && $topology['peak_outstanding_tasks'] <= $topology['outstanding_task_limit']
                 && $topology['outstanding_task_limit'] <= 2 * $summary['processes'],
             'Native Phase 5 direct topology is invalid.',
@@ -178,7 +178,8 @@ try {
         $saturationSummary = $read('saturation-c'.$processCount);
         $validateDirect($paritySummary);
         $validateDirect($saturationSummary);
-        $validatePeakExecution($saturationSummary, $processCount + 1);
+        $expectedLiveExecutors = min(60, 2 * $processCount);
+        $validatePeakExecution($saturationSummary, $expectedLiveExecutors + 1);
         nativePhaseFiveAssert(
             ($paritySummary['fixture'] ?? null) === 'parity'
                 && ($paritySummary['processes'] ?? null) === $processCount
@@ -187,7 +188,7 @@ try {
                 && ($saturationSummary['processes'] ?? null) === $processCount
                 && ($saturationSummary['test_count'] ?? null) === 60
                 && ($saturationSummary['telemetry']['topology']['peak_live_pids'] ?? null)
-                    === $processCount
+                    === $expectedLiveExecutors
                 && ($saturationSummary['telemetry']['scheduler']['observed_process_lanes'] ?? null)
                     === $processCount
                 && ($saturationSummary['telemetry']['scheduler']['observed_body_lanes'] ?? null)
@@ -338,6 +339,7 @@ try {
     foreach ([...$inactiveSummaries, $inert, $stateful] as $scopeSummary) {
         $validateIdentity($scopeSummary);
         $validateMonitor($scopeSummary);
+        $expectedScopeHostPeak = ($scopeSummary['fixture'] ?? null) === 'stateful' ? 3 : 0;
         nativePhaseFiveAssert(
             ($scopeSummary['processes'] ?? null) === 30
                 && ($scopeSummary['test_count'] ?? null) === 60
@@ -355,8 +357,15 @@ try {
                 )
                 && $scopeSummary['telemetry']['scheduler']['observed_test_body_lanes'] >= 1
                 && $scopeSummary['telemetry']['scheduler']['observed_test_body_lanes'] <= 30
-                && ($scopeSummary['telemetry']['scheduler']['observed_total_processes'] ?? null)
+                && ($scopeSummary['telemetry']['scheduler']['observed_active_process_lanes'] ?? null)
                     === ($scopeSummary['telemetry']['topology']['peak_live_pids'] ?? null)
+                && ($scopeSummary['telemetry']['scheduler']['scope_host_peak'] ?? null)
+                    === $expectedScopeHostPeak
+                && ($scopeSummary['telemetry']['scheduler']['executor_peak'] ?? null)
+                    === ($scopeSummary['telemetry']['scheduler']['observed_test_body_lanes'] ?? null)
+                && ($scopeSummary['telemetry']['scheduler']['observed_active_process_lanes'] ?? null)
+                    === ($scopeSummary['telemetry']['scheduler']['executor_peak'] ?? 0)
+                        + ($scopeSummary['telemetry']['scheduler']['scope_host_peak'] ?? 0)
                 && ($scopeSummary['isolation']['orphan_pids'] ?? null) === []
                 && ($scopeSummary['isolation']['artifact_residue_count'] ?? null) === 0
                 && ($scopeSummary['telemetry']['prepared_branches']['current_after_run'] ?? null) === 0
@@ -369,7 +378,7 @@ try {
 
     foreach ($inactive as $count => $samples) {
         foreach ($samples as $repetition => $summary) {
-            $validatePeakExecution($summary, 31);
+            $validatePeakExecution($summary, 1 + min(60, 2 * 30));
             nativePhaseFiveAssert(
                 ($summary['fixture'] ?? null) === 'inactive'
                     && ($summary['inactive_scope_count'] ?? null) === $count
@@ -389,10 +398,27 @@ try {
             && ($inert['telemetry']['prepared_branches']['enters_by_kind']['scope'] ?? null) === 0
             && ($stateful['fixture'] ?? null) === 'stateful'
             && ($stateful['repetition'] ?? null) === 0
-            && ($stateful['telemetry']['topology']['scope_workers'] ?? null) === 2
-            && ($stateful['telemetry']['prepared_branches']['enters_by_kind']['scope'] ?? null) === 2
+            && ($stateful['telemetry']['topology']['scope_workers'] ?? null) === 3
+            && ($stateful['telemetry']['prepared_branches']['enters_by_kind']['scope'] ?? null) === 3
             && ($stateful['isolation']['parent_heap_unchanged'] ?? null) === true
-            && ($stateful['isolation']['stateful_scope_checked'] ?? null) === true,
+            && ($stateful['isolation']['stateful_scope_checked'] ?? null) === true
+            && ($stateful['stateful_c1_depth']['processes'] ?? null) === 1
+            && ($stateful['stateful_c1_depth']['scope_ir_depth'] ?? null) === 2
+            && ($stateful['stateful_c1_depth']['process_descendant_depth'] ?? null) === 3
+            && ($stateful['stateful_c1_depth']['test_count'] ?? null) === 60
+            && ($stateful['stateful_c1_depth']['terminal_result_count'] ?? null) === 60
+            && ($stateful['stateful_c1_depth']['semantic_hash'] ?? null)
+                === ($stateful['semantic_hash'] ?? null)
+            && ($stateful['stateful_c1_depth']['forks'] ?? null) === 63
+            && ($stateful['stateful_c1_depth']['scope_workers'] ?? null) === 3
+            && ($stateful['stateful_c1_depth']['executor_workers'] ?? null) === 60
+            && ($stateful['stateful_c1_depth']['scope_host_peak'] ?? null) === 3
+            && ($stateful['stateful_c1_depth']['executor_peak'] ?? null) === 1
+            && ($stateful['stateful_c1_depth']['active_process_peak'] ?? null) === 4
+            && ($stateful['stateful_c1_depth']['prepared_branch_peak'] ?? null) === 4
+            && ($stateful['stateful_c1_depth']['parent_heap_unchanged'] ?? null) === true
+            && ($stateful['stateful_c1_depth']['orphan_pids'] ?? null) === []
+            && ($stateful['stateful_c1_depth']['artifact_residue_count'] ?? null) === 0,
         'Native Phase 5 inert/stateful scope topology gate failed.',
     );
 
@@ -482,10 +508,13 @@ try {
             && ($dslStress['telemetry']['topology']['executor_workers'] ?? null) === 10_000
             && ($dslStress['telemetry']['topology']['process_anchors'] ?? null) === 0
             && ($dslStress['telemetry']['topology']['peak_live_pids'] ?? 0) >= 2
-            && ($dslStress['telemetry']['topology']['peak_live_pids'] ?? PHP_INT_MAX) <= 30
+            && ($dslStress['telemetry']['topology']['peak_live_pids'] ?? PHP_INT_MAX) <= 60
             && ($dslStress['telemetry']['topology']['peak_outstanding_tasks'] ?? PHP_INT_MAX)
                 <= 60
             && ($dslStress['telemetry']['topology']['outstanding_task_limit'] ?? null) === 60
+            && ($dslStress['telemetry']['scheduler']['observed_process_lanes'] ?? 0) >= 2
+            && ($dslStress['telemetry']['scheduler']['observed_process_lanes'] ?? PHP_INT_MAX)
+                <= 30
             && ($dslStress['isolation']['no_batch'] ?? null) === true
             && ($dslStress['isolation']['unique_executor_pid_count'] ?? null) === 10_000
             && ($dslStress['isolation']['orphan_pids'] ?? null) === []
@@ -522,11 +551,25 @@ try {
     $all[] = $faults;
     $interruption = $read('interruption');
     $validateIdentity($interruption);
+    $forkedExecutorCount = $interruption['forked_executor_count'] ?? null;
+    $startedExecutorCount = $interruption['started_executor_count'] ?? null;
+    $interruptionProcessLanes = $interruption['observed_process_lanes'] ?? null;
     nativePhaseFiveAssert(
         ($interruption['fixture'] ?? null) === 'interruption'
             && ($interruption['signal'] ?? null) === SIGINT
             && ($interruption['submitted'] ?? null) === 30
             && ($interruption['terminal_result_count'] ?? null) === 30
+            && is_int($forkedExecutorCount)
+            && $forkedExecutorCount >= 1
+            && $forkedExecutorCount <= 16
+            && is_int($startedExecutorCount)
+            && $startedExecutorCount >= 1
+            && $startedExecutorCount <= 8
+            && $startedExecutorCount <= $forkedExecutorCount
+            && is_int($interruptionProcessLanes)
+            && $interruptionProcessLanes >= 1
+            && $interruptionProcessLanes <= 8
+            && $interruptionProcessLanes <= $startedExecutorCount
             && ($interruption['orphan_pids'] ?? null) === []
             && ($interruption['artifact_residue_count'] ?? null) === 0
             && ($interruption['replay']['schema'] ?? null) === 1
@@ -640,7 +683,10 @@ try {
         'drover_identity' => $all[0]['drover_identity'],
         'fixture' => 'experiments/native-phase-5',
         'measurement_contract' => [
-            'topology' => 'kernel',
+            'kernel_executor_population' => 'executor-pids-including-armed-excludes-root-and-grandchildren',
+            'active_process_lanes' => 'started-finished-intervals-excludes-armed',
+            'scope_host_peak' => 'scope-worker-started-finished-intervals',
+            'procfs_process_population' => 'root-plus-all-descendants',
             'phase_timings' => 'instrumented-harness',
             'aggregate_memory' => 'linux-procfs-rss-and-smaps-rollup-pss',
             'stable_process_snapshot' => 'shared-phase-lock-and-identical-pid-set-before-after',
@@ -656,7 +702,9 @@ try {
             'deliberate_saturation_c1_c30' => true,
             'one_executor_fork_per_test' => true,
             'no_batch' => true,
-            'outstanding_window_at_most_2c' => true,
+            'executor_window_at_most_2c' => true,
+            'stateful_scope_host_peak' => $stateful['telemetry']['scheduler']['scope_host_peak'],
+            'stateful_c1_nested_scope_depth' => $stateful['stateful_c1_depth'],
             'inactive_scope_artifacts' => $inactiveArtifactNames,
             'inactive_scope_pairs' => $inactivePairs,
             'inactive_scope_raw_pss_median_change_ratio' => round(

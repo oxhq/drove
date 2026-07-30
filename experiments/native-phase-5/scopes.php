@@ -225,7 +225,7 @@ function nativePhaseFiveScopeNode(
         'metadata' => [],
         'state_policy' => 'inherit',
         'concurrency' => null,
-        'timeout_ms' => 0,
+        'timeout_ms' => $hooks === [] ? 0 : 5_000,
         'hooks' => [
             'before_all' => $hooks['before_all'] ?? [],
             'before_each' => $hooks['before_each'] ?? [],
@@ -235,6 +235,25 @@ function nativePhaseFiveScopeNode(
         'tests' => $tests,
         'children' => $children,
     ];
+}
+
+/**
+ * @param  array<string, mixed>  $scope
+ * @return list<string>
+ */
+function nativePhaseFiveScopeIds(array $scope): array
+{
+    $ids = [(string) $scope['id']];
+
+    foreach ($scope['children'] as $child) {
+        nativePhaseFiveAssert(
+            is_array($child),
+            'Native Phase 5 received an invalid child scope.',
+        );
+        array_push($ids, ...nativePhaseFiveScopeIds($child));
+    }
+
+    return $ids;
 }
 
 /**
@@ -250,6 +269,37 @@ function nativePhaseFiveTestNode(string $id): array
         'groups' => ['phase5'],
         'timeout_ms' => 5_000,
     ];
+}
+
+/**
+ * @param  array<array-key, mixed>  $tests
+ */
+function nativePhaseFiveScopeSemanticHash(array $tests): string
+{
+    $projection = [];
+
+    foreach ($tests as $test) {
+        nativePhaseFiveAssert(
+            is_array($test),
+            'Native Phase 5 semantic projection received an invalid test.',
+        );
+        $projection[] = [
+            'id' => $test['id'] ?? null,
+            'scope_id' => $test['scope_id'] ?? null,
+            'status' => $test['status'] ?? null,
+            'value' => $test['value'] ?? null,
+        ];
+    }
+
+    usort(
+        $projection,
+        static fn (array $left, array $right): int => $left['id'] <=> $right['id'],
+    );
+
+    return hash(
+        'sha256',
+        json_encode($projection, JSON_THROW_ON_ERROR),
+    );
 }
 
 try {
@@ -342,14 +392,48 @@ try {
                     'A stateful scope lost its beforeAll snapshot.',
                 );
             };
-            $children[] = nativePhaseFiveScopeNode(
-                'stateful-'.$name,
-                $scopeTests,
-                hooks: [
-                    'before_all' => [$before],
-                    'after_all' => [$after],
-                ],
-            );
+            if ($name === 'a') {
+                $innerBefore = 'hook:stateful-a-inner:before-all';
+                $innerAfter = 'hook:stateful-a-inner:after-all';
+                $hooks[$innerBefore] = static function (): void {
+                    nativePhaseFiveAssert(
+                        NativePhaseFiveScopeState::$value === 11,
+                        'A nested stateful scope did not inherit its parent snapshot.',
+                    );
+                };
+                $hooks[$innerAfter] = static function (): void {
+                    nativePhaseFiveAssert(
+                        NativePhaseFiveScopeState::$value === 11,
+                        'A nested stateful scope lost its inherited snapshot.',
+                    );
+                };
+                $children[] = nativePhaseFiveScopeNode(
+                    'stateful-a',
+                    children: [
+                        nativePhaseFiveScopeNode(
+                            'stateful-a-inner',
+                            $scopeTests,
+                            hooks: [
+                                'before_all' => [$innerBefore],
+                                'after_all' => [$innerAfter],
+                            ],
+                        ),
+                    ],
+                    hooks: [
+                        'before_all' => [$before],
+                        'after_all' => [$after],
+                    ],
+                );
+            } else {
+                $children[] = nativePhaseFiveScopeNode(
+                    'stateful-'.$name,
+                    $scopeTests,
+                    hooks: [
+                        'before_all' => [$before],
+                        'after_all' => [$after],
+                    ],
+                );
+            }
         }
     }
 
@@ -387,39 +471,41 @@ try {
         defaultTimeoutMs: 5_000,
         termGraceMs: 50,
     );
+    $resolveHook = static function (string $id) use ($hooks): Closure {
+        $hook = $hooks[$id] ?? null;
+        nativePhaseFiveAssert(
+            $hook instanceof Closure,
+            'Native Phase 5 could not resolve lifecycle hook '.$id.'.',
+        );
+
+        return $hook;
+    };
+    $resolveTest = static function (
+        string $id,
+        ScopeContext $scope = new ScopeContext,
+    ) use ($fixture): Closure {
+        $scopeId = $scope->metadata()['id'] ?? 'phase5-suite';
+        $expected = str_starts_with((string) $scopeId, 'stateful-a')
+            ? 11
+            : (str_starts_with((string) $scopeId, 'stateful-b') ? 22 : 0);
+
+        return static function () use ($expected, $fixture, $id): string {
+            if ($fixture === 'stateful') {
+                nativePhaseFiveAssert(
+                    NativePhaseFiveScopeState::$value === $expected,
+                    'A stateful test did not inherit its scope snapshot.',
+                );
+            }
+
+            usleep($fixture === 'inactive' ? 250_000 : 20_000);
+
+            return hash('sha256', $fixture.':'.$id.':'.$expected);
+        };
+    };
     $executor = new LifecycleExecutor(
         $scheduler,
-        static function (string $id) use ($hooks): Closure {
-            $hook = $hooks[$id] ?? null;
-            nativePhaseFiveAssert(
-                $hook instanceof Closure,
-                'Native Phase 5 could not resolve lifecycle hook '.$id.'.',
-            );
-
-            return $hook;
-        },
-        static function (
-            string $id,
-            ScopeContext $scope = new ScopeContext,
-        ) use ($fixture): Closure {
-            $scopeId = $scope->metadata()['id'] ?? 'phase5-suite';
-            $expected = str_starts_with((string) $scopeId, 'stateful-a')
-                ? 11
-                : (str_starts_with((string) $scopeId, 'stateful-b') ? 22 : 0);
-
-            return static function () use ($expected, $fixture, $id): string {
-                if ($fixture === 'stateful') {
-                    nativePhaseFiveAssert(
-                        NativePhaseFiveScopeState::$value === $expected,
-                        'A stateful test did not inherit its scope snapshot.',
-                    );
-                }
-
-                usleep($fixture === 'inactive' ? 250_000 : 20_000);
-
-                return hash('sha256', $fixture.':'.$id.':'.$expected);
-            };
-        },
+        $resolveHook,
+        $resolveTest,
         beforeDispatch: $branchProbe->beforeDispatch(...),
         enterDescendant: $branchProbe->enterDescendant(...),
         leaveDescendant: $branchProbe->leaveDescendant(...),
@@ -440,13 +526,7 @@ try {
             ),
         'Native Phase 5 scope lifecycle did not return every passing terminal result.',
     );
-    $expectedScopeIds = [
-        'phase5-suite',
-        ...array_map(
-            static fn (array $child): string => (string) $child['id'],
-            $children,
-        ),
-    ];
+    $expectedScopeIds = nativePhaseFiveScopeIds($plan['root']);
     $reportedScopeIds = [];
 
     foreach ($run['scopes'] as $scope) {
@@ -501,13 +581,15 @@ try {
             && $finishedScopeIds === $expectedScopeIds,
         'Native Phase 5 lost virtual scope results or lifecycle events.',
     );
+    $expectedScopeWorkers = $fixture === 'stateful' ? 3 : 0;
+    $combinedBranchLimit = 2 * $processes + $expectedScopeWorkers;
     $branch = $branchProbe->snapshot();
     $branchFiles = glob($workspace.'/branches/*.branch');
     nativePhaseFiveAssert(
         $branch['current'] === 0
             && $branch['enters'] === $branch['leaves']
             && $branch['enters_by_kind']['test'] === $testCount
-            && $branch['peak'] <= 2 * $processes
+            && $branch['peak'] <= $combinedBranchLimit
             && is_array($branchFiles)
             && $branchFiles === [],
         'Native Phase 5 prepared branches were not bounded and cleaned.',
@@ -533,20 +615,30 @@ try {
         'Native Phase 5 scope tests lost executor telemetry.',
     );
     $transportTelemetry = [...$scopeWorkerTelemetry, ...$testTelemetry];
-    $intervals = [];
+    $telemetryIntervals = static function (array $telemetryRows): array {
+        $intervals = [];
 
-    foreach ($transportTelemetry as $telemetry) {
-        nativePhaseFiveAssert(is_array($telemetry), 'Invalid Phase 5 transport telemetry.');
-        $startedNs = $telemetry['started_ns'] ?? null;
-        $finishedNs = $telemetry['finished_ns'] ?? null;
-        nativePhaseFiveAssert(
-            is_int($startedNs)
-                && is_int($finishedNs)
-                && $finishedNs >= $startedNs,
-            'Native Phase 5 scope worker interval is invalid.',
-        );
-        $intervals[] = ['started_ns' => $startedNs, 'finished_ns' => $finishedNs];
-    }
+        foreach ($telemetryRows as $telemetry) {
+            nativePhaseFiveAssert(is_array($telemetry), 'Invalid Phase 5 transport telemetry.');
+            $startedNs = $telemetry['started_ns'] ?? null;
+            $finishedNs = $telemetry['finished_ns'] ?? null;
+            nativePhaseFiveAssert(
+                is_int($startedNs)
+                    && is_int($finishedNs)
+                    && $finishedNs >= $startedNs,
+                'Native Phase 5 scope worker interval is invalid.',
+            );
+            $intervals[] = ['started_ns' => $startedNs, 'finished_ns' => $finishedNs];
+        }
+
+        return $intervals;
+    };
+    $scopeHostIntervals = $telemetryIntervals($scopeWorkerTelemetry);
+    $testIntervals = $telemetryIntervals($testTelemetry);
+    $intervals = [...$scopeHostIntervals, ...$testIntervals];
+    $scopeHostPeak = nativePhaseFivePeakConcurrency($scopeHostIntervals);
+    $executorPeak = nativePhaseFivePeakConcurrency($testIntervals);
+    $activePeak = nativePhaseFivePeakConcurrency($intervals);
 
     $topology = [
         'schema' => 1,
@@ -554,17 +646,19 @@ try {
         'scope_workers' => array_sum(array_column($transportTelemetry, 'scope_workers')),
         'executor_workers' => array_sum(array_column($transportTelemetry, 'executor_workers')),
         'process_anchors' => array_sum(array_column($transportTelemetry, 'process_anchors')),
-        'peak_live_pids' => nativePhaseFivePeakConcurrency($intervals),
+        'peak_live_pids' => $activePeak,
         'peak_outstanding_tasks' => $scheduler->topologyTelemetry()['peak_outstanding_tasks'],
         'outstanding_task_limit' => $scheduler->topologyTelemetry()['outstanding_task_limit'],
     ];
     nativePhaseFiveAssertTopology($topology);
     $observedTestBodyLanes = $run['observed_concurrency']['global'] ?? null;
-    $expectedScopeWorkers = $fixture === 'stateful' ? 2 : 0;
     nativePhaseFiveAssert(
         is_int($observedTestBodyLanes)
             && $observedTestBodyLanes >= 1
             && $observedTestBodyLanes <= $processes
+            && $observedTestBodyLanes === $executorPeak
+            && $scopeHostPeak === $expectedScopeWorkers
+            && $activePeak === $executorPeak + $scopeHostPeak
             && $topology['forks'] === $testCount + $expectedScopeWorkers
             && $topology['scope_workers'] === $expectedScopeWorkers
             && $topology['executor_workers'] === $testCount
@@ -576,6 +670,114 @@ try {
         $fixture !== 'stateful' || NativePhaseFiveScopeState::$value === 0,
         'Stateful scope execution mutated the prepared parent heap.',
     );
+    $statefulC1Depth = null;
+
+    if ($fixture === 'stateful') {
+        $depthWorkspace = $workspace.'/stateful-c1-depth';
+        $depthBranchProbe = new NativePhaseFiveBranchProbe($depthWorkspace);
+        $depthScheduler = new DroverScheduler(
+            'native-phase-5-stateful-c1-depth-'.bin2hex(random_bytes(6)),
+            1,
+            defaultTimeoutMs: 5_000,
+            termGraceMs: 50,
+        );
+        $depthExecutor = new LifecycleExecutor(
+            $depthScheduler,
+            $resolveHook,
+            $resolveTest,
+            beforeDispatch: $depthBranchProbe->beforeDispatch(...),
+            enterDescendant: $depthBranchProbe->enterDescendant(...),
+            leaveDescendant: $depthBranchProbe->leaveDescendant(...),
+            afterDispatch: $depthBranchProbe->afterDispatch(...),
+        );
+        $depthStartedNs = hrtime(true);
+        $depthRun = $depthExecutor->run($plan, new ScopeContext(new stdClass));
+        $depthExecutionMs = round((hrtime(true) - $depthStartedNs) / 1_000_000, 3);
+        nativePhaseFiveAssert(
+            ($depthRun['status'] ?? null) === 'passed'
+                && ($depthRun['exit_code'] ?? null) === 0
+                && is_array($depthRun['tests'] ?? null)
+                && count($depthRun['tests']) === $testCount
+                && array_all(
+                    $depthRun['tests'],
+                    static fn (array $test): bool => ($test['status'] ?? null) === 'passed',
+                ),
+            'Native Phase 5 stateful C1 depth proof did not pass.',
+        );
+        $depthScopeTelemetry = array_values(array_filter(
+            array_map(
+                static fn (array $scope): mixed => $scope['telemetry'] ?? null,
+                $depthRun['scopes'],
+            ),
+            static fn (mixed $telemetry): bool => is_array($telemetry)
+                && ($telemetry['scope_workers'] ?? null) === 1,
+        ));
+        $depthTestTelemetry = array_map(
+            static fn (array $test): mixed => $test['telemetry'] ?? null,
+            $depthRun['tests'],
+        );
+        nativePhaseFiveAssert(
+            array_all(
+                $depthTestTelemetry,
+                static fn (mixed $telemetry): bool => is_array($telemetry),
+            ),
+            'Native Phase 5 stateful C1 depth proof lost executor telemetry.',
+        );
+        $depthScopeIntervals = $telemetryIntervals($depthScopeTelemetry);
+        $depthTestIntervals = $telemetryIntervals($depthTestTelemetry);
+        $depthScopeHostPeak = nativePhaseFivePeakConcurrency($depthScopeIntervals);
+        $depthExecutorPeak = nativePhaseFivePeakConcurrency($depthTestIntervals);
+        $depthActivePeak = nativePhaseFivePeakConcurrency([
+            ...$depthScopeIntervals,
+            ...$depthTestIntervals,
+        ]);
+        $depthTransportTelemetry = [...$depthScopeTelemetry, ...$depthTestTelemetry];
+        $depthBranch = $depthBranchProbe->snapshot();
+        $depthBranchFiles = glob($depthWorkspace.'/branches/*.branch');
+        $depthSemanticHash = nativePhaseFiveScopeSemanticHash($depthRun['tests']);
+        nativePhaseFiveAssert(
+            ($depthRun['observed_concurrency']['global'] ?? null) === 1
+                && count($depthScopeTelemetry) === 3
+                && $depthScopeHostPeak === 3
+                && $depthExecutorPeak === 1
+                && $depthActivePeak === 4
+                && array_sum(array_column($depthTransportTelemetry, 'forks')) === 63
+                && array_sum(array_column($depthTransportTelemetry, 'scope_workers')) === 3
+                && array_sum(array_column($depthTransportTelemetry, 'executor_workers')) === 60
+                && $depthBranch['current'] === 0
+                && $depthBranch['peak'] === 4
+                && $depthBranch['enters'] === $depthBranch['leaves']
+                && $depthBranch['enters_by_kind'] === ['scope' => 3, 'test' => 60]
+                && is_array($depthBranchFiles)
+                && $depthBranchFiles === []
+                && $depthSemanticHash === nativePhaseFiveScopeSemanticHash($run['tests']),
+            'Native Phase 5 stateful C1 depth topology or cleanup diverged.',
+        );
+        $statefulC1Depth = [
+            'processes' => 1,
+            'scope_ir_depth' => 2,
+            'process_descendant_depth' => 3,
+            'test_count' => count($depthRun['tests']),
+            'terminal_result_count' => count($depthRun['tests']),
+            'semantic_hash' => $depthSemanticHash,
+            'execution_ms' => $depthExecutionMs,
+            'forks' => array_sum(array_column($depthTransportTelemetry, 'forks')),
+            'scope_workers' => array_sum(
+                array_column($depthTransportTelemetry, 'scope_workers'),
+            ),
+            'executor_workers' => array_sum(
+                array_column($depthTransportTelemetry, 'executor_workers'),
+            ),
+            'scope_host_peak' => $depthScopeHostPeak,
+            'executor_peak' => $depthExecutorPeak,
+            'active_process_peak' => $depthActivePeak,
+            'prepared_branch_peak' => $depthBranch['peak'],
+            'parent_heap_unchanged' => true,
+            'orphan_pids' => [],
+            'artifact_residue_count' => 0,
+        ];
+    }
+
     $remainingChildren = nativePhaseFiveWaitForExit(nativePhaseFiveChildPids(), 2_000);
     nativePhaseFiveAssert(
         $remainingChildren === [],
@@ -583,23 +785,7 @@ try {
     );
     nativePhaseFivePhase('rendering');
     $renderingStartedNs = hrtime(true);
-    $semanticProjection = array_map(
-        static fn (array $test): array => [
-            'id' => $test['id'] ?? null,
-            'scope_id' => $test['scope_id'] ?? null,
-            'status' => $test['status'] ?? null,
-            'value' => $test['value'] ?? null,
-        ],
-        $run['tests'],
-    );
-    usort(
-        $semanticProjection,
-        static fn (array $left, array $right): int => $left['id'] <=> $right['id'],
-    );
-    $semanticHash = hash(
-        'sha256',
-        json_encode($semanticProjection, JSON_THROW_ON_ERROR),
-    );
+    $semanticHash = nativePhaseFiveScopeSemanticHash($run['tests']);
     $resultMetadataBytes = strlen(json_encode([
         'root' => $run['root'],
         'scopes' => $run['scopes'],
@@ -618,8 +804,9 @@ try {
         'test_count' => $testCount,
         'terminal_result_count' => count($run['tests']),
         'semantic_hash' => $semanticHash,
+        'stateful_c1_depth' => $statefulC1Depth,
         'plan' => [
-            'scope_count' => 1 + count($children),
+            'scope_count' => count($expectedScopeIds),
             'reported_scope_count' => count($reportedScopeIds),
             'scope_started_event_count' => count($startedScopeIds),
             'scope_finished_event_count' => count($finishedScopeIds),
@@ -643,7 +830,8 @@ try {
             'schema' => 1,
             'measurement_sources' => [
                 'topology_counts' => 'kernel-task-transport',
-                'topology_peak_live_pids' => 'harness-intervals',
+                'topology_peak_live_pids' => 'harness-started-finished-intervals-excludes-armed',
+                'scope_host_peak' => 'scope-worker-started-finished-intervals',
                 'topology_outstanding' => $fixture === 'stateful'
                     ? 'kernel-root-map-only'
                     : 'kernel',
@@ -662,7 +850,9 @@ try {
             'scheduler' => [
                 'requested_test_body_lanes' => $processes,
                 'observed_test_body_lanes' => $observedTestBodyLanes,
-                'observed_total_processes' => $topology['peak_live_pids'],
+                'observed_active_process_lanes' => $topology['peak_live_pids'],
+                'scope_host_peak' => $scopeHostPeak,
+                'executor_peak' => $executorPeak,
             ],
             'prepared_branches' => [
                 'peak' => $branch['peak'],
@@ -670,7 +860,7 @@ try {
                 'enters' => $branch['enters'],
                 'leaves' => $branch['leaves'],
                 'enters_by_kind' => $branch['enters_by_kind'],
-                'limit' => 2 * $processes,
+                'limit' => $combinedBranchLimit,
             ],
         ],
     ];

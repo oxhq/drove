@@ -42,13 +42,16 @@ The configured process count caps active test bodies/executor lanes. It is not
 a claim that every OS PID is capped at that number. Stateful scopes add
 separately reported, lazily created scope hosts that own their semantic
 snapshots; inert scopes add none. Aggregate PID, RSS, and PSS measurements
-include both executors and scope hosts. RSS remains a reported conservative
-upper bound. The inactive-scope gate compares raw aggregate execution PSS from
-the stable 31-PID population in three paired 10/1,000-scope repetitions. The
-median change must remain at most 10% and every pair at most 15%. PHP
-used-memory, allocator footprint, and serialized plan bytes are reported
-separately and are never subtracted from `/proc` PSS. Exact C1-C30 saturation
-and aggregate-memory bounds use the deliberate barrier fixture.
+include both executors and scope hosts. Drover may retain at most `2C` executor
+children across active and pre-armed states; that executor window excludes
+scope hosts. Scope-host peak is measured independently from scope-worker
+started/finished intervals. RSS remains a reported conservative upper bound.
+The inactive-scope gate compares raw aggregate execution PSS from the stable
+61-PID population at C30 in three paired 10/1,000-scope repetitions. The median
+change must remain at most 10% and every pair at most 15%. PHP used-memory,
+allocator footprint, and serialized plan bytes are reported separately and are
+never subtracted from `/proc` PSS. Exact C1-C30 saturation and aggregate-memory
+bounds use the deliberate barrier fixture.
 
 Every executor group created by a nested Drove map is registered with the
 original engine before child readiness. The root preserves three identity
@@ -70,8 +73,9 @@ The hosted workflow records:
 | Cheap C1 | 5 Drove + 5 matched reference samples | Drove median no more than 15% slower |
 | Setup dominated | 5 Drove + 5 matched reference samples | Drove median at least 2x faster |
 | Independent work | 3 samples at C1, C16, C30 | At least 20x C1-to-C30; C30 at least 10% faster than C16; idle below 5% |
-| Inactive scopes | 3 paired runs of 10 and 1,000 empty siblings | Every virtual result/event survives; at least three stable 31-PID samples per run; raw full-population PSS median delta at most 10% and each pair at most 15%; zero scope workers/branches |
+| Inactive scopes | 3 paired runs of 10 and 1,000 empty siblings | Every virtual result/event survives; at least three stable 61-PID samples per C30 run; raw full-population PSS median delta at most 10% and each pair at most 15%; zero scope workers/branches |
 | Scope behavior | inert and stateful scopes | Inert scopes flatten; stateful `beforeAll`/`afterAll` isolation survives |
+| Nested stateful C1 | 1 depth-2 Scope IR run | One active test body, three scope hosts, 63 total forks, semantic parity with C30, and zero orphan/state residue |
 | DSL stress | 10,000 flat native cases at C30 | `Runner` path, 256 MiB PHP limit with at least 10% headroom, no shards, no batch |
 | Repeated faults | 100 kill + 100 timeout + 100 fatal crash | 300 terminal results, no descendants or state residue |
 | Interruption | 30 submitted cases | Every case terminal after `SIGINT`, no descendants |

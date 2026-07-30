@@ -476,7 +476,7 @@ $ffi->drover_map_free($map);
 $ffi->drover_engine_free($engine);
 
 $assert(count($results) === count($tasks), 'Drover lost an ABI smoke result.');
-$assert($maxActive === 2, 'Drover did not reserve global permits before fork.');
+$assert($maxActive === 2, 'Drover did not cap started executors at the global permit width.');
 $assert(
     $topology === [
         'schema' => 1,
@@ -484,11 +484,11 @@ $assert(
         'scope_workers' => 1,
         'executor_workers' => count($tasks) - 1,
         'process_anchors' => 0,
-        'peak_live_pids' => 2,
+        'peak_live_pids' => 3,
         'peak_outstanding_tasks' => count($tasks),
         'outstanding_task_limit' => count($tasks),
     ],
-    'Drover ABI topology did not prove one executor-led fork per test.',
+    'Drover ABI topology did not prove one fork per task within the pre-armed executor window.',
 );
 $assert(
     array_all(

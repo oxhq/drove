@@ -13,12 +13,18 @@ use std::os::fd::RawFd;
 use std::time::Duration;
 
 const GLOBAL_POOL: &str = "@global";
+const ARMED_POOL: &str = "@armed";
 const MAX_QUEUE_CAPACITY: usize = 1_000_000;
 const TOPOLOGY_SCHEMA: u32 = 1;
 const NESTED_GROUP_MAGIC: [u8; 4] = *b"DRPG";
 const NESTED_GROUP_VERSION: u8 = 1;
 const NESTED_GROUP_MESSAGE_BYTES: usize = 32;
 const PROCESS_BOUNDARY_TIMEOUT_NS: u64 = 1_000_000_000;
+const EXECUTOR_START_BYTE: u8 = b'>';
+#[cfg(target_os = "linux")]
+const SOCKET_SEND_FLAGS: libc::c_int = libc::MSG_NOSIGNAL;
+#[cfg(not(target_os = "linux"))]
+const SOCKET_SEND_FLAGS: libc::c_int = 0;
 #[cfg(target_os = "macos")]
 const MAX_DARWIN_PROCESS_GROUP_PIDS: usize = 65_536;
 
@@ -169,22 +175,13 @@ impl NestedGroupChannel {
         validate_nested_group_message(&message, self)?;
         let bytes = message.encode();
 
-        loop {
-            let written = unsafe { libc::send(self.write, bytes.as_ptr().cast(), bytes.len(), 0) };
+        let written = send_socket(self.write, &bytes)
+            .map_err(|error| format!("Drover could not publish a nested-group record: {error}."))?;
 
-            if written == bytes.len() as isize {
-                return Ok(());
-            }
-
-            let error = io::Error::last_os_error();
-
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-
-            return Err(format!(
-                "Drover could not publish a nested-group record: {error}."
-            ));
+        if written == bytes.len() {
+            Ok(())
+        } else {
+            Err("Drover could not publish a complete nested-group record.".into())
         }
     }
 
@@ -574,6 +571,15 @@ impl PermitRegistry {
 
         let mut pools = HashMap::new();
         pools.insert(GLOBAL_POOL.into(), create_pool(global)?);
+        let armed = match create_pool(global) {
+            Ok(armed) => armed,
+            Err(error) => {
+                close_pools(&pools);
+
+                return Err(error);
+            }
+        };
+        pools.insert(ARMED_POOL.into(), armed);
 
         for (scope_id, limit) in scope_limits {
             if scope_id.is_empty() || !(1..=256).contains(&limit) {
@@ -618,6 +624,10 @@ impl PermitRegistry {
 
         names.push(GLOBAL_POOL.into());
         names
+    }
+
+    fn try_acquire_armed(&self) -> Result<bool, String> {
+        self.take(ARMED_POOL)
     }
 
     fn try_acquire(&self, names: &[String]) -> Result<bool, String> {
@@ -924,6 +934,12 @@ pub struct Task {
     permit_names: Vec<String>,
 }
 
+impl Task {
+    fn can_prearm(&self) -> bool {
+        self.permit_names.len() == 1 && self.permit_names[0] == GLOBAL_POOL
+    }
+}
+
 #[derive(Debug)]
 pub struct ChildRole {
     pub ordinal: u32,
@@ -985,6 +1001,27 @@ pub enum Step {
     Done,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExecutorState {
+    Armed {
+        armed_permit: bool,
+        task_permits: bool,
+    },
+    Running {
+        task_permits: bool,
+    },
+    FailedToStart {
+        armed_permit: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpawnPermits {
+    None,
+    Armed,
+    Task,
+}
+
 #[derive(Debug)]
 struct ActiveTask {
     task: Task,
@@ -1002,6 +1039,7 @@ struct ActiveTask {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     value_buffer: Vec<u8>,
+    state: ExecutorState,
     started_ns: Option<u64>,
     deadline_ns: Option<u64>,
     finished_ns: Option<u64>,
@@ -1025,13 +1063,10 @@ impl ActiveTask {
         pid: libc::pid_t,
         pgid: libc::pid_t,
         fd: RawFd,
-        spawned_ns: u64,
+        _spawned_ns: u64,
         run_id: &str,
         registered_nested: bool,
     ) -> Self {
-        let deadline_ns = (task.timeout_ms > 0)
-            .then(|| spawned_ns.saturating_add(task.timeout_ms.saturating_mul(1_000_000)));
-
         Self {
             validator: Validator::new(
                 run_id.into(),
@@ -1054,8 +1089,12 @@ impl ActiveTask {
             stdout: Vec::new(),
             stderr: Vec::new(),
             value_buffer: Vec::new(),
+            state: ExecutorState::Armed {
+                armed_permit: false,
+                task_permits: false,
+            },
             started_ns: None,
-            deadline_ns,
+            deadline_ns: None,
             finished_ns: None,
             terminal_received_ns: None,
             terminal: None,
@@ -1070,6 +1109,68 @@ impl ActiveTask {
             registered_nested,
             retired_nested: false,
         }
+    }
+
+    fn armed(&self) -> bool {
+        matches!(
+            self.state,
+            ExecutorState::Armed {
+                armed_permit: true,
+                task_permits: false,
+            }
+        ) && self.protocol_error.is_none()
+            && !self.exited
+            && !self.reaped
+    }
+
+    fn running(&self) -> bool {
+        matches!(self.state, ExecutorState::Running { .. })
+    }
+
+    fn owns_armed_permit(&self) -> bool {
+        matches!(
+            self.state,
+            ExecutorState::Armed {
+                armed_permit: true,
+                ..
+            } | ExecutorState::FailedToStart { armed_permit: true }
+        )
+    }
+
+    fn owns_task_permits(&self) -> bool {
+        matches!(
+            self.state,
+            ExecutorState::Armed {
+                task_permits: true,
+                ..
+            } | ExecutorState::Running { task_permits: true }
+        )
+    }
+
+    fn mark_armed_permit_acquired(&mut self) {
+        self.state = ExecutorState::Armed {
+            armed_permit: true,
+            task_permits: false,
+        };
+    }
+
+    fn mark_task_permits_acquired(&mut self) {
+        self.state = ExecutorState::Armed {
+            armed_permit: false,
+            task_permits: true,
+        };
+    }
+
+    fn mark_started(&mut self, started_ns: u64, task_permits: bool) {
+        self.state = ExecutorState::Running { task_permits };
+        self.deadline_ns = (self.task.timeout_ms > 0)
+            .then(|| started_ns.saturating_add(self.task.timeout_ms.saturating_mul(1_000_000)));
+    }
+
+    fn mark_start_failed(&mut self) {
+        self.state = ExecutorState::FailedToStart {
+            armed_permit: self.owns_armed_permit(),
+        };
     }
 
     fn read_available(&mut self) {
@@ -1419,7 +1520,7 @@ impl ActiveTask {
     fn into_result(self) -> TaskResult {
         let exit_code = self.exit_code();
         let signal = self.signal();
-        let (scope_workers, executor_workers) = worker_counts(&self.task.kind, true);
+        let (scope_workers, executor_workers) = worker_counts(&self.task.kind, self.running());
         let telemetry = telemetry(
             Some(self.pid),
             Some(self.pgid),
@@ -1581,6 +1682,12 @@ pub struct Scheduler {
     peak_outstanding_tasks: u32,
     interrupted_signal: Option<i32>,
     refill_before_collect: bool,
+    #[cfg(test)]
+    readiness_delay: Duration,
+    #[cfg(test)]
+    fail_readiness: bool,
+    #[cfg(test)]
+    fail_pre_ready_reap: bool,
 }
 
 impl Scheduler {
@@ -1600,7 +1707,6 @@ impl Scheduler {
         let owner_pid = unsafe { libc::getpid() };
         let nested_group_graph =
             (owner_pid == nested_groups.origin_pid).then(NestedGroupGraph::default);
-
         Ok(Self {
             run_id,
             queue_capacity,
@@ -1623,6 +1729,12 @@ impl Scheduler {
             peak_outstanding_tasks: 0,
             interrupted_signal: None,
             refill_before_collect: false,
+            #[cfg(test)]
+            readiness_delay: Duration::ZERO,
+            #[cfg(test)]
+            fail_readiness: false,
+            #[cfg(test)]
+            fail_pre_ready_reap: false,
         })
     }
 
@@ -1799,7 +1911,10 @@ impl Scheduler {
     }
 
     pub fn active_count(&self) -> usize {
-        self.active.len()
+        self.active
+            .values()
+            .filter(|active| active.running())
+            .count()
     }
 
     pub fn max_active(&self) -> usize {
@@ -1828,6 +1943,64 @@ impl Scheduler {
                 Err(error.into())
             }
         }
+    }
+
+    fn release_armed_permit(&mut self) -> Result<(), String> {
+        self.release_permits(&[ARMED_POOL.into()])
+    }
+
+    fn release_spawn_permits(&mut self, task: &Task, permits: SpawnPermits) -> Result<(), String> {
+        match permits {
+            SpawnPermits::None => Ok(()),
+            SpawnPermits::Armed => self.release_armed_permit(),
+            SpawnPermits::Task => self.release_permits(&task.permit_names),
+        }
+    }
+
+    fn wait_pre_ready_child(&mut self, pid: libc::pid_t) -> Result<(), ReapError> {
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_pre_ready_reap) {
+            return Err(ReapError::TimedOut(format!(
+                "injected timeout waiting to reap Drove child {pid}."
+            )));
+        }
+
+        wait_bounded_checked(pid)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn retain_pre_ready_child(
+        &mut self,
+        task: Task,
+        pid: libc::pid_t,
+        fd: RawFd,
+        spawned_ns: u64,
+        permits: SpawnPermits,
+        registered_nested: bool,
+        error: String,
+    ) {
+        let cleanup_ns = monotonic_ns().unwrap_or(spawned_ns);
+        let mut active = ActiveTask::new(
+            task,
+            pid,
+            pid,
+            fd,
+            spawned_ns,
+            &self.run_id,
+            registered_nested,
+        );
+
+        match permits {
+            SpawnPermits::None => {}
+            SpawnPermits::Armed => active.mark_armed_permit_acquired(),
+            SpawnPermits::Task => active.mark_task_permits_acquired(),
+        }
+
+        active.protocol_error = Some(error);
+        active.begin_cleanup(cleanup_ns);
+        active.kill_ns = Some(cleanup_ns);
+        self.active.insert(pid, active);
+        self.refill_before_collect = true;
     }
 
     pub fn cancel(&mut self) -> Result<(), String> {
@@ -1929,11 +2102,22 @@ impl Scheduler {
                 ));
             }
 
-            if let Err(error) = self.release_permits(&child.task.permit_names) {
-                failures.push(format!(
-                    "permit release for task {}: {error}",
-                    child.task.id
-                ));
+            if child.owns_task_permits() {
+                if let Err(error) = self.release_permits(&child.task.permit_names) {
+                    failures.push(format!(
+                        "permit release for task {}: {error}",
+                        child.task.id
+                    ));
+                }
+            }
+
+            if child.owns_armed_permit() {
+                if let Err(error) = self.release_armed_permit() {
+                    failures.push(format!(
+                        "armed-permit release for task {}: {error}",
+                        child.task.id
+                    ));
+                }
             }
         }
 
@@ -1960,47 +2144,186 @@ impl Scheduler {
     }
 
     fn spawn_available(&mut self) -> Result<Option<Step>, String> {
-        let mut spawned = false;
+        let mut progressed = self.start_available()?;
+
+        if let Some(index) = self
+            .pending
+            .iter()
+            .position(|task| task.permit_names.is_empty())
+        {
+            let task = self
+                .pending
+                .remove(index)
+                .expect("permit-free task existed while spawning");
+
+            return self.spawn(task, true, SpawnPermits::None).map(Some);
+        }
 
         loop {
             let mut reserved = None;
 
             for index in 0..self.pending.len() {
-                let permit_names = &self
+                let task = self
                     .pending
                     .get(index)
-                    .expect("pending index came from its length")
-                    .permit_names;
+                    .expect("pending index came from its length");
 
-                if self.registry.try_acquire(permit_names)? {
-                    reserved = Some(index);
+                if task.can_prearm() {
+                    if self.registry.try_acquire_armed()? {
+                        reserved = Some((index, SpawnPermits::Armed));
+                    } else if self.registry.try_acquire(&task.permit_names)? {
+                        reserved = Some((index, SpawnPermits::Task));
+                    }
+
+                    break;
+                }
+
+                if self.registry.try_acquire(&task.permit_names)? {
+                    reserved = Some((index, SpawnPermits::Task));
 
                     break;
                 }
             }
 
-            let Some(index) = reserved else {
-                return Ok(spawned.then_some(Step::Progress));
+            let Some((index, permits)) = reserved else {
+                break;
             };
             let task = self
                 .pending
                 .remove(index)
-                .expect("pending task existed while reserving permits");
-            let permit_bearing = !task.permit_names.is_empty();
+                .expect("pending task existed while reserving its launch");
             let active = self.active.len();
-            let step = self.spawn(task)?;
+            let start_immediately = matches!(permits, SpawnPermits::Task);
+            let step = self.spawn(task, start_immediately, permits)?;
 
-            if !matches!(step, Step::Progress) || self.active.len() == active || !permit_bearing {
+            if !matches!(step, Step::Progress) {
                 return Ok(Some(step));
             }
 
-            spawned = true;
+            if self.active.len() == active {
+                return Ok(Some(Step::Progress));
+            }
+
+            progressed = true;
+
+            if matches!(permits, SpawnPermits::Armed) && self.start_available()? {
+                progressed = true;
+            }
         }
+
+        Ok(progressed.then_some(Step::Progress))
     }
 
-    fn spawn(&mut self, task: Task) -> Result<Step, String> {
+    fn start_available(&mut self) -> Result<bool, String> {
+        let mut pids: Vec<_> = self
+            .active
+            .iter()
+            .filter_map(|(pid, active)| active.armed().then_some(*pid))
+            .collect();
+        pids.sort_by_key(|pid| {
+            self.active
+                .get(pid)
+                .map(|active| active.task.ordinal)
+                .unwrap_or(u32::MAX)
+        });
+        let mut progressed = false;
+
+        for pid in pids {
+            if !self.registry.take(GLOBAL_POOL)? {
+                continue;
+            }
+
+            let started_ns = match monotonic_ns() {
+                Ok(started_ns) => started_ns,
+                Err(error) => {
+                    self.release_permits(&[GLOBAL_POOL.into()])?;
+
+                    return Err(error.to_string());
+                }
+            };
+            self.start_task(pid, started_ns, true)?;
+            progressed = true;
+        }
+
+        Ok(progressed)
+    }
+
+    fn start_task(
+        &mut self,
+        pid: libc::pid_t,
+        start_attempt_ns: u64,
+        task_permits: bool,
+    ) -> Result<(), String> {
+        let start_error = {
+            let active = self
+                .active
+                .get_mut(&pid)
+                .ok_or_else(|| format!("Drover lost pre-armed executor {pid}."))?;
+
+            write_start(active.fd).err()
+        };
+
+        if let Some(error) = start_error {
+            {
+                let active = self
+                    .active
+                    .get_mut(&pid)
+                    .expect("pre-armed executor existed while handling start failure");
+                active.mark_start_failed();
+                active.protocol_error = Some(format!(
+                    "Drover could not start task {} in its pre-armed executor: {error}.",
+                    active.task.id
+                ));
+                active.begin_cleanup(start_attempt_ns);
+            }
+
+            if task_permits {
+                let permit_names = self
+                    .active
+                    .get(&pid)
+                    .expect("failed-to-start executor existed while releasing permits")
+                    .task
+                    .permit_names
+                    .clone();
+                self.release_permits(&permit_names)?;
+            }
+        } else {
+            // The task timeout covers task execution, not time spent armed or
+            // descheduled before the start byte reaches the executor.
+            let started_ns = monotonic_ns().unwrap_or(start_attempt_ns);
+            let (kind, owned_armed_permit) = {
+                let active = self
+                    .active
+                    .get_mut(&pid)
+                    .expect("pre-armed executor existed while starting");
+                let owned_armed_permit = active.owns_armed_permit();
+                active.mark_started(started_ns, task_permits);
+
+                (active.task.kind.clone(), owned_armed_permit)
+            };
+            let (scope_workers, executor_workers) = worker_counts(&kind, true);
+            self.scope_workers += u64::from(scope_workers);
+            self.executor_workers += u64::from(executor_workers);
+            self.max_active = self.max_active.max(self.active_count());
+
+            if owned_armed_permit {
+                self.release_armed_permit()?;
+            }
+        }
+
+        self.refill_before_collect = true;
+
+        Ok(())
+    }
+
+    fn spawn(
+        &mut self,
+        task: Task,
+        start_immediately: bool,
+        permits: SpawnPermits,
+    ) -> Result<Step, String> {
         if let Err(error) = validate_sigchld_disposition() {
-            self.release_permits(&task.permit_names)?;
+            self.release_spawn_permits(&task, permits)?;
 
             return Err(error);
         }
@@ -2008,7 +2331,7 @@ impl Scheduler {
         let spawned_ns = match monotonic_ns() {
             Ok(spawned_ns) => spawned_ns,
             Err(error) => {
-                self.release_permits(&task.permit_names)?;
+                self.release_spawn_permits(&task, permits)?;
 
                 return Err(error.to_string());
             }
@@ -2016,7 +2339,7 @@ impl Scheduler {
         let sockets = match socket_pair() {
             Ok(sockets) => sockets,
             Err(error) => {
-                self.release_permits(&task.permit_names)?;
+                self.release_spawn_permits(&task, permits)?;
                 self.completed.push_back(failed_result(
                     task,
                     "fork_failure",
@@ -2033,7 +2356,7 @@ impl Scheduler {
             Ok(sockets) => sockets,
             Err(error) => {
                 close_descriptors(sockets);
-                self.release_permits(&task.permit_names)?;
+                self.release_spawn_permits(&task, permits)?;
                 self.completed.push_back(failed_result(
                     task,
                     "fork_failure",
@@ -2046,13 +2369,28 @@ impl Scheduler {
             }
         };
 
+        if let Err(error) = set_nonblocking(sockets[0]) {
+            close_descriptors(sockets);
+            close_descriptors(ready_sockets);
+            self.release_spawn_permits(&task, permits)?;
+            self.completed.push_back(failed_result(
+                task,
+                "fork_failure",
+                error,
+                empty_telemetry(None),
+                Vec::new(),
+            ));
+
+            return Ok(Step::Progress);
+        }
+
         let registered_nested = self.owner_pid != self.nested_groups.origin_pid;
         let pid = unsafe { libc::fork() };
 
         if pid == -1 {
             close_descriptors(sockets);
             close_descriptors(ready_sockets);
-            self.release_permits(&task.permit_names)?;
+            self.release_spawn_permits(&task, permits)?;
             self.completed.push_back(failed_result(
                 task,
                 "fork_failure",
@@ -2079,7 +2417,6 @@ impl Scheduler {
                 // The executor may host a nested Scope IR dispatch. Permit
                 // registry descriptors are inherited shared state and must
                 // remain live for nested maps/withPermit() in this process.
-                libc::signal(libc::SIGPIPE, libc::SIG_IGN);
             }
 
             if unsafe { libc::setpgid(0, 0) } != 0 {
@@ -2107,6 +2444,20 @@ impl Scheduler {
                 }
             }
 
+            #[cfg(test)]
+            if !self.readiness_delay.is_zero() {
+                std::thread::sleep(self.readiness_delay);
+            }
+
+            #[cfg(test)]
+            if self.fail_readiness {
+                write_nested_group_ready_failure(ready_sockets[0]);
+
+                unsafe {
+                    libc::_exit(1);
+                }
+            }
+
             if registered_nested && !write_group_ready(ready_sockets[0], true) {
                 unsafe {
                     libc::_exit(1);
@@ -2115,6 +2466,13 @@ impl Scheduler {
 
             unsafe {
                 libc::close(ready_sockets[0]);
+            }
+
+            if read_start(sockets[1]).is_err() {
+                unsafe {
+                    libc::close(sockets[1]);
+                    libc::_exit(1);
+                }
             }
 
             return Ok(Step::Child(ChildRole {
@@ -2140,17 +2498,10 @@ impl Scheduler {
         self.forks += 1;
         self.peak_live_pids = self.peak_live_pids.max((self.active.len() + 1) as u32);
 
-        let readiness_timeout_ns = if task.timeout_ms == 0 {
-            PROCESS_BOUNDARY_TIMEOUT_NS
-        } else {
-            task.timeout_ms
-                .saturating_mul(1_000_000)
-                .min(PROCESS_BOUNDARY_TIMEOUT_NS)
-        };
         let group_ready = if registered_nested {
             read_group_ready(
                 ready_sockets[1],
-                spawned_ns.saturating_add(readiness_timeout_ns),
+                spawned_ns.saturating_add(PROCESS_BOUNDARY_TIMEOUT_NS),
             )
         } else if let Some(error) = parent_group_error {
             Err(error)
@@ -2162,14 +2513,8 @@ impl Scheduler {
             libc::close(ready_sockets[1]);
         }
 
-        let (readiness_interrupted, readiness_error) = match group_ready {
-            Ok(GroupReadiness::Ready) => (false, None),
-            Ok(GroupReadiness::Interrupted) => (true, None),
-            Err(error) => (false, Some(error)),
-        };
-
-        if readiness_interrupted || readiness_error.is_some() {
-            let mut failures: Vec<_> = readiness_error.into_iter().collect();
+        if let Err(error) = group_ready {
+            let mut failures = vec![error];
 
             for (target, label) in [(-pid, "process group"), (pid, "executor")] {
                 if unsafe { libc::kill(target, libc::SIGKILL) } != 0 {
@@ -2184,18 +2529,27 @@ impl Scheduler {
                 }
             }
 
-            unsafe {
-                libc::close(sockets[0]);
-            }
-            let reaped = match wait_bounded_checked(pid) {
-                Ok(()) => true,
+            match self.wait_pre_ready_child(pid) {
+                Ok(()) => unsafe {
+                    libc::close(sockets[0]);
+                },
                 Err(reap_error) => {
                     failures.push(reap_error.to_string());
-                    false
-                }
-            };
+                    self.retain_pre_ready_child(
+                        task,
+                        pid,
+                        sockets[0],
+                        spawned_ns,
+                        permits,
+                        registered_nested,
+                        failures.join(" "),
+                    );
 
-            if registered_nested && reaped {
+                    return Ok(Step::Progress);
+                }
+            }
+
+            if registered_nested {
                 if let Err(registry_error) =
                     self.emit_nested_group(NestedGroupOperation::Retire, pid, pid)
                 {
@@ -2207,13 +2561,7 @@ impl Scheduler {
                     failures.push(registry_error);
                 }
             }
-            self.release_permits(&task.permit_names)?;
-
-            if readiness_interrupted && failures.is_empty() {
-                self.pending.push_front(task);
-
-                return Ok(Step::Progress);
-            }
+            self.release_spawn_permits(&task, permits)?;
 
             self.completed.push_back(failed_result(
                 task,
@@ -2226,70 +2574,27 @@ impl Scheduler {
             return Ok(Step::Progress);
         }
 
-        let (scope_workers, executor_workers) = worker_counts(&task.kind, true);
-        self.scope_workers += u64::from(scope_workers);
-        self.executor_workers += u64::from(executor_workers);
+        let mut active = ActiveTask::new(
+            task,
+            pid,
+            pid,
+            sockets[0],
+            spawned_ns,
+            &self.run_id,
+            registered_nested,
+        );
 
-        if let Err(mut error) = set_nonblocking(sockets[0]) {
-            unsafe {
-                libc::kill(-pid, libc::SIGKILL);
-                libc::kill(pid, libc::SIGKILL);
-                libc::close(sockets[0]);
-            }
-            if registered_nested {
-                if let Err(registry_error) =
-                    self.emit_nested_group(NestedGroupOperation::Retire, pid, pid)
-                {
-                    error = format!("{error} {registry_error}");
-                }
-            }
-            if let Err(reap_error) = wait_bounded_checked(pid) {
-                error = format!("{error} {reap_error}");
-            }
-            if registered_nested {
-                if let Err(registry_error) =
-                    self.emit_nested_group(NestedGroupOperation::Unregister, pid, pid)
-                {
-                    error = format!("{error} {registry_error}");
-                }
-            }
-            self.release_permits(&task.permit_names)?;
-            self.completed.push_back(failed_result(
-                task,
-                "fork_failure",
-                error,
-                telemetry(
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    1,
-                    scope_workers,
-                    executor_workers,
-                    0,
-                ),
-                Vec::new(),
-            ));
-
-            return Ok(Step::Progress);
+        match permits {
+            SpawnPermits::None => {}
+            SpawnPermits::Armed => active.mark_armed_permit_acquired(),
+            SpawnPermits::Task => active.mark_task_permits_acquired(),
         }
 
-        self.active.insert(
-            pid,
-            ActiveTask::new(
-                task,
-                pid,
-                pid,
-                sockets[0],
-                spawned_ns,
-                &self.run_id,
-                registered_nested,
-            ),
-        );
-        self.max_active = self.max_active.max(self.active.len());
+        self.active.insert(pid, active);
+        if start_immediately {
+            let started_ns = monotonic_ns().map_err(|error| error.to_string())?;
+            self.start_task(pid, started_ns, matches!(permits, SpawnPermits::Task))?;
+        }
         self.refill_before_collect = true;
 
         Ok(Step::Progress)
@@ -2366,7 +2671,12 @@ impl Scheduler {
                 unsafe {
                     libc::close(active.fd);
                 }
-                self.release_permits(&active.task.permit_names)?;
+                if active.owns_task_permits() {
+                    self.release_permits(&active.task.permit_names)?;
+                }
+                if active.owns_armed_permit() {
+                    self.release_armed_permit()?;
+                }
                 self.completed.push_back(active.into_result());
             }
         }
@@ -2398,10 +2708,23 @@ impl Scheduler {
             });
         }
 
+        let pending_needs_armed_permit = self.pending.iter().any(Task::can_prearm);
         self.registry.append_poll_descriptors(
-            self.pending
-                .iter()
-                .flat_map(|task| task.permit_names.iter().cloned()),
+            self.active
+                .values()
+                .filter(|active| active.armed())
+                .flat_map(|active| active.task.permit_names.iter().cloned())
+                .chain(
+                    self.pending
+                        .iter()
+                        .filter(|task| !task.can_prearm())
+                        .flat_map(|task| task.permit_names.iter().cloned()),
+                )
+                .chain(
+                    pending_needs_armed_permit
+                        .then(|| ARMED_POOL.to_string())
+                        .into_iter(),
+                ),
             &mut seen,
             &mut descriptors,
         )?;
@@ -2519,6 +2842,27 @@ fn socket_pair_of_type(socket_type: libc::c_int) -> Result<[RawFd; 2], io::Error
         }
     }
 
+    #[cfg(target_os = "macos")]
+    for fd in sockets {
+        let enabled: libc::c_int = 1;
+        let result = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_NOSIGPIPE,
+                (&enabled as *const libc::c_int).cast(),
+                std::mem::size_of_val(&enabled) as libc::socklen_t,
+            )
+        };
+
+        if result != 0 {
+            let error = io::Error::last_os_error();
+            close_descriptors(sockets);
+
+            return Err(error);
+        }
+    }
+
     Ok(sockets)
 }
 
@@ -2542,11 +2886,32 @@ fn close_pools(pools: &HashMap<String, PermitPool>) {
 fn write_byte(fd: RawFd) -> Result<(), String> {
     let byte = b'.';
 
-    loop {
-        let result = unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
+    match send_socket(fd, &[byte]) {
+        Ok(1) => Ok(()),
+        Ok(_) => Err("Drover could not release a complete concurrency permit.".into()),
+        Err(error) => Err(format!(
+            "Drover could not release a concurrency permit: {error}."
+        )),
+    }
+}
 
-        if result == 1 {
-            return Ok(());
+fn write_start(fd: RawFd) -> Result<(), io::Error> {
+    match send_socket(fd, &[EXECUTOR_START_BYTE])? {
+        1 => Ok(()),
+        _ => Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            "Drover could not write the executor start signal.",
+        )),
+    }
+}
+
+fn send_socket(fd: RawFd, bytes: &[u8]) -> Result<usize, io::Error> {
+    loop {
+        let written =
+            unsafe { libc::send(fd, bytes.as_ptr().cast(), bytes.len(), SOCKET_SEND_FLAGS) };
+
+        if written >= 0 {
+            return Ok(written as usize);
         }
 
         let error = io::Error::last_os_error();
@@ -2555,9 +2920,41 @@ fn write_byte(fd: RawFd) -> Result<(), String> {
             continue;
         }
 
-        return Err(format!(
-            "Drover could not release a concurrency permit: {error}."
-        ));
+        return Err(error);
+    }
+}
+
+fn read_start(fd: RawFd) -> Result<(), io::Error> {
+    let mut byte = 0_u8;
+
+    loop {
+        let read = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
+
+        if read == 1 {
+            return if byte == EXECUTOR_START_BYTE {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Drover received an invalid executor start signal.",
+                ))
+            };
+        }
+
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Drover closed an executor before signaling its start.",
+            ));
+        }
+
+        let error = io::Error::last_os_error();
+
+        if error.kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+
+        return Err(error);
     }
 }
 
@@ -2692,100 +3089,84 @@ fn validate_sigchld_disposition() -> Result<(), String> {
 fn write_group_ready(fd: RawFd, ready: bool) -> bool {
     let byte = if ready { b'.' } else { b'!' };
 
-    loop {
-        let written = unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
-
-        if written == 1 {
-            return true;
-        }
-
-        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-            return false;
-        }
-    }
+    matches!(send_socket(fd, &[byte]), Ok(1))
 }
 
 fn write_nested_group_ready_failure(fd: RawFd) -> bool {
     let byte = b'?';
 
-    loop {
-        let written = unsafe { libc::write(fd, (&byte as *const u8).cast(), 1) };
-
-        if written == 1 {
-            return true;
-        }
-
-        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-            return false;
-        }
-    }
+    matches!(send_socket(fd, &[byte]), Ok(1))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GroupReadiness {
     Ready,
-    Interrupted,
 }
 
 fn read_group_ready(fd: RawFd, deadline_ns: u64) -> Result<GroupReadiness, String> {
     let mut byte = 0_u8;
-    let now_ns = monotonic_ns().map_err(|error| error.to_string())?;
 
-    if now_ns >= deadline_ns {
-        return Err("The Drove executor timed out before its process group was ready.".into());
-    }
+    loop {
+        let now_ns = monotonic_ns().map_err(|error| error.to_string())?;
 
-    let timeout_ms = deadline_ns
-        .saturating_sub(now_ns)
-        .div_ceil(1_000_000)
-        .min(i32::MAX as u64) as i32;
-    let mut descriptor = libc::pollfd {
-        fd,
-        events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
-        revents: 0,
-    };
-    let polled = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
-
-    if polled == 0 {
-        return Err("The Drove executor timed out before its process group was ready.".into());
-    }
-
-    if polled == -1 {
-        let error = io::Error::last_os_error();
-
-        if error.kind() == io::ErrorKind::Interrupted {
-            return Ok(GroupReadiness::Interrupted);
+        if now_ns >= deadline_ns {
+            return Err("The Drove executor timed out before its process group was ready.".into());
         }
 
-        return Err(format!(
-            "Drover could not wait for executor process-group readiness: {error}."
-        ));
-    }
-
-    let read = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
-
-    if read == 1 {
-        return match byte {
-            b'.' => Ok(GroupReadiness::Ready),
-            b'!' => Err("The Drove executor could not create its process group.".into()),
-            b'?' => Err("The Drove executor could not register its nested process group.".into()),
-            _ => Err("The Drove executor sent an invalid process-group signal.".into()),
+        let timeout_ms = deadline_ns
+            .saturating_sub(now_ns)
+            .div_ceil(1_000_000)
+            .min(i32::MAX as u64) as i32;
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+            revents: 0,
         };
-    }
+        let polled = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
 
-    if read == -1 {
-        let error = io::Error::last_os_error();
-
-        if error.kind() == io::ErrorKind::Interrupted {
-            return Ok(GroupReadiness::Interrupted);
+        if polled == 0 {
+            return Err("The Drove executor timed out before its process group was ready.".into());
         }
 
-        return Err(format!(
-            "Drover could not read executor process-group readiness: {error}."
-        ));
-    }
+        if polled == -1 {
+            let error = io::Error::last_os_error();
 
-    Err("The Drove executor exited before its process group was ready.".into())
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+
+            return Err(format!(
+                "Drover could not wait for executor process-group readiness: {error}."
+            ));
+        }
+
+        let read = unsafe { libc::read(fd, (&mut byte as *mut u8).cast(), 1) };
+
+        if read == 1 {
+            return match byte {
+                b'.' => Ok(GroupReadiness::Ready),
+                b'!' => Err("The Drove executor could not create its process group.".into()),
+                b'?' => {
+                    Err("The Drove executor could not register its nested process group.".into())
+                }
+                _ => Err("The Drove executor sent an invalid process-group signal.".into()),
+            };
+        }
+
+        if read == -1 {
+            let error = io::Error::last_os_error();
+
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+
+            return Err(format!(
+                "Drover could not read executor process-group readiness: {error}."
+            ));
+        }
+
+        return Err("The Drove executor exited before its process group was ready.".into());
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -3067,8 +3448,111 @@ mod tests {
     use super::*;
     use std::io::{Seek, SeekFrom, Write};
     use std::os::fd::AsRawFd;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    extern "C" fn readiness_signal_handler(_: libc::c_int) {}
+    static READINESS_SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static SIGPIPE_SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    extern "C" fn readiness_signal_handler(_: libc::c_int) {
+        READINESS_SIGNAL_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    extern "C" fn sigpipe_signal_handler(_: libc::c_int) {
+        SIGPIPE_SIGNAL_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    struct SignalDispositionGuard {
+        signal: libc::c_int,
+        previous: libc::sigaction,
+    }
+
+    impl SignalDispositionGuard {
+        fn install(signal: libc::c_int, handler: usize) -> Self {
+            let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+            let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
+            action.sa_sigaction = handler;
+            action.sa_flags = 0;
+            unsafe {
+                libc::sigemptyset(&mut action.sa_mask);
+            }
+            assert_eq!(
+                unsafe { libc::sigaction(signal, &action, &mut previous) },
+                0
+            );
+
+            Self { signal, previous }
+        }
+    }
+
+    impl Drop for SignalDispositionGuard {
+        fn drop(&mut self) {
+            unsafe {
+                libc::sigaction(self.signal, &self.previous, std::ptr::null_mut());
+            }
+        }
+    }
+
+    fn current_signal_handler(signal: libc::c_int) -> usize {
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            unsafe { libc::sigaction(signal, std::ptr::null(), &mut action) },
+            0
+        );
+
+        action.sa_sigaction
+    }
+
+    fn exit_passing_child(run_id: &str, child: ChildRole) -> ! {
+        let started_ns = monotonic_ns().unwrap();
+        let started = Frame::new(
+            run_id.into(),
+            child.task_id.clone(),
+            "test".into(),
+            "scope:root".into(),
+            child.ordinal,
+            0,
+            "task.started".into(),
+            json!({ "started_ns": started_ns }),
+        )
+        .unwrap();
+        let value = Frame::new(
+            run_id.into(),
+            child.task_id.clone(),
+            "test".into(),
+            "scope:root".into(),
+            child.ordinal,
+            1,
+            "task.value".into(),
+            json!({
+                "encoding": "base64",
+                "data": STANDARD.encode(b"null")
+            }),
+        )
+        .unwrap();
+        let finished = Frame::new(
+            run_id.into(),
+            child.task_id,
+            "test".into(),
+            "scope:root".into(),
+            child.ordinal,
+            2,
+            "task.finished".into(),
+            json!({
+                "status": "passed",
+                "failure": null,
+                "finished_ns": monotonic_ns().unwrap(),
+                "memory_peak_bytes": null
+            }),
+        )
+        .unwrap();
+        let passed = write_frame(child.fd, &started).is_ok()
+            && write_frame(child.fd, &value).is_ok()
+            && write_frame(child.fd, &finished).is_ok();
+        unsafe {
+            libc::close(child.fd);
+            libc::_exit(i32::from(!passed));
+        }
+    }
 
     fn assert_descriptors_close_on_exec(descriptors: [RawFd; 2]) {
         let flags = descriptors.map(|descriptor| unsafe { libc::fcntl(descriptor, libc::F_GETFD) });
@@ -3123,11 +3607,14 @@ mod tests {
             libc::close(sockets[0]);
             libc::setpgid(pid, pid);
         }
-        read_group_ready(
-            sockets[1],
-            monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
-        )
-        .unwrap();
+        assert_eq!(
+            read_group_ready(
+                sockets[1],
+                monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
+            )
+            .unwrap(),
+            GroupReadiness::Ready,
+        );
         unsafe {
             libc::close(sockets[1]);
         }
@@ -3143,6 +3630,195 @@ mod tests {
     #[test]
     fn datagram_socket_pairs_are_close_on_exec() {
         assert_descriptors_close_on_exec(datagram_socket_pair().unwrap());
+    }
+
+    #[test]
+    fn socket_writes_surface_closed_peers_without_mutating_or_raising_sigpipe() {
+        SIGPIPE_SIGNAL_COUNT.store(0, Ordering::Relaxed);
+        let _guard =
+            SignalDispositionGuard::install(libc::SIGPIPE, sigpipe_signal_handler as usize);
+        let closed_pair = || {
+            let sockets = socket_pair().unwrap();
+            unsafe {
+                libc::close(sockets[1]);
+            }
+
+            sockets[0]
+        };
+
+        let start = closed_pair();
+        let error = write_start(start).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EPIPE));
+        unsafe {
+            libc::close(start);
+        }
+
+        let permit = closed_pair();
+        assert!(write_byte(permit).is_err());
+        unsafe {
+            libc::close(permit);
+        }
+
+        let readiness = closed_pair();
+        assert!(!write_group_ready(readiness, true));
+        unsafe {
+            libc::close(readiness);
+        }
+
+        let nested_readiness = closed_pair();
+        assert!(!write_nested_group_ready_failure(nested_readiness));
+        unsafe {
+            libc::close(nested_readiness);
+        }
+
+        assert_eq!(
+            current_signal_handler(libc::SIGPIPE),
+            sigpipe_signal_handler as usize
+        );
+        assert_eq!(SIGPIPE_SIGNAL_COUNT.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn executor_preserves_the_inherited_sigpipe_disposition() {
+        let _guard =
+            SignalDispositionGuard::install(libc::SIGPIPE, sigpipe_signal_handler as usize);
+        let run_id = "sigpipe-disposition-run";
+        let engine =
+            Engine::new(run_id.into(), 1, HashMap::new(), Duration::from_millis(10)).unwrap();
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:sigpipe-disposition".into(),
+                "test".into(),
+                "scope:root".into(),
+                Vec::new(),
+                1_000,
+                false,
+            )
+            .unwrap();
+
+        let result = loop {
+            match scheduler.step().unwrap() {
+                Step::Child(child) => {
+                    if current_signal_handler(libc::SIGPIPE) != sigpipe_signal_handler as usize {
+                        unsafe {
+                            libc::_exit(3);
+                        }
+                    }
+
+                    exit_passing_child(run_id, child);
+                }
+                Step::Result(result) => break result,
+                Step::Progress => {}
+                Step::Done => panic!("SIGPIPE disposition task produced no terminal result"),
+            }
+        };
+
+        assert_eq!(result.status, "passed", "{:?}", result.failure);
+        assert_eq!(scheduler.topology().forks, 1);
+        assert_eq!(
+            current_signal_handler(libc::SIGPIPE),
+            sigpipe_signal_handler as usize
+        );
+    }
+
+    #[test]
+    fn failed_prearmed_start_releases_task_permits_then_cancel_reaps_and_releases_armed() {
+        let engine = Engine::new(
+            "failed-prearmed-start-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let global = engine.registry.names(&["scope:root".into()]);
+        assert_eq!(global, [GLOBAL_POOL]);
+        assert!(engine.registry.try_acquire(&global).unwrap());
+
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:failed-start".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                1_000,
+                true,
+            )
+            .unwrap();
+        assert!(matches!(scheduler.step().unwrap(), Step::Progress));
+
+        let (&pid, active) = scheduler.active.iter().next().expect("task was pre-armed");
+        let fd = active.fd;
+        assert!(active.armed());
+        assert!(active.owns_armed_permit());
+        assert!(!active.owns_task_permits());
+        assert_eq!(unsafe { libc::kill(-pid, libc::SIGKILL) }, 0);
+
+        let mut descriptors = [libc::pollfd {
+            fd,
+            events: libc::POLLHUP | libc::POLLERR,
+            revents: 0,
+        }];
+        poll_descriptors(&mut descriptors, 1_000).unwrap();
+        assert_ne!(descriptors[0].revents & (libc::POLLHUP | libc::POLLERR), 0);
+
+        engine.registry.release(&global).unwrap();
+        assert!(scheduler.start_available().unwrap());
+
+        let active = scheduler
+            .active
+            .get(&pid)
+            .expect("failed task remains owned");
+        assert!(matches!(
+            active.state,
+            ExecutorState::FailedToStart { armed_permit: true }
+        ));
+        assert!(active.protocol_error.as_ref().is_some_and(|error| {
+            error.contains("could not start task task:failed-start")
+                && error.contains("Broken pipe")
+        }));
+        assert!(!active.owns_task_permits());
+        assert!(active.owns_armed_permit());
+        assert_eq!(scheduler.active_count(), 0);
+
+        assert!(engine.registry.try_acquire(&global).unwrap());
+        assert!(!engine.registry.try_acquire(&global).unwrap());
+        engine.registry.release(&global).unwrap();
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+
+        scheduler.cancel().unwrap();
+        assert!(scheduler.active.is_empty());
+        assert!(engine.registry.try_acquire(&global).unwrap());
+        assert!(!engine.registry.try_acquire(&global).unwrap());
+        engine.registry.release(&global).unwrap();
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+    }
+
+    #[test]
+    fn armed_executor_timeout_begins_only_when_start_is_signaled() {
+        let task = Task {
+            ordinal: 0,
+            id: "task:armed-timeout".into(),
+            kind: "test".into(),
+            scope_id: "scope:root".into(),
+            timeout_ms: 25,
+            permit_names: vec![GLOBAL_POOL.into()],
+        };
+        let mut active = ActiveTask::new(task, 41, 41, -1, 100, "armed-timeout-run", false);
+        active.mark_armed_permit_acquired();
+
+        assert!(active.armed());
+        assert!(active.deadline_ns.is_none());
+        assert!(!active.owns_task_permits());
+
+        active.mark_started(1_000_000, true);
+
+        assert!(active.running());
+        assert_eq!(active.deadline_ns, Some(26_000_000));
+        assert!(active.owns_task_permits());
     }
 
     fn assert_group_reaped(pid: libc::pid_t) {
@@ -3218,7 +3894,7 @@ mod tests {
     }
 
     #[test]
-    fn executor_readiness_surfaces_an_interrupted_wait_for_scheduler_cancellation() {
+    fn executor_readiness_retries_an_interrupted_wait_on_the_same_child() {
         let sockets = socket_pair().unwrap();
         let control = socket_pair().unwrap();
         let pid = unsafe { libc::fork() };
@@ -3249,7 +3925,7 @@ mod tests {
                 monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
             );
             unsafe {
-                libc::_exit(i32::from(readiness != Ok(GroupReadiness::Interrupted)));
+                libc::_exit(i32::from(readiness != Ok(GroupReadiness::Ready)));
             }
         }
 
@@ -3266,31 +3942,15 @@ mod tests {
             GroupReadiness::Ready,
         );
 
-        let deadline_ns = monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS;
-        let mut status = 0;
-
-        loop {
+        for _ in 0..4 {
             unsafe {
                 libc::kill(pid, libc::SIGUSR1);
             }
             std::thread::sleep(Duration::from_millis(1));
-
-            let waited = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
-
-            if waited == pid {
-                break;
-            }
-
-            assert_eq!(waited, 0);
-
-            if monotonic_ns().unwrap() >= deadline_ns {
-                unsafe {
-                    libc::kill(pid, libc::SIGKILL);
-                    libc::waitpid(pid, &mut status, 0);
-                }
-                panic!("readiness wait did not surface its interruption");
-            }
         }
+        assert!(write_group_ready(sockets[1], true));
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
 
         unsafe {
             libc::close(sockets[1]);
@@ -3298,6 +3958,129 @@ mod tests {
         }
         assert!(libc::WIFEXITED(status));
         assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    #[test]
+    fn scheduler_retries_nested_readiness_after_sigusr1_without_reforking() {
+        READINESS_SIGNAL_COUNT.store(0, Ordering::Relaxed);
+        let _guard =
+            SignalDispositionGuard::install(libc::SIGUSR1, readiness_signal_handler as usize);
+        let run_id = "nested-readiness-eintr-run";
+        let mut engine =
+            Engine::new(run_id.into(), 1, HashMap::new(), Duration::from_millis(10)).unwrap();
+        engine.nested_groups.origin_pid = unsafe { libc::getpid() } + 100_000;
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler.readiness_delay = Duration::from_millis(50);
+        scheduler
+            .submit(
+                "task:nested-readiness-eintr".into(),
+                "test".into(),
+                "scope:root".into(),
+                Vec::new(),
+                1_000,
+                false,
+            )
+            .unwrap();
+
+        let parent_pid = unsafe { libc::getpid() };
+        let signaler = unsafe { libc::fork() };
+        assert_ne!(signaler, -1);
+
+        if signaler == 0 {
+            for _ in 0..20 {
+                unsafe {
+                    libc::usleep(1_000);
+                    libc::kill(parent_pid, libc::SIGUSR1);
+                }
+            }
+
+            unsafe {
+                libc::_exit(0);
+            }
+        }
+
+        let mut results = Vec::new();
+
+        loop {
+            match scheduler.step().unwrap() {
+                Step::Child(child) => exit_passing_child(run_id, child),
+                Step::Result(result) => results.push(result),
+                Step::Progress => {}
+                Step::Done => break,
+            }
+        }
+
+        let mut signaler_status = 0;
+        assert_eq!(
+            unsafe { libc::waitpid(signaler, &mut signaler_status, 0) },
+            signaler
+        );
+        assert!(libc::WIFEXITED(signaler_status));
+        assert_eq!(libc::WEXITSTATUS(signaler_status), 0);
+        assert!(READINESS_SIGNAL_COUNT.load(Ordering::Relaxed) > 0);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "passed", "{:?}", results[0].failure);
+        assert!(results[0].telemetry.pid.is_some());
+        assert_eq!(scheduler.topology().forks, 1);
+    }
+
+    #[test]
+    fn readiness_reap_timeout_retains_child_and_permits_until_cancel() {
+        let mut engine = Engine::new(
+            "readiness-reap-timeout-run".into(),
+            1,
+            HashMap::from([("limited".into(), 1)]),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        engine.nested_groups.origin_pid = unsafe { libc::getpid() } + 100_000;
+        let names = engine.registry.names(&["limited".into()]);
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler.fail_readiness = true;
+        scheduler.fail_pre_ready_reap = true;
+        scheduler
+            .submit(
+                "task:readiness-reap-timeout".into(),
+                "test".into(),
+                "scope:limited".into(),
+                vec!["limited".into()],
+                1_000,
+                true,
+            )
+            .unwrap();
+
+        assert!(matches!(scheduler.step().unwrap(), Step::Progress));
+        assert!(scheduler.pending.is_empty());
+        assert!(scheduler.completed.is_empty());
+        assert_eq!(scheduler.active.len(), 1);
+        assert_eq!(scheduler.topology().forks, 1);
+        let active = scheduler.active.values().next().unwrap();
+        assert!(active.owns_task_permits());
+        assert!(!active.owns_armed_permit());
+        assert!(active.protocol_error.as_ref().is_some_and(|error| {
+            error.contains("could not register its nested process group")
+                && error.contains("injected timeout waiting to reap")
+        }));
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        let register = engine
+            .nested_groups
+            .receive()
+            .unwrap()
+            .expect("nested child registered before readiness failed");
+        assert_eq!(register.operation, NestedGroupOperation::Register);
+        assert!(engine.nested_groups.receive().unwrap().is_none());
+
+        scheduler.cancel().unwrap();
+        assert!(scheduler.active.is_empty());
+        assert!(scheduler.completed.is_empty());
+        let retire = engine.nested_groups.receive().unwrap().unwrap();
+        let unregister = engine.nested_groups.receive().unwrap().unwrap();
+        assert_eq!(retire.operation, NestedGroupOperation::Retire);
+        assert_eq!(unregister.operation, NestedGroupOperation::Unregister);
+        assert!(engine.nested_groups.receive().unwrap().is_none());
+        assert!(engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        engine.registry.release(&names).unwrap();
     }
 
     #[test]
@@ -3964,6 +4747,90 @@ mod tests {
     }
 
     #[test]
+    fn starts_the_same_prearmed_pid_before_delivering_a_buffered_result() {
+        let engine = Engine::new(
+            "prearmed-refill-before-result-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(2).unwrap();
+
+        for id in ["task:first", "task:second"] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+
+        match scheduler.step().unwrap() {
+            Step::Child(child) => {
+                assert_eq!(child.task_id, "task:first");
+                unsafe {
+                    libc::close(child.fd);
+                    libc::_exit(1);
+                }
+            }
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => panic!("Drover did not pre-arm the refill fixture"),
+        }
+
+        let prearmed_pid = scheduler
+            .active
+            .iter()
+            .find_map(|(pid, active)| {
+                (active.task.id == "task:second" && active.armed()).then_some(*pid)
+            })
+            .expect("second task was pre-armed");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+
+        loop {
+            match scheduler.step().unwrap() {
+                Step::Child(child) => {
+                    assert_eq!(child.task_id, "task:second");
+
+                    loop {
+                        unsafe {
+                            libc::pause();
+                        }
+                    }
+                }
+                Step::Progress => {
+                    if scheduler.completed.len() == 1
+                        && scheduler
+                            .active
+                            .get(&prearmed_pid)
+                            .is_some_and(|active| active.running())
+                    {
+                        break;
+                    }
+
+                    if std::time::Instant::now() >= deadline {
+                        let _ = scheduler.cancel();
+                        panic!("Drover did not start its pre-armed refill in time");
+                    }
+                }
+                Step::Result(_) | Step::Done => {
+                    panic!("Drover delivered the buffered result before its pre-armed refill")
+                }
+            }
+        }
+
+        assert_eq!(scheduler.forks, 2);
+        assert_eq!(scheduler.active_count(), 1);
+        assert_eq!(scheduler.max_active(), 1);
+        assert!(scheduler.pending.is_empty());
+        scheduler.cancel().unwrap();
+    }
+
+    #[test]
     fn armed_refill_latch_does_not_fork_interrupted_pending_work() {
         let engine = Engine::new(
             "interrupted-refill-run".into(),
@@ -4007,7 +4874,14 @@ mod tests {
         .unwrap();
         let mut scheduler = engine.scheduler(6).unwrap();
 
-        for id in ["task:first", "task:second", "task:third"] {
+        for id in [
+            "task:first",
+            "task:second",
+            "task:third",
+            "task:fourth",
+            "task:fifth",
+            "task:sixth",
+        ] {
             scheduler
                 .submit(
                     id.into(),
@@ -4032,14 +4906,247 @@ mod tests {
             }
         }
 
-        assert_eq!(scheduler.forks, 3);
+        assert_eq!(scheduler.forks, 6);
+        assert_eq!(scheduler.active.len(), 6);
         assert_eq!(scheduler.active_count(), 3);
         assert_eq!(scheduler.max_active(), 3);
+        assert_eq!(
+            scheduler
+                .active
+                .values()
+                .filter(|active| active.armed())
+                .count(),
+            3
+        );
+        assert_eq!(scheduler.topology().peak_live_pids, 6);
         assert!(scheduler.pending.is_empty());
 
         for pid in scheduler.active.keys().copied() {
             assert_eq!(unsafe { libc::getpgid(pid) }, pid);
         }
+        let names = engine.registry.names(&["scope:root".into()]);
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+
+        scheduler.cancel().unwrap();
+    }
+
+    #[test]
+    fn starts_unrestricted_work_when_another_map_owns_the_armed_window() {
+        let engine = Engine::new(
+            "shared-armed-window-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:unrestricted".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                1_000,
+                true,
+            )
+            .unwrap();
+
+        match scheduler.step().unwrap() {
+            Step::Child(_) => loop {
+                unsafe {
+                    libc::pause();
+                }
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover left a global lane idle behind another map's armed window")
+            }
+        }
+
+        let active = scheduler
+            .active
+            .values()
+            .next()
+            .expect("unrestricted task was started");
+        assert!(active.running());
+        assert!(!active.owns_armed_permit());
+        assert!(active.owns_task_permits());
+        assert_eq!(scheduler.forks, 1);
+        assert_eq!(scheduler.active_count(), 1);
+        assert_eq!(scheduler.topology().peak_live_pids, 1);
+
+        scheduler.cancel().unwrap();
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+    }
+
+    #[test]
+    fn two_schedulers_share_one_running_and_armed_capacity_bound() {
+        let engine = Engine::new(
+            "two-scheduler-capacity-run".into(),
+            2,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut first = engine.scheduler(4).unwrap();
+        let mut second = engine.scheduler(4).unwrap();
+
+        for (scheduler, id) in [
+            (&mut first, "task:first-running"),
+            (&mut second, "task:second-running"),
+        ] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+            match scheduler.step().unwrap() {
+                Step::Child(_) => loop {
+                    unsafe {
+                        libc::pause();
+                    }
+                },
+                Step::Progress => {}
+                Step::Result(_) | Step::Done => panic!("scheduler did not start its first task"),
+            }
+        }
+
+        for id in ["task:first-armed-a", "task:first-armed-b"] {
+            first
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+        assert!(matches!(first.step().unwrap(), Step::Progress));
+
+        for id in ["task:second-blocked-a", "task:second-blocked-b"] {
+            second
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+        assert!(matches!(second.step().unwrap(), Step::Progress));
+
+        let running = [&first, &second]
+            .into_iter()
+            .flat_map(|scheduler| scheduler.active.values())
+            .filter(|active| active.running())
+            .count();
+        let armed = [&first, &second]
+            .into_iter()
+            .flat_map(|scheduler| scheduler.active.values())
+            .filter(|active| active.armed())
+            .count();
+        let live = first.active.len() + second.active.len();
+
+        assert_eq!(running, 2);
+        assert_eq!(armed, 2);
+        assert_eq!(live, 4);
+        assert_eq!(first.pending.len() + second.pending.len(), 2);
+        assert!(!engine.registry.take(GLOBAL_POOL).unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+
+        first.cancel().unwrap();
+        second.cancel().unwrap();
+
+        let global = engine.registry.names(&["scope:root".into()]);
+        assert!(engine.registry.try_acquire(&global).unwrap());
+        assert!(engine.registry.try_acquire(&global).unwrap());
+        assert!(!engine.registry.try_acquire(&global).unwrap());
+        engine.registry.release(&global).unwrap();
+        engine.registry.release(&global).unwrap();
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+    }
+
+    #[test]
+    fn constrained_tasks_scan_past_a_saturated_scope_without_prearming_it() {
+        let engine = Engine::new(
+            "scope-head-of-line-run".into(),
+            3,
+            HashMap::from([("hot".into(), 1), ("cold".into(), 2)]),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(6).unwrap();
+
+        for (id, scope) in [
+            ("task:hot-first", "hot"),
+            ("task:hot-second", "hot"),
+            ("task:hot-third", "hot"),
+            ("task:cold-first", "cold"),
+            ("task:cold-second", "cold"),
+        ] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    scope.into(),
+                    vec![scope.into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+
+        match scheduler.step().unwrap() {
+            Step::Child(_) => loop {
+                unsafe {
+                    libc::pause();
+                }
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover did not scan past the saturated hot scope")
+            }
+        }
+
+        let running_ids: HashSet<_> = scheduler
+            .active
+            .values()
+            .filter(|active| active.running())
+            .map(|active| active.task.id.as_str())
+            .collect();
+        assert_eq!(
+            running_ids,
+            HashSet::from(["task:hot-first", "task:cold-first", "task:cold-second",])
+        );
+        assert_eq!(scheduler.forks, 3);
+        assert_eq!(scheduler.active.len(), 3);
+        assert_eq!(scheduler.active_count(), 3);
+        assert_eq!(scheduler.max_active(), 3);
+        assert_eq!(scheduler.topology().peak_live_pids, 3);
+        assert!(scheduler.active.values().all(|active| active.running()));
+        assert_eq!(
+            scheduler
+                .pending
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            ["task:hot-second", "task:hot-third"]
+        );
 
         scheduler.cancel().unwrap();
     }
@@ -4054,6 +5161,14 @@ mod tests {
         )
         .unwrap();
         let mut scheduler = engine.scheduler(6).unwrap();
+        let names = engine.registry.names(&["scope:first".into()]);
+
+        for _ in 0..3 {
+            assert!(engine.registry.try_acquire(&names).unwrap());
+            assert!(engine.registry.try_acquire_armed().unwrap());
+        }
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
 
         for id in ["scope:first", "scope:second", "scope:third"] {
             scheduler
@@ -4083,11 +5198,18 @@ mod tests {
         assert_eq!(scheduler.forks, 1);
         assert_eq!(scheduler.active_count(), 1);
         assert_eq!(scheduler.pending.len(), 2);
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
         scheduler.cancel().unwrap();
+
+        for _ in 0..3 {
+            engine.registry.release(&names).unwrap();
+            engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+        }
     }
 
     #[test]
-    fn armed_refill_latch_respects_the_global_permit_capacity() {
+    fn prearms_the_outstanding_window_without_exceeding_global_permits() {
         let engine = Engine::new(
             "capacity-refill-run".into(),
             1,
@@ -4124,20 +5246,125 @@ mod tests {
 
         assert!(scheduler.refill_before_collect);
         assert!(matches!(scheduler.step().unwrap(), Step::Progress));
-        assert_eq!(scheduler.forks, 1);
+        assert_eq!(scheduler.forks, 2);
+        assert_eq!(scheduler.active.len(), 2);
         assert_eq!(scheduler.active_count(), 1);
-        assert_eq!(scheduler.pending.len(), 1);
+        assert!(scheduler.pending.is_empty());
         assert_eq!(scheduler.max_active(), 1);
-        let pid = *scheduler.active.keys().next().unwrap();
-        assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+        assert_eq!(
+            scheduler
+                .active
+                .values()
+                .filter(|active| active.armed())
+                .count(),
+            1
+        );
+        assert_eq!(
+            scheduler
+                .active
+                .values()
+                .filter(|active| active.running())
+                .count(),
+            1
+        );
+        assert!(scheduler.active.values().any(|active| {
+            active.armed()
+                && active.owns_armed_permit()
+                && !active.owns_task_permits()
+                && active.deadline_ns.is_none()
+        }));
+        assert!(scheduler.active.values().any(|active| {
+            active.running()
+                && !active.owns_armed_permit()
+                && active.owns_task_permits()
+                && active.deadline_ns.is_some()
+        }));
+
+        for pid in scheduler.active.keys().copied() {
+            assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+        }
 
         let names = engine.registry.names(&["scope:root".into()]);
         assert!(!engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
 
         scheduler.cancel().unwrap();
         assert_eq!(scheduler.active_count(), 0);
         assert!(scheduler.pending.is_empty());
         assert!(engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        engine.registry.release(&names).unwrap();
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+    }
+
+    #[test]
+    fn reaps_an_armed_crash_without_releasing_unacquired_task_permits() {
+        let engine = Engine::new(
+            "armed-crash-run".into(),
+            1,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let names = engine.registry.names(&["scope:root".into()]);
+        assert!(engine.registry.try_acquire(&names).unwrap());
+        let mut scheduler = engine.scheduler(1).unwrap();
+        scheduler
+            .submit(
+                "task:armed-crash".into(),
+                "test".into(),
+                "scope:root".into(),
+                vec!["scope:root".into()],
+                25,
+                true,
+            )
+            .unwrap();
+
+        assert!(matches!(scheduler.step().unwrap(), Step::Progress));
+        let pid = *scheduler.active.keys().next().expect("task was pre-armed");
+        let active = scheduler.active.get(&pid).unwrap();
+        assert!(active.armed());
+        assert!(active.deadline_ns.is_none());
+        assert!(!active.owns_task_permits());
+        std::thread::sleep(Duration::from_millis(30));
+        scheduler.collect().unwrap();
+        let active = scheduler.active.get(&pid).unwrap();
+        assert!(active.armed());
+        assert!(!active.timed_out);
+        assert!(active.deadline_ns.is_none());
+        assert_eq!(unsafe { libc::kill(-pid, libc::SIGKILL) }, 0);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let result = loop {
+            match scheduler.step().unwrap() {
+                Step::Result(result) => break result,
+                Step::Progress => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = scheduler.cancel();
+                        panic!("armed crash cleanup exceeded its bound");
+                    }
+                }
+                Step::Child(_) => panic!("an armed crash reached its task body"),
+                Step::Done => panic!("an armed crash produced no terminal result"),
+            }
+        };
+
+        assert_eq!(
+            result.failure.as_ref().unwrap()["kind"],
+            "signal_termination"
+        );
+        assert_eq!(result.telemetry.forks, 1);
+        assert_eq!(result.telemetry.scope_workers, 0);
+        assert_eq!(result.telemetry.executor_workers, 0);
+        assert!(engine.registry.try_acquire_armed().unwrap());
+        assert!(!engine.registry.try_acquire_armed().unwrap());
+        engine.registry.release(&[ARMED_POOL.into()]).unwrap();
+        assert!(!engine.registry.try_acquire(&names).unwrap());
+        engine.registry.release(&names).unwrap();
+        assert!(engine.registry.try_acquire(&names).unwrap());
+        assert!(!engine.registry.try_acquire(&names).unwrap());
         engine.registry.release(&names).unwrap();
     }
 
@@ -4552,11 +5779,14 @@ mod tests {
         unsafe {
             libc::close(sockets[0]);
         }
-        read_group_ready(
-            sockets[1],
-            monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
-        )
-        .unwrap();
+        assert_eq!(
+            read_group_ready(
+                sockets[1],
+                monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
+            )
+            .unwrap(),
+            GroupReadiness::Ready,
+        );
         unsafe {
             libc::close(sockets[1]);
         }
@@ -4633,11 +5863,14 @@ mod tests {
             libc::close(sockets[0]);
             libc::setpgid(pid, pid);
         }
-        read_group_ready(
-            sockets[1],
-            monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
-        )
-        .unwrap();
+        assert_eq!(
+            read_group_ready(
+                sockets[1],
+                monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS,
+            )
+            .unwrap(),
+            GroupReadiness::Ready,
+        );
         assert_eq!(unsafe { libc::getpgid(pid) }, pid);
         unsafe {
             libc::close(sockets[1]);
