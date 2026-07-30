@@ -379,11 +379,17 @@ requires two artifact-backed migrations retained for at least 14 days. Drove
 does not manufacture repository-owned evidence or apply that irreducibly
 external gate to the build needed to collect it.
 
-An alpha tag can become visible to Packagist before post-tag CI finishes.
-Candidate tag creation must therefore be protected and occur only after the
-design-partner verifier passes on the exact candidate commit. The release and
-published-package workflows rerun that gate, but source code cannot prove or
-replace the hosted tag-protection rule.
+An alpha tag can become visible to Packagist before its tag-ref rebuild
+finishes. Root promotion therefore builds and verifies branch-ref provenance,
+runs the exact-SHA hosted gates and, when required, the design-partner verifier,
+and proves that the recorded split `develop` commit has the exact Laravel
+subtree before GitHub Actions creates the annotated root tag. A second run at
+the tag requires the identically named annotated split tag, then rebuilds and
+verifies tag-ref provenance before creating the GitHub release. The split
+commit must be prepared first and tagged immediately after the root tag, but
+the tags remain separate promotions; this is not atomic cross-repository
+enforcement. Source code cannot prove or replace the hosted tag-protection
+rules or their actor-level GitHub Actions bypass.
 
 ## Non-goals
 

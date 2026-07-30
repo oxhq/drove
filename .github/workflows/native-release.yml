@@ -5,6 +5,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: Annotated v0.x.y-alpha.n tag to promote
+        required: true
+        type: string
+      laravel_commit:
+        description: Exact 40-character oxhq/drove-laravel develop commit
+        required: true
+        type: string
 
 concurrency:
   group: drove-native-release-${{ github.ref }}
@@ -44,13 +53,15 @@ jobs:
             library: target/release/libdrover.dylib
 
     steps:
-      - name: Checkout exact tag
+      - name: Checkout exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact checkout and release tag
+      - name: Verify exact checkout and release source
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
@@ -58,7 +69,6 @@ jobs:
           test "$(uname -m)" = "${{ matrix.machine }}"
           git fetch --no-tags origin \
             refs/heads/develop:refs/remotes/origin/develop
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             if [[ ! "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
               echo "Native releases require a v0.x.y-alpha.n tag." >&2
@@ -69,6 +79,16 @@ jobs:
               exit 1
             fi
             test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              test "$REQUESTED_VERSION" = "$GITHUB_REF_NAME"
+              git merge-base --is-ancestor HEAD origin/develop
+            else
+              test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
+            fi
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$GITHUB_REF" = refs/heads/develop
+            test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
           fi
 
       - name: Install Rust 1.88
@@ -86,12 +106,14 @@ jobs:
           coverage: none
 
       - name: Verify release identity
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             php scripts/verify-release-version.php "$GITHUB_REF_NAME"
           else
-            php scripts/verify-release-version.php
+            php scripts/verify-release-version.php "$REQUESTED_VERSION"
           fi
 
       - name: Test and build Drover on glibc 2.31
@@ -191,7 +213,6 @@ jobs:
           ' "$provenance" "$source_revision" "$DROVER_TARGET" "$asset"
 
       - name: Attest release archive provenance
-        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: ${{ runner.temp }}/native/drove-native-${{ matrix.target }}.tar.gz
@@ -232,8 +253,10 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish native release assets
-    if: startsWith(github.ref, 'refs/tags/')
+    name: Promote or publish native release
+    if: >-
+      github.ref_type == 'tag' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop')
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -243,38 +266,109 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout exact annotated tag
+      - name: Checkout exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify release tag
+      - name: Verify release source
+        id: release_source
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           test -z "$(git status --porcelain=v1)"
           git fetch --no-tags origin \
             refs/heads/develop:refs/remotes/origin/develop
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            release_version="$GITHUB_REF_NAME"
+            release_mode=publish
+            source_ref="refs/tags/$release_version"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              test "$REQUESTED_VERSION" = "$release_version"
+            fi
+            if [[ "$(git cat-file -t "refs/tags/$release_version")" != tag ]]; then
+              echo "Native releases require an annotated tag." >&2
+              exit 1
+            fi
+            test "$(
+              git rev-parse "refs/tags/$release_version^{commit}"
+            )" = "$(git rev-parse HEAD)"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              git merge-base --is-ancestor HEAD origin/develop
+            else
+              test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
+            fi
+          else
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$GITHUB_REF" = refs/heads/develop
+            test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"
+            release_version="$REQUESTED_VERSION"
+            release_mode=promote
+            source_ref=refs/heads/develop
+          fi
+          if [[ ! "$release_version" =~ ^v0\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
             echo "Native releases require a v0.x.y-alpha.n tag." >&2
             exit 1
           fi
-          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
-            echo "Native releases require an annotated tag." >&2
-            exit 1
-          fi
-          test "$(git rev-parse "$GITHUB_REF_NAME^{commit}")" = "$(git rev-parse HEAD)"
+          {
+            echo "version=$release_version"
+            echo "mode=$release_mode"
+            echo "source_ref=$source_ref"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve release publication policy
         id: release_policy
+        env:
+          RELEASE_VERSION: ${{ steps.release_source.outputs.version }}
         run: |
           set -euo pipefail
           php scripts/verify-release-version.php \
-            "$GITHUB_REF_NAME" \
+            "$RELEASE_VERSION" \
             --github-output \
             >> "$GITHUB_OUTPUT"
+
+      - name: Require exact split Laravel tree
+        id: split_laravel
+        env:
+          LARAVEL_COMMIT: ${{ inputs.laravel_commit }}
+          RELEASE_MODE: ${{ steps.release_source.outputs.mode }}
+          RELEASE_VERSION: ${{ steps.release_source.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_MODE" == publish ]]; then
+            split_ref="refs/drove-laravel/tags/$RELEASE_VERSION"
+            git fetch --no-tags \
+              https://github.com/oxhq/drove-laravel.git \
+              "refs/tags/$RELEASE_VERSION:$split_ref"
+            test "$(git cat-file -t "$split_ref")" = tag
+            laravel_commit="$(git rev-parse "$split_ref^{commit}")"
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              if [[ ! "$LARAVEL_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "laravel_commit must be a lowercase 40-character Git SHA." >&2
+                exit 1
+              fi
+              test "$laravel_commit" = "$LARAVEL_COMMIT"
+            fi
+          else
+            if [[ ! "$LARAVEL_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "laravel_commit must be a lowercase 40-character Git SHA." >&2
+              exit 1
+            fi
+            split_ref=refs/drove-laravel/heads/develop
+            git fetch --no-tags \
+              https://github.com/oxhq/drove-laravel.git \
+              "refs/heads/develop:$split_ref"
+            test "$(git rev-parse "$split_ref^{commit}")" = "$LARAVEL_COMMIT"
+            laravel_commit="$LARAVEL_COMMIT"
+          fi
+          test "$(git rev-parse "$laravel_commit^{tree}")" = "$(
+            git rev-parse HEAD:packages/drove-laravel
+          )"
+          echo "laravel_commit=$laravel_commit" >> "$GITHUB_OUTPUT"
 
       - name: Require successful full corpus at release SHA
         env:
@@ -330,11 +424,13 @@ jobs:
 
       - name: Require external design-partner evidence
         if: steps.release_policy.outputs.requires_design_partner_evidence == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.release_source.outputs.version }}
         run: |
           set -euo pipefail
           php scripts/verify-design-partners.php \
             docs/design-partner-evidence.json \
-            "$GITHUB_REF_NAME" \
+            "$RELEASE_VERSION" \
             "$(git rev-parse HEAD)"
 
       - name: Download native packages
@@ -344,12 +440,11 @@ jobs:
           path: release
           merge-multiple: true
 
-      - name: Verify and publish immutable experimental release
+      - name: Verify immutable release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_ROLE: ${{ steps.release_policy.outputs.release_role }}
-          REQUIRES_DESIGN_PARTNER_EVIDENCE: ${{ steps.release_policy.outputs.requires_design_partner_evidence }}
+          RELEASE_SOURCE_REF: ${{ steps.release_source.outputs.source_ref }}
         run: |
           set -euo pipefail
           cd release
@@ -391,23 +486,85 @@ jobs:
               --repo "$GH_REPO" \
               --signer-workflow "$signer_workflow" \
               --source-digest "$release_sha" \
-              --source-ref "refs/tags/$GITHUB_REF_NAME" \
+              --source-ref "$RELEASE_SOURCE_REF" \
               --deny-self-hosted-runners
           done
           cat ./*.tar.gz.sha256 | LC_ALL=C sort > SHA256SUMS
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists; refusing to replace its assets." >&2
+
+      - name: Promote exact develop SHA to annotated tag
+        if: steps.release_source.outputs.mode == 'promote'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ steps.release_source.outputs.sha }}
+          RELEASE_VERSION: ${{ steps.release_source.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            refs/heads/develop:refs/remotes/origin/develop
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_VERSION" \
+            >/dev/null 2>&1; then
+            echo "Tag $RELEASE_VERSION already exists; refusing to move it." >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists without its tag." >&2
+            exit 1
+          fi
+          tag_object="$(
+            gh api --method POST "repos/$GH_REPO/git/tags" \
+              -f tag="$RELEASE_VERSION" \
+              -f message="Drove $RELEASE_VERSION" \
+              -f object="$RELEASE_SHA" \
+              -f type=commit \
+              --jq .sha
+          )"
+          test -n "$tag_object"
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f ref="refs/tags/$RELEASE_VERSION" \
+            -f sha="$tag_object" \
+            >/dev/null
+          tag="$(
+            gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_VERSION" \
+              --jq .object.sha
+          )"
+          test "$tag" = "$tag_object"
+          test "$(
+            gh api "repos/$GH_REPO/git/tags/$tag_object" --jq .object.sha
+          )" = "$RELEASE_SHA"
+          echo "Created annotated tag $RELEASE_VERSION at $RELEASE_SHA."
+
+      - name: Publish immutable experimental release
+        if: steps.release_source.outputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LARAVEL_COMMIT: ${{ steps.split_laravel.outputs.laravel_commit }}
+          RELEASE_ROLE: ${{ steps.release_policy.outputs.release_role }}
+          RELEASE_VERSION: ${{ steps.release_source.outputs.version }}
+          REQUIRES_DESIGN_PARTNER_EVIDENCE: ${{ steps.release_policy.outputs.requires_design_partner_evidence }}
+        run: |
+          set -euo pipefail
+          cd release
+          release_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          signer_workflow="${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY/.github/workflows/native-release.yml"
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists; refusing to replace its assets." >&2
             exit 1
           fi
           notes="$RUNNER_TEMP/drove-native-release-notes.md"
           {
-            echo "# Drove $GITHUB_REF_NAME"
+            echo "# Drove $RELEASE_VERSION"
             echo
             echo "Experimental alpha release of the independent Drove prepared-state test runner."
             echo
             echo "The four attached native Drover archives target glibc 2.31+ Linux and macOS on x86_64 and ARM64. Alpine and other musl systems are not supported."
             echo
-            echo "Each archive has a SHA-256 checksum, normalized provenance manifest, and GitHub build-provenance attestation. Verify with \`gh attestation verify <archive> --repo $GH_REPO --signer-workflow $signer_workflow --source-digest $release_sha --source-ref refs/tags/$GITHUB_REF_NAME --deny-self-hosted-runners\`."
+            echo "The exact-tree split Laravel develop commit verified before publication was \`$LARAVEL_COMMIT\`. Its identically named tag remains a separate repository promotion."
+            echo
+            echo "Each archive has a SHA-256 checksum, normalized provenance manifest, and GitHub build-provenance attestation. Verify with \`gh attestation verify <archive> --repo $GH_REPO --signer-workflow $signer_workflow --source-digest $release_sha --source-ref refs/tags/$RELEASE_VERSION --deny-self-hosted-runners\`."
             echo
             echo "Bridge Coverage gates PCOV 1.0.12 line coverage only through the Pest/PHPUnit bridge. The native frontend rejects coverage options and does not declare coverage support."
             echo
@@ -423,10 +580,10 @@ jobs:
             echo
             echo "Historical repository tags through v5.0.1 belong to the Pest lineage and are not prior Drove releases."
           } > "$notes"
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_VERSION" \
             --verify-tag \
             --prerelease \
-            --title "Drove $GITHUB_REF_NAME" \
+            --title "Drove $RELEASE_VERSION" \
             --notes-file "$notes" \
             ./*.tar.gz \
             ./*.tar.gz.sha256 \
