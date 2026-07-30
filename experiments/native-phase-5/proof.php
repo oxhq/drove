@@ -273,6 +273,7 @@ try {
 
     $values = [];
     $executorPids = [];
+    $schedulerIntervals = [];
     $processIntervals = [];
     $bodyIntervals = [];
     $queueWaitMs = [];
@@ -303,8 +304,14 @@ try {
         $value = $result['value'];
         $telemetry = $result['telemetry'];
         $pid = $telemetry['pid'] ?? null;
+        $dispatchedNs = $runner === 'drover'
+            ? ($telemetry['dispatched_ns'] ?? null)
+            : ($telemetry['started_ns'] ?? null);
         $startedNs = $telemetry['started_ns'] ?? null;
         $finishedNs = $telemetry['finished_ns'] ?? null;
+        $schedulerCompletedNs = $runner === 'drover'
+            ? ($telemetry['scheduler_completed_ns'] ?? null)
+            : $finishedNs;
         $memory = $telemetry['memory_peak_bytes']
             ?? $result['memory_peak_bytes']
             ?? $value['php_peak_memory_bytes']
@@ -313,9 +320,14 @@ try {
         nativePhaseFiveAssert(
             is_int($pid)
                 && $pid > 0
+                && is_int($dispatchedNs)
                 && is_int($startedNs)
                 && is_int($finishedNs)
+                && is_int($schedulerCompletedNs)
+                && $startedNs >= $dispatchedNs
+                && $finishedNs >= $dispatchedNs
                 && $finishedNs >= $startedNs
+                && $schedulerCompletedNs >= $finishedNs
                 && is_int($memory)
                 && $memory > 0,
             'Native Phase 5 executor telemetry is incomplete.',
@@ -344,6 +356,10 @@ try {
             'semantic' => $value['semantic'],
         ];
         $executorPids[] = $pid;
+        $schedulerIntervals[] = [
+            'started_ns' => $dispatchedNs,
+            'finished_ns' => $schedulerCompletedNs,
+        ];
         $processIntervals[] = [
             'started_ns' => $startedNs,
             'finished_ns' => $finishedNs,
@@ -374,10 +390,13 @@ try {
             && count($uniqueExecutorPids) === $testCount,
         'Native Phase 5 batching or executor PID reuse was observed.',
     );
+    $observedSchedulerLanes = nativePhaseFivePeakConcurrency($schedulerIntervals);
     $observedProcesses = nativePhaseFivePeakConcurrency($processIntervals);
     $observedBodies = nativePhaseFivePeakConcurrency($bodyIntervals);
     nativePhaseFiveAssert(
-        $observedBodies <= $processes && $observedProcesses <= $processes,
+        $observedBodies <= $processes
+            && $observedProcesses <= $processes
+            && $observedSchedulerLanes <= $processes,
         'Native Phase 5 exceeded declared concurrency.',
     );
 
@@ -497,13 +516,17 @@ try {
             'artifact_residue_count' => 0,
         ],
         'telemetry' => [
-            'schema' => 1,
+            'schema' => 2,
             'measurement_sources' => [
                 'topology' => $topologySource,
                 'timings' => 'harness',
                 'timing_observer' => getenv('DROVE_PHASE5_PHASE_FILE') === false
                     ? 'none'
                     : 'procfs-smaps-rollup',
+                'scheduler_lanes' => $runner === 'drover'
+                    ? 'native-dispatch-through-scheduler-completion'
+                    : 'child-start-through-child-finish-reference',
+                'body_lanes' => 'executor-body-intervals',
                 'queue_wait' => 'harness',
                 'phase_timings' => 'harness',
                 'php_memory' => 'php',
@@ -521,11 +544,20 @@ try {
                 'observed_process_lanes' => $observedProcesses,
                 'observed_interval_lanes' => $observedProcesses,
                 'observed_body_lanes' => $observedBodies,
+                'observed_scheduler_lanes' => $observedSchedulerLanes,
                 'scheduler_idle_lane_ratio' => nativePhaseFiveIdleRatio(
-                    $bodyIntervals,
+                    $schedulerIntervals,
                     $processes,
                 ),
                 'scheduler_steady_state_idle_lane_ratio' => nativePhaseFiveSteadyStateIdleRatio(
+                    $schedulerIntervals,
+                    $processes,
+                ),
+                'body_lane_unoccupied_ratio' => nativePhaseFiveIdleRatio(
+                    $bodyIntervals,
+                    $processes,
+                ),
+                'steady_state_body_lane_unoccupied_ratio' => nativePhaseFiveSteadyStateIdleRatio(
                     $bodyIntervals,
                     $processes,
                 ),

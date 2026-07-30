@@ -969,6 +969,8 @@ pub struct ChildRole {
 pub struct Telemetry {
     pub pid: Option<libc::pid_t>,
     pub pgid: Option<libc::pid_t>,
+    pub dispatched_ns: Option<u64>,
+    pub scheduler_completed_ns: Option<u64>,
     pub started_ns: Option<u64>,
     pub finished_ns: Option<u64>,
     pub duration_ms: Option<f64>,
@@ -1057,6 +1059,8 @@ struct ActiveTask {
     stderr: Vec<u8>,
     value_buffer: Vec<u8>,
     state: ExecutorState,
+    dispatched_ns: Option<u64>,
+    scheduler_completed_ns: Option<u64>,
     started_ns: Option<u64>,
     deadline_ns: Option<u64>,
     finished_ns: Option<u64>,
@@ -1110,6 +1114,8 @@ impl ActiveTask {
                 armed_permit: false,
                 task_permits: false,
             },
+            dispatched_ns: None,
+            scheduler_completed_ns: None,
             started_ns: None,
             deadline_ns: None,
             finished_ns: None,
@@ -1178,10 +1184,12 @@ impl ActiveTask {
         };
     }
 
-    fn mark_started(&mut self, started_ns: u64, task_permits: bool) {
+    fn mark_started(&mut self, dispatched_ns: u64, timeout_started_ns: u64, task_permits: bool) {
         self.state = ExecutorState::Running { task_permits };
-        self.deadline_ns = (self.task.timeout_ms > 0)
-            .then(|| started_ns.saturating_add(self.task.timeout_ms.saturating_mul(1_000_000)));
+        self.dispatched_ns = Some(dispatched_ns);
+        self.deadline_ns = (self.task.timeout_ms > 0).then(|| {
+            timeout_started_ns.saturating_add(self.task.timeout_ms.saturating_mul(1_000_000))
+        });
     }
 
     fn mark_start_failed(&mut self) {
@@ -1551,6 +1559,8 @@ impl ActiveTask {
         let telemetry = telemetry(
             Some(self.pid),
             Some(self.pgid),
+            self.dispatched_ns,
+            self.scheduler_completed_ns,
             self.started_ns,
             self.finished_ns,
             exit_code,
@@ -2264,7 +2274,9 @@ impl Scheduler {
 
         for pid in pids {
             if !self.registry.take(GLOBAL_POOL)? {
-                continue;
+                // Every armed executor waits on this same pool, so another
+                // failed read cannot make a later PID startable.
+                break;
             }
 
             let started_ns = match monotonic_ns() {
@@ -2331,7 +2343,7 @@ impl Scheduler {
                     .get_mut(&pid)
                     .expect("pre-armed executor existed while starting");
                 let owned_armed_permit = active.owns_armed_permit();
-                active.mark_started(started_ns, task_permits);
+                active.mark_started(start_attempt_ns, started_ns, task_permits);
 
                 (active.task.kind.clone(), owned_armed_permit)
             };
@@ -2603,7 +2615,9 @@ impl Scheduler {
                 task,
                 "fork_failure",
                 failures.join(" "),
-                telemetry(None, None, None, None, None, None, None, 1, 0, 0, 0),
+                telemetry(
+                    None, None, None, None, None, None, None, None, None, 1, 0, 0, 0,
+                ),
                 Vec::new(),
             ));
 
@@ -2710,7 +2724,7 @@ impl Scheduler {
         }
 
         for pid in ready {
-            if let Some(active) = self.active.remove(&pid) {
+            if let Some(mut active) = self.active.remove(&pid) {
                 if active.registered_nested && active.retired_nested {
                     self.emit_nested_group(NestedGroupOperation::Unregister, pid, active.pgid)?;
                 }
@@ -2723,6 +2737,19 @@ impl Scheduler {
                 if active.owns_armed_permit() {
                     self.release_armed_permit()?;
                 }
+                let lower_bound = [
+                    active.dispatched_ns,
+                    active.started_ns,
+                    active.finished_ns,
+                    active.terminal_received_ns,
+                    active.eof_ns,
+                ]
+                .into_iter()
+                .flatten()
+                .max()
+                .unwrap_or(now_ns);
+                active.scheduler_completed_ns =
+                    Some(monotonic_ns().unwrap_or(now_ns).max(lower_bound));
                 self.completed.push_back(active.into_result());
             }
         }
@@ -3377,6 +3404,8 @@ fn signal_process_group(pgid: libc::pid_t, signal: i32) -> Result<(), io::Error>
 fn telemetry(
     pid: Option<libc::pid_t>,
     pgid: Option<libc::pid_t>,
+    dispatched_ns: Option<u64>,
+    scheduler_completed_ns: Option<u64>,
     started_ns: Option<u64>,
     finished_ns: Option<u64>,
     exit_code: Option<i32>,
@@ -3396,6 +3425,8 @@ fn telemetry(
     Telemetry {
         pid,
         pgid,
+        dispatched_ns,
+        scheduler_completed_ns,
         started_ns,
         finished_ns,
         duration_ms,
@@ -3411,6 +3442,8 @@ fn telemetry(
 
 fn empty_telemetry(interrupted_signal: Option<i32>) -> Telemetry {
     telemetry(
+        None,
+        None,
         None,
         None,
         None,
@@ -3820,6 +3853,14 @@ mod tests {
         };
 
         assert_eq!(result.status, "passed", "{:?}", result.failure);
+        let telemetry = &result.telemetry;
+        let dispatched_ns = telemetry.dispatched_ns.unwrap();
+        let started_ns = telemetry.started_ns.unwrap();
+        let finished_ns = telemetry.finished_ns.unwrap();
+        let scheduler_completed_ns = telemetry.scheduler_completed_ns.unwrap();
+        assert!(dispatched_ns <= started_ns);
+        assert!(started_ns <= finished_ns);
+        assert!(finished_ns <= scheduler_completed_ns);
         assert_eq!(scheduler.topology().forks, 1);
         assert_eq!(
             current_signal_handler(libc::SIGPIPE),
@@ -3919,9 +3960,10 @@ mod tests {
         assert!(active.deadline_ns.is_none());
         assert!(!active.owns_task_permits());
 
-        active.mark_started(1_000_000, true);
+        active.mark_started(900_000, 1_000_000, true);
 
         assert!(active.running());
+        assert_eq!(active.dispatched_ns, Some(900_000));
         assert_eq!(active.deadline_ns, Some(26_000_000));
         assert!(active.owns_task_permits());
     }
@@ -3986,7 +4028,7 @@ mod tests {
             libc::close(sockets[1]);
         }
         let mut active = ActiveTask::new(task, pid, pid, sockets[0], stale_ns, run_id, false);
-        active.mark_started(stale_ns, false);
+        active.mark_started(stale_ns, stale_ns, false);
         let deadline_ns = monotonic_ns().unwrap() + PROCESS_BOUNDARY_TIMEOUT_NS;
 
         while !active.eof || active.started_ns.is_none() {
@@ -4029,6 +4071,7 @@ mod tests {
             libc::close(active.fd);
         }
         let result = active.into_result();
+        assert_eq!(result.telemetry.dispatched_ns, Some(stale_ns));
         assert_eq!(result.status, "failed");
         assert_eq!(
             result.failure.as_ref().unwrap()["kind"],
@@ -4935,6 +4978,7 @@ mod tests {
         assert!(active.protocol_error.is_none());
         assert_eq!(active.stdout.len(), 2_097_152);
         assert!(active.terminal.is_some());
+        assert!(active.terminal_received_ns.unwrap() >= active.finished_ns.unwrap());
 
         drop(file);
         std::fs::remove_file(path).unwrap();
@@ -5189,7 +5233,7 @@ mod tests {
                 "bounded-collection-run",
                 false,
             );
-            active.mark_started(1, true);
+            active.mark_started(1, 1, true);
             active.exited = true;
             active.reaped = true;
             active.wait_status = Some(0);
@@ -6138,6 +6182,8 @@ mod tests {
     fn counts_a_pre_readiness_fork_without_a_typed_worker() {
         let (scope_workers, executor_workers) = worker_counts("test", false);
         let telemetry = telemetry(
+            None,
+            None,
             None,
             None,
             None,

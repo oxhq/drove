@@ -26,11 +26,14 @@ Measurements name their source:
 - Independent-work timings run without an external observer. Their summaries
   declare `timing_observer=none`, retain kernel topology and harness isolation
   evidence, and deliberately omit aggregate `/proc` memory telemetry.
-- The raw idle ratio spans the first body start through the final body finish
-  and remains a diagnostic. The independent-work gate uses a steady-state
-  window from the Cth body start through the first finish that leaves fewer
-  than C unfinished bodies. Every interval is clipped to that window, so all
-  inter-wave gaps still count; only initial ramp and final drain are excluded.
+- Telemetry schema 2 derives scheduler idle from occupancy intervals spanning
+  native dispatch through scheduler completion after held permits are released.
+  Result serialization, IPC, cleanup, and host delay while a lane remains
+  unavailable therefore stay occupied rather than being misclassified as idle.
+  The steady-state window runs from the Cth dispatch through the first scheduler
+  completion that leaves fewer than C unfinished tasks. Body-lane occupancy
+  remains a separate diagnostic that includes the full executor pipeline and
+  host scheduling.
 - A Linux `/proc` monitor reports aggregate and per-process RSS and PSS, swap,
   live PIDs, phase-specific peaks, and cgroup OOM deltas. PSS comes from
   `smaps_rollup` so shared prepared pages are not counted once per fork. Child
