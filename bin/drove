@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 
+use Drove\Native\Command;
 use Drove\Pest\Runner;
 
 $proxyAutoload = $GLOBALS['_composer_autoload_path'] ?? null;
@@ -26,12 +27,20 @@ while (! file_exists($rootPath.'/composer.json')) {
     $parent = dirname($rootPath);
 
     if ($parent === $rootPath) {
-        fwrite(STDERR, "Drove could not locate the Composer project root.".PHP_EOL);
+        fwrite(STDERR, 'Drove could not locate the Composer project root.'.PHP_EOL);
 
         exit(2);
     }
 
     $rootPath = $parent;
+}
+
+if (in_array('--native', $_SERVER['argv'], true)) {
+    $arguments = array_slice($_SERVER['argv'], 1);
+    $native = array_search('--native', $arguments, true);
+    unset($arguments[$native]);
+
+    exit(Command::main(array_values($arguments), $rootPath));
 }
 
 exit(Runner::main($_SERVER['argv'], $rootPath));

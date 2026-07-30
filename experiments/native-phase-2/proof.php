@@ -2,6 +2,12 @@
 
 declare(strict_types=1);
 
+use Drove\Console\Renderer;
+use Drove\Extension\CliInput;
+use Drove\Extension\CliOptionDefinition;
+use Drove\Extension\CliOptionType;
+use Drove\Extension\CliResult;
+use Drove\Extension\Contracts\CliOption;
 use Drove\Extension\Contracts\Reporter;
 use Drove\Extension\ContributionKind;
 use Drove\Extension\Diagnostic;
@@ -10,11 +16,13 @@ use Drove\Extension\ExtensionException;
 use Drove\Extension\ExtensionSet;
 use Drove\Extension\Loader;
 use Drove\Extension\PlanView;
+use Drove\Extension\RegisteredExtension;
 use Drove\Extension\Registry;
 use Drove\Extension\RunSummary;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\PcntlScheduler;
 use Drove\Kernel\Scheduler;
+use Drove\Native\Command;
 use Drove\Native\DeclarationRegistry;
 use Drove\Native\Declarations;
 use Drove\Native\Runner;
@@ -434,6 +442,89 @@ try {
             && $cliOptions[0]['definition']->longName === 'phase-label',
         'The typed CLI contribution was not exposed to the parser in deterministic order.',
     );
+    $command = new Command;
+    $commandOptions = new ReflectionMethod($command, 'options');
+    $parsedOptions = $commandOptions->invoke($command, [
+        '--processes=30',
+        '--phase-label=requested',
+        '--group=fast',
+        'tests',
+    ], $extensions);
+    $assert(
+        $parsedOptions['processes'] === 30
+            && $parsedOptions['groups'] === ['fast']
+            && $parsedOptions['paths'] === ['tests']
+            && $parsedOptions['extension_values'] === [[
+                'owner' => 'proof/alpha',
+                'key' => 'label',
+                'value' => 'requested',
+            ]],
+        'The native command did not parse its typed extension option.',
+    );
+    $commandHelp = new ReflectionMethod($command, 'help');
+    $assert(
+        str_contains(
+            $commandHelp->invoke($command, $extensions),
+            '  --phase-label=VALUE    Print the configured Phase 2 label.',
+        ),
+        'Native help omitted the installed extension option.',
+    );
+    $commandOutput = new ReflectionMethod($command, 'extensionCliOutput');
+    $assert(
+        $commandOutput->invoke($command, [[
+            'owner' => 'proof/alpha',
+            'key' => 'label',
+            'output' => "blue:requested\nTests: forged",
+        ]]) === implode(PHP_EOL, [
+            'Extension option output:',
+            ' [proof/alpha:label]',
+            '   option | blue:requested',
+            '   option | Tests: forged',
+            '',
+            '',
+        ]),
+        'Native extension CLI output was not isolated from the run summary.',
+    );
+    $coreCollision = new ExtensionSet([
+        new RegisteredExtension(
+            $byId['proof/alpha'],
+            hash('sha256', 'core-collision'),
+            [],
+            [],
+            [],
+            [],
+            [],
+            [
+                'core-collision' => new class implements CliOption
+                {
+                    public function definition(): CliOptionDefinition
+                    {
+                        return new CliOptionDefinition(
+                            'processes',
+                            'Must collide with Drove.',
+                            CliOptionType::Integer,
+                        );
+                    }
+
+                    public function execute(CliInput $input): CliResult
+                    {
+                        return new CliResult((string) $input->value);
+                    }
+                },
+            ],
+        ),
+    ]);
+    $coreCollisionRejected = false;
+
+    try {
+        $commandHelp->invoke($command, $coreCollision);
+    } catch (InvalidArgumentException $exception) {
+        $coreCollisionRejected = $exception->getMessage()
+            === 'Extension proof/alpha CLI option --processes conflicts with Drove.';
+    }
+
+    $assert($coreCollisionRejected, 'An extension CLI option shadowed a core Drove option.');
+    $cliFrontDoorChecked = true;
     $contractFiles = glob($rootPath.'/src/Drove/Extension/Contracts/*.php');
 
     if ($contractFiles === false || $contractFiles === []) {
@@ -553,6 +644,19 @@ try {
         ],
         'Typed reporters did not receive the native run summary in deterministic order.',
     );
+    $renderedRun = (new Renderer)->render($run);
+    $assert(
+        str_contains($renderedRun, implode(PHP_EOL, [
+            'Extension reports:',
+            ' [proof/alpha:summary]',
+            '   report | passed:32',
+            ' [proof/zeta:summary]',
+            '   report | zeta:passed',
+        ]))
+            && str_contains($renderedRun, 'Tests: 32 passed (32)'),
+        'Extension reports were not rendered separately from native result semantics.',
+    );
+    $reporterRenderingChecked = true;
     $observedConcurrency = $run['observed_concurrency']['global'] ?? null;
     $assert(
         $observedConcurrency === ($forked ? min($processes, 32) : 1),
@@ -652,6 +756,8 @@ try {
         'contract_authority_guard_checked' => true,
         'fixture_dependency_guard_checked' => true,
         'cli_collision_checked' => true,
+        'cli_front_door_checked' => $cliFrontDoorChecked,
+        'reporter_rendering_checked' => $reporterRenderingChecked,
         'internal_type_error_classification_checked' => true,
         'typed_contributions_checked' => array_map(
             static fn (ContributionKind $kind): string => $kind->value,

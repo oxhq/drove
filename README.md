@@ -104,6 +104,9 @@ for passing, failing, and explicitly unsupported input.
 
 See [`docs/migration-from-pest.md`](docs/migration-from-pest.md) for source
 installation, the compatibility matrix, and declared limitations.
+The independent [`native DSL`](docs/native-dsl.md) is the forward product
+surface; it lowers directly to Scope IR without generated Pest or PHPUnit
+cases.
 
 ## Laravel alpha
 

@@ -27,7 +27,7 @@ final class DeclarationRegistry
      *         after_each: list<string>,
      *         after_all: list<string>
      *     },
-     *     tests: list<array<string, mixed>>,
+     *     tests: list<string>,
      *     children: list<string>
      * }>
      */
@@ -42,13 +42,30 @@ final class DeclarationRegistry
     /** @var list<string> */
     private array $scopeStack = [];
 
-    /** @var array<string, Closure> */
-    private array $tests = [];
+    /** @var array<string, TestDefinition> */
+    private array $definitions = [];
+
+    /** @var array<string, array{name: string, source: array{path: string, line: int}}> */
+    private array $testMetadata = [];
+
+    /** @var array<string, CaseDefinition> */
+    private array $cases = [];
 
     /** @var array<string, Closure> */
     private array $hooks = [];
 
+    /** @var array<string, string> */
+    private array $hookPhases = [];
+
+    /** @var array<string, iterable<mixed, mixed>|Closure> */
+    private array $datasets = [];
+
+    /** @var array<string, list<array{key: int|string, arguments: list<mixed>}>> */
+    private array $materializedDatasets = [];
+
     private bool $poisoned = false;
+
+    private bool $frozen = false;
 
     private readonly string $rootPath;
 
@@ -76,31 +93,49 @@ final class DeclarationRegistry
         Closure $body,
         string $sourcePath,
         int $sourceLine,
-    ): void {
+    ): TestDefinition {
         $this->assertHealthy();
+        $this->assertMutable();
         $this->assertDescription($description, 'test');
-        $this->assertNoParameters($body, 'test');
         $sourcePath = $this->canonicalPath($sourcePath);
         $this->assertSourceLine($sourceLine);
         $scopeId = $this->activeScope($sourcePath);
         $id = 'test:'.$scopeId.'::'.rawurlencode($description);
 
-        if (isset($this->tests[$id])) {
+        if (isset($this->definitions[$id])) {
             throw new LogicException(sprintf('Duplicate native test ID %s.', $id));
         }
 
-        $this->tests[$id] = $body;
-        $this->nodes[$scopeId]['tests'][] = [
-            'id' => $id,
+        $definition = new TestDefinition($body);
+        $this->definitions[$id] = $definition;
+        $this->nodes[$scopeId]['tests'][] = $id;
+        $this->testMetadata[$id] = [
             'name' => $description,
-            'source' => [
-                'path' => $sourcePath,
-                'line' => $sourceLine,
-            ],
-            'dataset' => null,
-            'groups' => [],
-            'timeout_ms' => 0,
+            'source' => ['path' => $sourcePath, 'line' => $sourceLine],
         ];
+
+        return $definition;
+    }
+
+    /** @param iterable<mixed, mixed>|Closure $rows */
+    public function declareDataset(string $name, iterable|Closure $rows): void
+    {
+        $this->assertHealthy();
+        $this->assertMutable();
+
+        if (trim($name) === '') {
+            throw new InvalidArgumentException('A named native dataset requires a name.');
+        }
+
+        if (array_key_exists($name, $this->datasets)) {
+            throw new LogicException(sprintf('Duplicate native dataset %s.', $name));
+        }
+
+        if ($rows instanceof Closure && new ReflectionFunction($rows)->getNumberOfParameters() !== 0) {
+            throw new InvalidArgumentException('Native dataset providers do not accept parameters.');
+        }
+
+        $this->datasets[$name] = $rows;
     }
 
     public function declareDescribe(
@@ -110,6 +145,7 @@ final class DeclarationRegistry
         int $sourceLine,
     ): void {
         $this->assertHealthy();
+        $this->assertMutable();
         $this->assertDescription($description, 'describe');
         $this->assertNoParameters($declarations, 'describe');
         $this->assertSourceLine($sourceLine);
@@ -146,6 +182,7 @@ final class DeclarationRegistry
         int $sourceLine,
     ): void {
         $this->assertHealthy();
+        $this->assertMutable();
 
         if (! in_array($phase, ['before_all', 'before_each', 'after_each', 'after_all'], true)) {
             throw new InvalidArgumentException(sprintf('Unknown native hook phase %s.', $phase));
@@ -163,19 +200,22 @@ final class DeclarationRegistry
         }
 
         $this->hooks[$id] = $hook;
+        $this->hookPhases[$id] = $phase;
         $this->nodes[$scopeId]['hooks'][$phase][] = $id;
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function plan(): array
+    public function plan(?Selection $selection = null): array
     {
         $this->assertHealthy();
+        $this->freeze();
+        $this->cases = [];
         $children = [];
 
         foreach ($this->fileOrder as $fileId) {
-            $node = $this->compileNode($fileId);
+            $node = $this->compileNode($fileId, $selection);
 
             if ($node !== null) {
                 $children[] = $node;
@@ -214,7 +254,14 @@ final class DeclarationRegistry
     {
         $this->assertHealthy();
 
-        return $this->tests[$testId] ?? throw new OutOfBoundsException(sprintf(
+        return $this->resolveCase($testId)->body;
+    }
+
+    public function resolveCase(string $testId): CaseDefinition
+    {
+        $this->assertHealthy();
+
+        return $this->cases[$testId] ?? throw new OutOfBoundsException(sprintf(
             'No native test closure was captured for %s.',
             $testId,
         ));
@@ -224,10 +271,16 @@ final class DeclarationRegistry
     {
         $this->assertHealthy();
 
-        return $this->hooks[$hookId] ?? throw new OutOfBoundsException(sprintf(
+        $hook = $this->hooks[$hookId] ?? throw new OutOfBoundsException(sprintf(
             'No native hook closure was captured for %s.',
             $hookId,
         ));
+
+        $phase = $this->hookPhases[$hookId] ?? null;
+
+        return in_array($phase, ['before_each', 'after_each'], true)
+            ? TestContext::wrapHook($hook, $phase)
+            : $hook;
     }
 
     private function activeScope(string $sourcePath): string
@@ -260,7 +313,7 @@ final class DeclarationRegistry
      *         after_each: list<string>,
      *         after_all: list<string>
      *     },
-     *     tests: list<array<string, mixed>>,
+     *     tests: list<string>,
      *     children: list<string>
      * }
      */
@@ -286,7 +339,7 @@ final class DeclarationRegistry
          *         after_each: list<string>,
          *         after_all: list<string>
          *     },
-         *     tests: list<array<string, mixed>>,
+         *     tests: list<string>,
          *     children: list<string>
          * } $node
          */
@@ -296,20 +349,29 @@ final class DeclarationRegistry
     /**
      * @return array<string, mixed>|null
      */
-    private function compileNode(string $id): ?array
+    private function compileNode(string $id, ?Selection $selection): ?array
     {
         $source = $this->nodes[$id];
         $children = [];
+        $tests = [];
 
         foreach ($source['children'] as $childId) {
-            $child = $this->compileNode($childId);
+            $child = $this->compileNode($childId, $selection);
 
             if ($child !== null) {
                 $children[] = $child;
             }
         }
 
-        if ($source['tests'] === [] && $children === []) {
+        foreach ($source['tests'] as $testId) {
+            foreach ($this->compileDefinition($testId) as $test) {
+                if ($selection === null || $selection->includes($test['name'], $test['groups'])) {
+                    $tests[] = $test;
+                }
+            }
+        }
+
+        if ($tests === [] && $children === []) {
             return null;
         }
 
@@ -321,7 +383,7 @@ final class DeclarationRegistry
             'concurrency' => null,
             'timeout_ms' => 0,
             'hooks' => $source['hooks'],
-            'tests' => $source['tests'],
+            'tests' => $tests,
             'children' => $children,
         ];
         if ($source['type'] === 'file') {
@@ -335,6 +397,132 @@ final class DeclarationRegistry
         }
 
         return $node;
+    }
+
+    /**
+     * @return list<array{
+     *     id: string,
+     *     name: string,
+     *     source: array{path: string, line: int},
+     *     dataset: array{key: int|string, label: string}|null,
+     *     groups: list<string>,
+     *     timeout_ms: int,
+     *     disposition: string,
+     *     disposition_reason: string
+     * }>
+     */
+    private function compileDefinition(string $baseId): array
+    {
+        $definition = $this->definitions[$baseId];
+        $metadata = $this->testMetadata[$baseId];
+        $rows = $definition->inlineRows();
+        $datasetName = $definition->datasetName();
+
+        if ($datasetName !== null) {
+            $rows = $this->namedDataset($datasetName);
+        }
+
+        if ($rows === null) {
+            $this->assertBodyArguments($definition->body(), 0, $baseId);
+            $this->cases[$baseId] = new CaseDefinition(
+                $definition->body(),
+                [],
+                $definition->disposition(),
+                $definition->reason(),
+            );
+
+            return [[
+                'id' => $baseId,
+                'name' => $metadata['name'],
+                'source' => $metadata['source'],
+                'dataset' => null,
+                'groups' => $definition->groups(),
+                'timeout_ms' => $definition->timeoutMs(),
+                'disposition' => $definition->disposition(),
+                'disposition_reason' => $definition->reason(),
+            ]];
+        }
+
+        $tests = [];
+
+        foreach ($rows as $row) {
+            $key = $row['key'];
+            $arguments = $row['arguments'];
+            $caseKey = is_int($key)
+                ? 'index:'.$key
+                : 'name:'.rawurlencode($key);
+            $caseId = $baseId.'::dataset:'.$caseKey;
+            $label = is_int($key) ? '#'.$key : $key;
+            $this->assertBodyArguments($definition->body(), count($arguments), $caseId);
+
+            if (isset($this->cases[$caseId])) {
+                throw new LogicException(sprintf('Duplicate native dataset case ID %s.', $caseId));
+            }
+
+            $this->cases[$caseId] = new CaseDefinition(
+                $definition->body(),
+                $arguments,
+                $definition->disposition(),
+                $definition->reason(),
+            );
+            $tests[] = [
+                'id' => $caseId,
+                'name' => $metadata['name'].' ['.$label.']',
+                'source' => $metadata['source'],
+                'dataset' => ['key' => $key, 'label' => $label],
+                'groups' => $definition->groups(),
+                'timeout_ms' => $definition->timeoutMs(),
+                'disposition' => $definition->disposition(),
+                'disposition_reason' => $definition->reason(),
+            ];
+        }
+
+        return $tests;
+    }
+
+    /**
+     * @return list<array{key: int|string, arguments: list<mixed>}>
+     */
+    private function namedDataset(string $name): array
+    {
+        if (isset($this->materializedDatasets[$name])) {
+            return $this->materializedDatasets[$name];
+        }
+
+        $rows = $this->datasets[$name] ?? throw new OutOfBoundsException(sprintf(
+            'Native dataset %s is not defined.',
+            $name,
+        ));
+
+        if ($rows instanceof Closure) {
+            $rows = $rows();
+        }
+
+        if (! is_iterable($rows)) {
+            throw new InvalidArgumentException(sprintf(
+                'Native dataset %s must return an iterable.',
+                $name,
+            ));
+        }
+
+        return $this->materializedDatasets[$name] = TestDefinition::materialize($rows);
+    }
+
+    private function assertBodyArguments(Closure $body, int $count, string $testId): void
+    {
+        $reflection = new ReflectionFunction($body);
+        $accepts = $count >= $reflection->getNumberOfRequiredParameters()
+            && ($reflection->isVariadic() || $count <= $reflection->getNumberOfParameters());
+
+        if (! $accepts) {
+            throw new InvalidArgumentException(sprintf(
+                'Native test %s receives %d dataset arguments, but its closure accepts %d to %s.',
+                $testId,
+                $count,
+                $reflection->getNumberOfRequiredParameters(),
+                $reflection->isVariadic() ? 'many' : (string) $reflection->getNumberOfParameters(),
+            ));
+        }
     }
 
     /**
@@ -435,9 +623,29 @@ final class DeclarationRegistry
     {
         if (new ReflectionFunction($closure)->getNumberOfParameters() !== 0) {
             throw new InvalidArgumentException(sprintf(
-                'Native %s closures do not accept parameters in Phase 1.',
+                'Native %s closures do not accept parameters.',
                 $kind,
             ));
+        }
+    }
+
+    private function freeze(): void
+    {
+        if ($this->frozen) {
+            return;
+        }
+
+        foreach ($this->definitions as $definition) {
+            $definition->freeze();
+        }
+
+        $this->frozen = true;
+    }
+
+    private function assertMutable(): void
+    {
+        if ($this->frozen) {
+            throw new LogicException('Native declarations cannot change after planning.');
         }
     }
 

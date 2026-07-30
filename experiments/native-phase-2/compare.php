@@ -37,6 +37,8 @@ foreach (array_slice($arguments, 1, 6) as $index => $path) {
         || ($summary['contract_authority_guard_checked'] ?? null) !== true
         || ($summary['fixture_dependency_guard_checked'] ?? null) !== true
         || ($summary['cli_collision_checked'] ?? null) !== true
+        || ($summary['cli_front_door_checked'] ?? null) !== true
+        || ($summary['reporter_rendering_checked'] ?? null) !== true
         || ($summary['internal_type_error_classification_checked'] ?? null) !== true
         || ($summary['negotiated_api_versions'] ?? null) !== ['proof/alpha' => 1, 'proof/zeta' => 1]
         || ! is_int($summary['executor_peak_memory_bytes'] ?? null)

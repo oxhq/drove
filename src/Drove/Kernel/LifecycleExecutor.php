@@ -16,7 +16,7 @@ use Throwable;
 final readonly class LifecycleExecutor
 {
     /**
-     * @param  Closure(string): (Closure|array<string, mixed>)  $testResolver
+     * @param  Closure(string, ScopeContext=): (Closure|array<string, mixed>)  $testResolver
      * @param  null|Closure(ScopeContext, list<array<string, mixed>>): void  $beforeDispatch
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $enterDescendant
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $leaveDescendant
@@ -510,7 +510,7 @@ final readonly class LifecycleExecutor
         }
 
         $scopeId = $levels[count($levels) - 1]['id'];
-        ['closure' => $body, 'runtime' => $runtime] = $this->test($testId);
+        ['closure' => $body, 'runtime' => $runtime] = $this->test($testId, $context);
         $events = [$this->event('test.started', $scopeId, $testId, status: 'running')];
         $completed = [];
         $primaryFailure = null;
@@ -640,6 +640,17 @@ final readonly class LifecycleExecutor
                 }
             }
         }
+
+        $deferred = $this->runDeferred(
+            $context,
+            array_column($levels, 'id'),
+            $scopeId,
+            $testId,
+            alreadyPermitted: true,
+        );
+        array_push($events, ...$deferred['events']);
+        array_push($teardownFailures, ...$deferred['failures']);
+        $primaryFailure ??= $deferred['failures'][0] ?? null;
 
         $stdout = '';
 
@@ -894,25 +905,35 @@ final readonly class LifecycleExecutor
         ScopeContext $context,
         array $scopeIds,
         string $scopeId,
+        ?string $testId = null,
+        bool $alreadyPermitted = false,
     ): array {
         $events = [];
         $failures = [];
 
-        $this->scheduler->withPermit($scopeIds, function () use (
+        $drain = function () use (
             $context,
             $scopeId,
+            $testId,
             &$events,
             &$failures,
         ): void {
             foreach ($context->drainDeferred() as $ordinal => $cleanup) {
                 $hookId = sprintf('defer:%s:%d', $scopeId, $ordinal);
-                $events[] = $this->event('hook.started', $scopeId, hookId: $hookId, phase: 'defer');
+                $events[] = $this->event(
+                    'hook.started',
+                    $scopeId,
+                    testId: $testId,
+                    hookId: $hookId,
+                    phase: 'defer',
+                );
 
                 try {
                     $this->invoke($cleanup, $context);
                     $events[] = $this->event(
                         'hook.finished',
                         $scopeId,
+                        testId: $testId,
                         hookId: $hookId,
                         phase: 'defer',
                         status: 'passed',
@@ -923,6 +944,7 @@ final readonly class LifecycleExecutor
                     $events[] = $this->event(
                         'hook.finished',
                         $scopeId,
+                        testId: $testId,
                         hookId: $hookId,
                         phase: 'defer',
                         status: 'failed',
@@ -930,7 +952,13 @@ final readonly class LifecycleExecutor
                     );
                 }
             }
-        });
+        };
+
+        if ($alreadyPermitted) {
+            $drain();
+        } else {
+            $this->scheduler->withPermit($scopeIds, $drain);
+        }
 
         return ['events' => $events, 'failures' => $failures];
     }
@@ -1045,9 +1073,9 @@ final readonly class LifecycleExecutor
     /**
      * @return array{closure: Closure, runtime: ?object}
      */
-    private function test(string $id): array
+    private function test(string $id, ScopeContext $context): array
     {
-        $test = ($this->testResolver)($id);
+        $test = ($this->testResolver)($id, $context);
 
         if ($test instanceof Closure) {
             return ['closure' => $test, 'runtime' => null];

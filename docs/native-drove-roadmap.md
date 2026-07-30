@@ -48,7 +48,7 @@ The following invariants apply to every feature declared supported:
 | --- | --- | --- |
 | 1. Native frontend vertical slice | **IMPLEMENTED — HOSTED GATE PENDING** | Local and Linux C1/C4 proofs pass; required artifacts have not yet been observed and accepted upstream |
 | 2. Typed extension front door | **IMPLEMENTED — HOSTED GATE PENDING** | Local Linux C1–C30 parity passes; required artifacts have not yet been observed and accepted upstream |
-| 3. Native DSL feature surface | PENDING | Declared DSL conformance matrix passes at every declared concurrency |
+| 3. Native DSL feature surface | **IMPLEMENTED — HOSTED GATE PENDING** | Local Drover C1–C30 parity and repeated 10,000-case C30 stress pass; required hosted artifact has not yet been observed upstream |
 | 4. Native Laravel prepared runtime | PENDING | Laravel fixture proves prepared boot and sibling resource isolation |
 | 5. Bounded one-fork execution | PENDING | Declared-concurrency topology, telemetry, reliability, and performance gates pass |
 | 6. Bridges and migration corpus | PENDING | Classified bridge parity ladder passes, ending with Filament |
@@ -74,15 +74,16 @@ Deliverables:
   `Pest\Kernel`, PHPUnit `runBare()`, or Testbench lifecycle calls.
 - A Drove-only proof bootstrap that does not load the root Composer vendor tree,
   Pest frontend files, or Pest/PHPUnit runtime classes.
-- Native declarations accept zero-parameter closures only. Test bodies,
-  `beforeEach`, and `afterEach` execute with `$this` bound to one Drove-owned
-  `TestContext` per case. `beforeAll` and `afterAll` are scope hooks and receive
-  neither `$this`, `TestContext`, nor a kernel context.
+- Native declarations without a dataset accept zero-parameter closures. Test
+  bodies, `beforeEach`, and `afterEach` execute with `$this` bound to one
+  Drove-owned `TestContext` per case. `beforeAll` and `afterAll` are scope hooks
+  and receive neither `$this`, `TestContext`, nor a kernel context.
 - Drove-owned identity and equality assertions whose failures are classified
   by the kernel without a PHPUnit assertion object.
-- A dependency guard that fails when `src/Drove/Native` references Pest,
-  PHPUnit, or Testbench. Package extraction and removal of compatibility
-  dependencies from the root manifest remain later work.
+- A dependency guard that fails when `src/Drove/Native` imports or invokes
+  Pest, PHPUnit, or Testbench runtime names. Stable scanner diagnostics may
+  name rejected bridge syntax as inert data. Package extraction and removal of
+  compatibility dependencies from the root manifest remain later work.
 
 Exit gates:
 
@@ -91,9 +92,9 @@ Exit gates:
 - Repeated capture from at least two working directories, using the same
   explicit suite root, emits identical Scope IR, portable plan IDs, source
   paths, and source lines.
-- The shared declaration guard rejects parameters on native closures before
-  execution. Per-case closures prove their `$this` binding, while scope hooks
-  run through an unbound, zero-argument wrapper.
+- The shared declaration guard rejects parameters on native closures without
+  a dataset before execution. Per-case closures prove their `$this` binding,
+  while scope hooks run through an unbound, zero-argument wrapper.
 - The native proof process loads only Drove source plus its fixture; bridge
   frontend/bootstrap files and project vendor code remain absent.
 - Linux forked runs at C1 and C4 have identical plan and semantic hashes. The
@@ -178,11 +179,28 @@ Exit gates:
 - Every positive and negative case in the declared conformance matrix passes;
   unsupported cases are rejected before any test body runs.
 - Dataset IDs, hook traces, assertion counts, output, and exit codes are
-  identical at C1, C2, C4, C8, C16, and C30.
+  identical through the product Drover scheduler at C1, C2, C4, C8, C16, and
+  C30.
 - A 10,000-test stress fixture completes without lost results, duplicate IDs,
   leaked deferred cleanup, or cross-test memory mutation.
 - CLI help and native documentation contain only behavior covered by the
   conformance matrix.
+
+Current local evidence is diagnostic until the hosted gate runs. The
+conformance fixture produced 49 terminal results, 47 runnable cases, 46
+assertions, and 35 cleanups with identical semantic hashes at C1–C30. Two
+Drover C30 stress runs each produced 10,000 passes, assertions, cleanups, and
+unique executor PIDs with no batching. Their wall times were 13,356.081 ms and
+13,603.965 ms; the first reported a 370,233,344-byte parent peak and a
+71,303,168-byte maximum executor sample under the explicit 512 MiB stress
+limit.
+
+The same large fixture is not a supported `PcntlScheduler` claim. A flat
+PCNTL run lost three leaf executors to signal 11, and a later frozen sharded
+run still produced a terminal failure. Small PCNTL conformance remains useful
+diagnostic coverage, but Drover's native child `_exit` boundary is the product
+gate. Bounded plan/result memory and PCNTL large-suite teardown remain Phase 5
+work.
 
 ## Phase 4 — Native Laravel prepared runtime
 
@@ -224,6 +242,9 @@ Deliverables:
 - Lazy, bounded scheduling: inactive sibling scopes own no executor, process
   anchor, or prepared resource branch; prepared-but-not-running branches are
   capped at twice the requested test processes.
+- The 10,000-case gate must no longer require a 512 MiB PHP limit: plan and
+  result retention must fit the declared bound without relying on fixture
+  sharding to protect PHP request teardown.
 - No batch mode. Each executor receives one test, emits one terminal result,
   and exits.
 - Versioned telemetry for planning, environment preparation, execution,

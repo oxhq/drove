@@ -16,6 +16,8 @@ final readonly class Expectation
 
     public function toBe(mixed $expected): self
     {
+        TestContext::recordAssertion();
+
         if ($this->value !== $expected) {
             throw new AssertionFailed(sprintf(
                 'Failed asserting that %s is identical to %s.',
@@ -29,6 +31,8 @@ final readonly class Expectation
 
     public function toEqual(mixed $expected): self
     {
+        TestContext::recordAssertion();
+
         if ($this->value != $expected) {
             throw new AssertionFailed(sprintf(
                 'Failed asserting that %s equals %s.',

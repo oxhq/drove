@@ -93,12 +93,15 @@ try {
             );
         },
         $rootPath,
-    );
+    )->plan();
 } catch (InvalidArgumentException) {
     $parameterRejected = true;
 }
 
-$assert($parameterRejected, 'Native Phase 1 accepted a parameterized test closure.');
+$assert(
+    $parameterRejected,
+    'Native planning accepted a parameterized test closure without a dataset.',
+);
 $poisoned = Declarations::capture(
     static function (): void {
         try {
@@ -177,9 +180,27 @@ foreach ($nativeFiles as $file) {
         throw new RuntimeException(sprintf('Could not inspect %s.', $file));
     }
 
-    foreach (['Pest\\', 'PHPUnit\\', 'Testbench', '__destruct'] as $forbidden) {
+    $names = array_map(
+        static fn (array $token): string => $token[1],
+        array_filter(
+            token_get_all($source),
+            static fn (mixed $token): bool => is_array($token) && in_array(
+                $token[0],
+                [T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED, T_NAME_RELATIVE, T_STRING],
+                true,
+            ),
+        ),
+    );
+
+    foreach (['Pest', 'PHPUnit', 'Testbench', '__destruct'] as $forbidden) {
         $assert(
-            stripos($source, $forbidden) === false,
+            ! array_any(
+                $names,
+                static fn (string $name): bool => preg_match(
+                    sprintf('~(?:^|\\\\)%s(?:\\\\|$)~i', preg_quote($forbidden, '~')),
+                    $name,
+                ) === 1,
+            ),
             sprintf('%s imports or references forbidden bridge surface %s.', $file, $forbidden),
         );
     }
