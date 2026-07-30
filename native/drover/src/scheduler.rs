@@ -1960,26 +1960,42 @@ impl Scheduler {
     }
 
     fn spawn_available(&mut self) -> Result<Option<Step>, String> {
-        for index in 0..self.pending.len() {
-            let permit_names = &self
-                .pending
-                .get(index)
-                .expect("pending index came from its length")
-                .permit_names;
+        let mut spawned = false;
 
-            if !self.registry.try_acquire(permit_names)? {
-                continue;
+        loop {
+            let mut reserved = None;
+
+            for index in 0..self.pending.len() {
+                let permit_names = &self
+                    .pending
+                    .get(index)
+                    .expect("pending index came from its length")
+                    .permit_names;
+
+                if self.registry.try_acquire(permit_names)? {
+                    reserved = Some(index);
+
+                    break;
+                }
             }
 
+            let Some(index) = reserved else {
+                return Ok(spawned.then_some(Step::Progress));
+            };
             let task = self
                 .pending
                 .remove(index)
                 .expect("pending task existed while reserving permits");
+            let permit_bearing = !task.permit_names.is_empty();
+            let active = self.active.len();
+            let step = self.spawn(task)?;
 
-            return self.spawn(task).map(Some);
+            if !matches!(step, Step::Progress) || self.active.len() == active || !permit_bearing {
+                return Ok(Some(step));
+            }
+
+            spawned = true;
         }
-
-        Ok(None)
     }
 
     fn spawn(&mut self, task: Task) -> Result<Step, String> {
@@ -3968,6 +3984,96 @@ mod tests {
 
         scheduler.cancel().unwrap();
         assert!(scheduler.pending.is_empty());
+    }
+
+    #[test]
+    fn fills_every_available_lane_before_returning_to_the_parent() {
+        let engine = Engine::new(
+            "multi-lane-refill-run".into(),
+            3,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(6).unwrap();
+
+        for id in ["task:first", "task:second", "task:third"] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "test".into(),
+                    "scope:root".into(),
+                    vec!["scope:root".into()],
+                    1_000,
+                    true,
+                )
+                .unwrap();
+        }
+
+        match scheduler.step().unwrap() {
+            Step::Child(_) => loop {
+                unsafe {
+                    libc::pause();
+                }
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover did not fill every available lane")
+            }
+        }
+
+        assert_eq!(scheduler.forks, 3);
+        assert_eq!(scheduler.active_count(), 3);
+        assert_eq!(scheduler.max_active(), 3);
+        assert!(scheduler.pending.is_empty());
+
+        for pid in scheduler.active.keys().copied() {
+            assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+        }
+
+        scheduler.cancel().unwrap();
+    }
+
+    #[test]
+    fn returns_after_one_permit_free_scope_host_fork() {
+        let engine = Engine::new(
+            "scope-host-refill-run".into(),
+            3,
+            HashMap::new(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        let mut scheduler = engine.scheduler(6).unwrap();
+
+        for id in ["scope:first", "scope:second", "scope:third"] {
+            scheduler
+                .submit(
+                    id.into(),
+                    "scope".into(),
+                    id.into(),
+                    vec![id.into()],
+                    1_000,
+                    false,
+                )
+                .unwrap();
+        }
+
+        match scheduler.step().unwrap() {
+            Step::Child(_) => loop {
+                unsafe {
+                    libc::pause();
+                }
+            },
+            Step::Progress => {}
+            Step::Result(_) | Step::Done => {
+                panic!("Drover did not return after the first scope host fork")
+            }
+        }
+
+        assert_eq!(scheduler.forks, 1);
+        assert_eq!(scheduler.active_count(), 1);
+        assert_eq!(scheduler.pending.len(), 2);
+        scheduler.cancel().unwrap();
     }
 
     #[test]

@@ -377,6 +377,10 @@ final class DroverScheduler implements Scheduler
                     $peakOutstanding = max($peakOutstanding, $outstanding);
                 }
 
+                if ($this->consumeCancellationRequest()) {
+                    throw new RuntimeException('Drove explicit cancellation requested.');
+                }
+
                 $role = $this->ffi->drover_map_step($map, \FFI::addr($action));
                 pcntl_signal_dispatch();
 
