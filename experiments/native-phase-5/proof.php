@@ -501,6 +501,9 @@ try {
             'measurement_sources' => [
                 'topology' => $topologySource,
                 'timings' => 'harness',
+                'timing_observer' => getenv('DROVE_PHASE5_PHASE_FILE') === false
+                    ? 'none'
+                    : 'procfs-smaps-rollup',
                 'queue_wait' => 'harness',
                 'phase_timings' => 'harness',
                 'php_memory' => 'php',

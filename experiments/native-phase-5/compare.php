@@ -137,12 +137,34 @@ try {
     /**
      * @param  array<string, mixed>  $summary
      */
-    $validateDirect = static function (array $summary) use (
+    $validateDirect = static function (
+        array $summary,
+        bool $expectMonitor = true,
+    ) use (
         $validateIdentity,
         $validateMonitor,
     ): void {
         $validateIdentity($summary);
-        $validateMonitor($summary);
+        $telemetry = $summary['telemetry'] ?? null;
+        $measurementSources = is_array($telemetry)
+            ? ($telemetry['measurement_sources'] ?? null)
+            : null;
+
+        if ($expectMonitor) {
+            $validateMonitor($summary);
+        }
+
+        nativePhaseFiveAssert(
+            is_array($measurementSources)
+                && ($measurementSources['topology'] ?? null) === 'kernel'
+                && ($measurementSources['timings'] ?? null) === 'harness'
+                && ($measurementSources['queue_wait'] ?? null) === 'harness'
+                && ($measurementSources['phase_timings'] ?? null) === 'harness'
+                && ($expectMonitor
+                    || (($measurementSources['timing_observer'] ?? null) === 'none'
+                        && ! array_key_exists('process_monitor', $telemetry))),
+            'Native Phase 5 direct measurement boundary is invalid.',
+        );
         $tests = $summary['test_count'] ?? null;
         $topology = $summary['telemetry']['topology'] ?? null;
         nativePhaseFiveAssert(
@@ -281,23 +303,45 @@ try {
     );
 
     $independent = [];
+    $independentSemanticHashes = [];
 
     foreach ([1, 16, 30] as $processCount) {
         for ($repetition = 1; $repetition <= 3; $repetition++) {
             $summary = $read('independent-c'.$processCount.'-r'.$repetition);
-            $validateDirect($summary);
+            $validateDirect($summary, false);
+            $executionMs = $summary['telemetry']['timings_ms']['execution'] ?? null;
+            $wallMs = $summary['telemetry']['timings_ms']['wall'] ?? null;
+            $semanticHash = $summary['semantic_hash'] ?? null;
             nativePhaseFiveAssert(
                 ($summary['fixture'] ?? null) === 'independent'
                     && ($summary['processes'] ?? null) === $processCount
+                    && ($summary['repetition'] ?? null) === $repetition
                     && ($summary['test_count'] ?? null) === 300
+                    && is_string($semanticHash)
+                    && preg_match('/\A[a-f0-9]{64}\z/D', $semanticHash) === 1
+                    && ($summary['telemetry']['scheduler']['observed_process_lanes'] ?? null)
+                        === $processCount
+                    && ($summary['telemetry']['scheduler']['observed_body_lanes'] ?? null)
+                        === $processCount
+                    && (is_int($executionMs) || is_float($executionMs))
+                    && $executionMs > 0
+                    && (is_int($wallMs) || is_float($wallMs))
+                    && $wallMs > 0
+                    && $wallMs >= $executionMs
                     && ($summary['telemetry']['scheduler']['scheduler_idle_lane_ratio'] ?? 1) < 0.05,
                 'Native Phase 5 independent-work utilization gate failed.',
             );
             $independent[$processCount][] = $summary;
+            $independentSemanticHashes[] = $semanticHash;
             $all[] = $summary;
         }
     }
 
+    nativePhaseFiveAssert(
+        count($independentSemanticHashes) === 9
+            && count(array_unique($independentSemanticHashes)) === 1,
+        'Native Phase 5 independent-work semantic hashes diverged.',
+    );
     $independentMedians = [];
 
     foreach ($independent as $processCount => $samples) {
@@ -689,6 +733,7 @@ try {
             'scope_host_peak' => 'scope-worker-started-finished-intervals',
             'procfs_process_population' => 'root-plus-all-descendants',
             'phase_timings' => 'instrumented-harness',
+            'performance_timing' => 'observer-free-harness-no-procfs-monitor',
             'aggregate_memory' => 'linux-procfs-rss-and-smaps-rollup-pss',
             'stable_process_snapshot' => 'shared-phase-lock-and-identical-pid-set-before-after',
             'inactive_scope_memory_gate' => 'three-pair-median-raw-peak-population-pss',
@@ -726,6 +771,7 @@ try {
             'setup_speedup' => round($setupReferenceMedian / $setupDroverMedian, 6),
             'independent_median_ms' => $independentMedians,
             'independent_c1_c30_speedup' => round($speedup, 6),
+            'independent_procfs_monitor_absent' => true,
             'dsl_stress_10000_256m_unsharded' => true,
             'fault_injections' => 300,
             'signal_interruption_checked' => true,

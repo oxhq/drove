@@ -58,12 +58,16 @@ done
 
 for processes in 1 16 30; do
     for repetition in 1 2 3; do
-        run_direct \
-            "independent-c$processes-r$repetition" \
-            independent \
-            drover \
-            "$processes" \
-            "$repetition"
+        name="independent-c$processes-r$repetition"
+        env -u DROVE_PHASE5_PHASE_FILE \
+        -u DROVE_PHASE5_POPULATION_ACK_FILE \
+        DROVE_PHASE5_FIXTURE=independent \
+        DROVE_PHASE5_RUNNER=drover \
+        DROVE_PHASE5_PROCESSES="$processes" \
+        DROVE_PHASE5_REPETITION="$repetition" \
+        DROVE_PHASE5_WORKSPACE="$work_root/$name" \
+            php -d ffi.enable=true experiments/native-phase-5/proof.php \
+            >"$artifact_dir/$name.json"
     done
 done
 
