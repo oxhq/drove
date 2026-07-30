@@ -26,7 +26,7 @@ final class Artifact
 
     private bool $written = false;
 
-    /** @var array{sha256: string, tests: int, scopes: int, environment: ?array<string, mixed>}|null */
+    /** @var array{sha256: string, tests: int, scopes: int, environment: ?array<string, mixed>, extensions: ?array<string, mixed>}|null */
     private ?array $plan = null;
 
     /**
@@ -107,6 +107,7 @@ final class Artifact
             'tests' => $this->countNodes($plan, 'tests'),
             'scopes' => $this->countScopes($plan),
             'environment' => $this->environmentProjection($plan),
+            'extensions' => $this->extensionProjection($plan),
         ];
     }
 
@@ -443,6 +444,50 @@ final class Artifact
             'coordination' => $environment['coordination'],
             'resources' => $resources,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $plan
+     * @return array{schema: 1, extensions: list<array{id: string, api_version: int}>}|null
+     */
+    private function extensionProjection(array $plan): ?array
+    {
+        $metadata = $plan['root']['metadata']['extensions'] ?? null;
+
+        if (! is_array($metadata)
+            || ($metadata['schema'] ?? null) !== 1
+            || ! is_array($metadata['extensions'] ?? null)
+            || ! array_is_list($metadata['extensions'])) {
+            return null;
+        }
+
+        $extensions = [];
+
+        foreach ($metadata['extensions'] as $extension) {
+            if (! is_array($extension)
+                || ! is_string($extension['id'] ?? null)
+                || preg_match(
+                    '~^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$~D',
+                    $extension['id'],
+                ) !== 1
+                || ! is_int($extension['api_version'] ?? null)
+                || $extension['api_version'] < 1) {
+                return null;
+            }
+
+            if (isset($extensions[$extension['id']])) {
+                return null;
+            }
+
+            $extensions[$extension['id']] = [
+                'id' => $extension['id'],
+                'api_version' => $extension['api_version'],
+            ];
+        }
+
+        ksort($extensions, SORT_STRING);
+
+        return ['schema' => 1, 'extensions' => array_values($extensions)];
     }
 
     /**

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drove\Native;
 
 use Closure;
+use Drove\Extension\ExtensionSet;
+use Drove\Extension\PlanView;
 use InvalidArgumentException;
 use LogicException;
 use OutOfBoundsException;
@@ -50,9 +52,12 @@ final class DeclarationRegistry
 
     private readonly string $rootPath;
 
+    private readonly ExtensionSet $extensions;
+
     public function __construct(
         string $rootPath,
         private readonly string $suiteName = 'Drove Native',
+        ?ExtensionSet $extensions = null,
     ) {
         if ($suiteName === '') {
             throw new InvalidArgumentException('The native suite name cannot be empty.');
@@ -63,6 +68,7 @@ final class DeclarationRegistry
         }
 
         $this->rootPath = $this->normalizePath($rootPath);
+        $this->extensions = $extensions ?? ExtensionSet::empty();
     }
 
     public function declareTest(
@@ -176,21 +182,32 @@ final class DeclarationRegistry
             }
         }
 
-        return [
-            'schema' => 1,
-            'root' => [
-                'id' => 'suite:root',
-                'type' => 'suite',
-                'name' => $this->suiteName,
-                'metadata' => [],
-                'state_policy' => 'inherit',
-                'concurrency' => null,
-                'timeout_ms' => 0,
-                'hooks' => $this->emptyHooks(),
-                'tests' => [],
-                'children' => $children,
-            ],
+        $root = [
+            'id' => 'suite:root',
+            'type' => 'suite',
+            'name' => $this->suiteName,
+            'metadata' => [],
+            'state_policy' => 'inherit',
+            'concurrency' => null,
+            'timeout_ms' => 0,
+            'hooks' => $this->emptyHooks(),
+            'tests' => [],
+            'children' => $children,
         ];
+
+        if (! $this->extensions->isEmpty()) {
+            [$testCount, $scopeCount] = $this->planCounts($root);
+            $root['metadata']['extensions'] = $this->extensions->planMetadata(
+                new PlanView($this->suiteName, $testCount, $scopeCount),
+            );
+        }
+
+        return ['schema' => 1, 'root' => $root];
+    }
+
+    public function extensions(): ExtensionSet
+    {
+        return $this->extensions;
     }
 
     public function resolveTest(string $testId): Closure
@@ -318,6 +335,31 @@ final class DeclarationRegistry
         }
 
         return $node;
+    }
+
+    /**
+     * @param  array<string, mixed>  $root
+     * @return array{int, int}
+     */
+    private function planCounts(array $root): array
+    {
+        $testCount = 0;
+        $scopeCount = 0;
+        $pending = [$root];
+
+        while ($pending !== []) {
+            $scope = array_pop($pending);
+            $scopeCount++;
+            $tests = $scope['tests'] ?? [];
+            $children = $scope['children'] ?? [];
+            $testCount += is_array($tests) ? count($tests) : 0;
+
+            if (is_array($children)) {
+                array_push($pending, ...$children);
+            }
+        }
+
+        return [$testCount, $scopeCount];
     }
 
     /**

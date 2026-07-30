@@ -47,7 +47,7 @@ The following invariants apply to every feature declared supported:
 | Phase | Status | Exit proof |
 | --- | --- | --- |
 | 1. Native frontend vertical slice | **IMPLEMENTED — HOSTED GATE PENDING** | Local and Linux C1/C4 proofs pass; required artifacts have not yet been observed and accepted upstream |
-| 2. Typed extension front door | PENDING | Typed extensions alter plans only through declared contracts |
+| 2. Typed extension front door | **IMPLEMENTED — HOSTED GATE PENDING** | Local Linux C1–C30 parity passes; required artifacts have not yet been observed and accepted upstream |
 | 3. Native DSL feature surface | PENDING | Declared DSL conformance matrix passes at every declared concurrency |
 | 4. Native Laravel prepared runtime | PENDING | Laravel fixture proves prepared boot and sibling resource isolation |
 | 5. Bounded one-fork execution | PENDING | Declared-concurrency topology, telemetry, reliability, and performance gates pass |
@@ -133,9 +133,13 @@ Deliverables:
 - Deterministic contribution ordering, duplicate-key rejection, and stable
   diagnostic ownership for each extension.
 - CLI contributions consume typed parsed options and return typed results.
-  Extensions receive no raw `argv`, may not terminate the process, and may not
-  register autoload-time side effects.
+  The API exposes neither raw `argv`, process-exit policy, nor autoload
+  callbacks. Discovery rejects extension candidates declared as Composer
+  plugins or with `autoload.files` before loading their entrypoint.
 - No arbitrary event interception or mutation of kernel-owned lifecycle state.
+- Installed extension code is trusted PHP, not a sandbox. Drove constrains the
+  authority exposed by its API; it cannot prevent arbitrary package code from
+  calling global PHP functions outside that contract.
 
 Exit gates:
 
@@ -149,9 +153,9 @@ Exit gates:
   declared concurrency.
 - Duplicate, late, untyped, and incompatible extensions fail before execution
   with stable diagnostic codes.
-- A guarded subprocess proves discovery and execution do not inspect raw
-  `argv`, call `exit`, or mutate state while Composer autoload files are being
-  included.
+- A guarded proof shows discovery reads package metadata without loading
+  entrypoints, rejects forbidden Composer/autoload surfaces, and leaves raw
+  `argv` and process-exit policy outside every contribution contract.
 - Removing an extension leaves no hidden global state in the following run.
 
 ## Phase 3 — Native DSL feature surface

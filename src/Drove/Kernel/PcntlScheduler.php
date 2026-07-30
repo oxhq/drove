@@ -85,7 +85,9 @@ final class PcntlScheduler implements Scheduler
         $children = [];
         $results = [];
         $completionOrder = [];
-        $interruption = new class
+        $interruption = new
+        /** @phpstan-all-methods-impure */
+        class
         {
             private ?int $signal = null;
 

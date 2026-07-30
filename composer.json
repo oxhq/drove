@@ -125,6 +125,11 @@
             "phpstan analyse src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1/proof.php --no-progress --memory-limit=512M",
             "pint --test src/Drove/Native src/Drove/Kernel/AssertionFailed.php src/Drove/Kernel/FailureKind.php experiments/native-phase-1"
         ],
+        "test:native-phase-2": "php experiments/native-phase-2/proof.php",
+        "test:native-phase-2:static": [
+            "phpstan analyse src/Drove/Extension src/Drove/Native src/Drove/Replay/Artifact.php experiments/native-phase-2/proof.php experiments/native-phase-2/fixtures.php experiments/native-phase-2/compare.php --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Extension src/Drove/Native src/Drove/Replay/Artifact.php experiments/native-phase-2"
+        ],
         "test:parallel": "php bin/pest --exclude-group=integration --parallel --processes=3",
         "test:integration": "php bin/pest --group=integration -v",
         "update:snapshots": "REBUILD_SNAPSHOTS=true php bin/pest --update-snapshots",

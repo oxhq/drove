@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drove\Native;
 
+use Drove\Extension\ExtensionSet;
 use LogicException;
 
 final class Declarations
@@ -14,9 +15,10 @@ final class Declarations
         callable $declarations,
         string $rootPath,
         string $suiteName = 'Drove Native',
+        ?ExtensionSet $extensions = null,
     ): DeclarationRegistry {
         $previous = self::$active;
-        $registry = new DeclarationRegistry($rootPath, $suiteName);
+        $registry = new DeclarationRegistry($rootPath, $suiteName, $extensions);
         self::$active = $registry;
 
         try {
