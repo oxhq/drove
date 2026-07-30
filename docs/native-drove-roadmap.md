@@ -186,14 +186,16 @@ Exit gates:
 - CLI help and native documentation contain only behavior covered by the
   conformance matrix.
 
-Current local evidence is diagnostic until the hosted gate runs. The
-conformance fixture produced 49 terminal results, 47 runnable cases, 46
-assertions, and 35 cleanups with identical semantic hashes at C1–C30. Two
-Drover C30 stress runs each produced 10,000 passes, assertions, cleanups, and
-unique executor PIDs with no batching. Their wall times were 13,356.081 ms and
-13,603.965 ms; the first reported a 370,233,344-byte parent peak and a
-71,303,168-byte maximum executor sample under the explicit 512 MiB stress
-limit.
+Current local evidence is diagnostic until the hosted gate runs. At exact
+revision `2fb74fb404a331f61f3f9dcd32041b682c5b7fd4`, the conformance fixture
+produced 49 terminal results, 47 runnable cases, 46 assertions, and 35 cleanups
+with identical semantic hashes at C1–C30. Two Drover C30 stress runs each
+produced 10,000 passes, assertions, cleanups, and unique executor PIDs with no
+batching. Their wall times were 13,837.722 ms and 14,012.134 ms; parent peaks
+were 370,257,920 and 370,405,376 bytes, and the maximum executor sample was
+71,303,168 bytes under the explicit 512 MiB stress limit. The complete
+platform, lane, timing, memory, command, and artifact-hash record is stored in
+[`benchmarks/results/2026-07-29-native-phase-3-2fb74fb4.md`](../benchmarks/results/2026-07-29-native-phase-3-2fb74fb4.md).
 
 The same large fixture is not a supported `PcntlScheduler` claim. A flat
 PCNTL run lost three leaf executors to signal 11, and a later frozen sharded
