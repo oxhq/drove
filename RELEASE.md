@@ -19,7 +19,7 @@ releases.
    with the intended version and exact split Laravel commit. Its branch run must
    build and attest all four targets, rerun the release policy and exact-SHA
    hosted gates, verify exact root-subtree/split-tree equality and branch-ref
-   attestations, and only then promote the root commit to a tag.
+   attestations, and authorize the exact commit for manual tag creation.
 5. `composer validate --strict`, locked Rust tests, the installed-consumer
    smoke, and the package archive checks pass.
 6. Public compatibility and release notes match the supported surface.
@@ -35,30 +35,40 @@ releases.
 
 ## Hosted trust boundary
 
-Protect `v0.*` release tags with an active repository ruleset that restricts tag
-creation, update, and deletion. The GitHub Actions app may bypass that ruleset
-for the release workflow; human and team bypass should remain absent if direct
-tags are meant to be prohibited. No custom GitHub App is required for this root
-repository promotion.
+Protect root `v0.*` release tags with an active repository ruleset that
+restricts tag creation, update, and deletion. Repository administrators are the
+explicit bypass and trust root for the one manual tag-creation operation after
+the authorized branch run; GitHub Actions has no ruleset bypass.
 
-That bypass is an actor-level repository trust boundary, not a grant scoped to
-one workflow file. Any workflow that receives a `GITHUB_TOKEN` with
-`contents: write` can act as GitHub Actions. Keep the repository default at
-read-only, grant write permission only to the release job, and protect changes
-to `develop` and `.github/workflows/native-release.yml` through repository
-review policy. Source checks inside the workflow are defense in depth; they do
-not replace the hosted ruleset.
+The only job with `contents: write` must use the protected `native-release`
+environment with an explicit human reviewer. Builds may finish before approval,
+but neither root tag promotion nor GitHub release publication may begin without
+that environment approval.
+
+An administrator bypass is an actor-level repository trust boundary, not a
+grant scoped to this procedure. Repository administrators and applications
+with repository-administration authority can change or bypass the ruleset and
+must be treated as trusted release actors. Keep the repository default token at
+read-only, grant write permission only to the protected release job, and
+protect changes to `develop` and `.github/workflows/native-release.yml` through
+repository review policy. Source checks inside the workflow are defense in
+depth; they do not replace the hosted ruleset.
 
 The root `GITHUB_TOKEN` has no authority in `oxhq/drove-laravel`. Strict,
 atomic cross-repository promotion remains unavailable without a separately
 authorized split-repository mechanism; this process does not claim it. The root
 workflow only proves that the recorded split `develop` commit exists and has
-the exact `packages/drove-laravel` tree before creating the root tag.
+the exact `packages/drove-laravel` tree before authorizing the manual root tag.
 
-The `push.tags` trigger remains a defensive path for a tag created outside the
-promotion flow: it still requires an annotated tag at the exact `develop` SHA,
-an already annotated exact-tree split tag, the same hosted gates, release
-policy, and tag-ref attestations. It is not the normal authorization path.
+Protect split `v0.*` tags against update and deletion without a bypass. Initial
+split-tag creation remains the separately authorized manual operation described
+below; after creation the tag is immutable unless a repository administrator
+changes the ruleset.
+
+The `push.tags` trigger is the normal publication path after the administrator
+creates the authorized root tag. It still requires an annotated tag at the
+exact `develop` SHA, an already annotated exact-tree split tag, the same hosted
+gates, release policy, and tag-ref attestations.
 
 ## Publish
 
@@ -78,14 +88,19 @@ policy, and tag-ref attestations. It is not the normal authorization path.
 3. The branch run builds and attests the exact root `develop` SHA, applies the
    release policy and existing hosted gates, proves that `LARAVEL_COMMIT` is
    the current split `develop` commit with the exact root subtree, verifies
-   attestations bound to `refs/heads/develop`, and creates an annotated root tag
-   with its `GITHUB_TOKEN`. A tag created by `GITHUB_TOKEN` does not start the
-   tag-push workflow. Do not rerun the branch promotion or move/delete the tag
-   after it succeeds.
-4. Immediately create and push the same annotated tag at `LARAVEL_COMMIT` in
-   `oxhq/drove-laravel`. This remains a separately authorized action; do not
-   move either tag after creation.
-5. Dispatch the immutable root tag only after the split tag exists:
+   attestations bound to `refs/heads/develop`, waits for approval of the
+   protected `native-release` environment, and authorizes that exact version,
+   root commit, and split commit for manual tagging. It does not create a tag.
+4. Pause the Packagist push webhooks for both repositories. Confirm that the
+   intended version is still absent from both Packagist package APIs. Keep the
+   hooks paused if any later publication gate fails.
+5. Create the annotated tag first at `LARAVEL_COMMIT` in
+   `oxhq/drove-laravel`. Then, as a root-repository administrator, create the
+   same annotated root tag at the authorized root `develop` commit. The root
+   tag push starts the immutable publication workflow. Do not move or delete
+   either tag after creation.
+6. If the root tag push did not start the workflow, dispatch the immutable root
+   tag manually:
 
    ```bash
    gh workflow run native-release.yml \
@@ -94,18 +109,22 @@ policy, and tag-ref attestations. It is not the normal authorization path.
      -f laravel_commit="$LARAVEL_COMMIT"
    ```
 
-   The root tag run rebuilds the four native archives, requires the identically
-   named annotated split tag at `LARAVEL_COMMIT`, produces attestations bound
-   to the exact tag ref, verifies them, and creates the immutable GitHub
+   The root tag run (automatic or manual) rebuilds the four native archives,
+   requires the identically named annotated split tag at `LARAVEL_COMMIT`,
+   produces attestations bound to the exact tag ref, verifies them, waits for
+   the protected-environment approval, and creates the immutable GitHub
    prerelease. The tagged commit must remain an ancestor of root `develop`, so
    later development does not strand an already verified immutable tag. Verify
    every expected archive, checksum, provenance manifest, and GitHub
    attestation. Verification must bind
    `.github/workflows/native-release.yml`, the release commit and tag ref, and
    reject self-hosted provenance.
-6. Submit or update both GitHub repositories on Packagist as `oxhq/drove` and
-   `oxhq/drove-laravel`.
-7. Dispatch the Published package workflow with the exact tag plus the root and
+7. After the GitHub prerelease and all 13 assets are verified, reactivate both
+   Packagist hooks and ping each repository webhook through GitHub's hook API.
+   Packagist treats that ping as an update request and rescans the repository's
+   current tags. Require HTTP 202 from both deliveries, then verify that both
+   package APIs resolve the intended tag to the exact root and split commits.
+8. Dispatch the Published package workflow with the exact tag plus the root and
    split Laravel commits. All four pinned Linux/macOS runner families must
    resolve both Packagist dists without path repositories, verify the native
    checksum and attestation, install the matching asset, reject incompatible
@@ -121,11 +140,15 @@ policy, and tag-ref attestations. It is not the normal authorization path.
 
    `--ref` must be the exact annotated tag; dispatching the workflow from a
    branch or another tag fails before package resolution.
-8. Record both native-release run IDs (branch promotion and tag publication),
+9. Record both native-release run IDs (branch promotion and tag publication),
    the exact tags, root and split commits, and published-package workflow
    runs, Packagist versions, and normalized consumer artifacts in the release
    notes.
 
 Packagist publication and GitHub artifacts are separate gates. A green source
-workflow does not prove either one. If a release is defective, publish a new
-prerelease; never move or overwrite an existing tag.
+workflow does not prove either one. The temporary webhook pause prevents a
+normal push-triggered crawl from exposing a mismatched or assetless alpha; it
+does not disable Packagist's independent fallback crawls or make the two
+repositories atomic. Verify the package APIs before and after tagging. If a
+release is defective, publish a new prerelease; never move or overwrite an
+existing tag.

@@ -260,6 +260,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: native-release
     permissions:
       actions: read
       attestations: read
@@ -491,7 +492,7 @@ jobs:
           done
           cat ./*.tar.gz.sha256 | LC_ALL=C sort > SHA256SUMS
 
-      - name: Promote exact develop SHA to annotated tag
+      - name: Authorize exact develop SHA for manual tagging
         if: steps.release_source.outputs.mode == 'promote'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -513,28 +514,7 @@ jobs:
             echo "Release $RELEASE_VERSION already exists without its tag." >&2
             exit 1
           fi
-          tag_object="$(
-            gh api --method POST "repos/$GH_REPO/git/tags" \
-              -f tag="$RELEASE_VERSION" \
-              -f message="Drove $RELEASE_VERSION" \
-              -f object="$RELEASE_SHA" \
-              -f type=commit \
-              --jq .sha
-          )"
-          test -n "$tag_object"
-          gh api --method POST "repos/$GH_REPO/git/refs" \
-            -f ref="refs/tags/$RELEASE_VERSION" \
-            -f sha="$tag_object" \
-            >/dev/null
-          tag="$(
-            gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_VERSION" \
-              --jq .object.sha
-          )"
-          test "$tag" = "$tag_object"
-          test "$(
-            gh api "repos/$GH_REPO/git/tags/$tag_object" --jq .object.sha
-          )" = "$RELEASE_SHA"
-          echo "Created annotated tag $RELEASE_VERSION at $RELEASE_SHA."
+          echo "Authorized annotated tag $RELEASE_VERSION at $RELEASE_SHA."
 
       - name: Publish immutable experimental release
         if: steps.release_source.outputs.mode == 'publish'

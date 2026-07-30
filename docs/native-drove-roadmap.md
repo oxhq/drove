@@ -342,6 +342,8 @@ Deliverables:
   metadata.
 - A tagged experimental release and Packagist publication. The release remains
   pre-v1 and links the exact native support surface and bridge registry.
+- A protected `native-release` environment with an explicit reviewer gates the
+  only job that receives repository write authority.
 - A Pest/PHPUnit bridge coverage decision recorded as an ADR and an
   implementation for every bridge driver declared supported; unsupported
   bridge drivers fail explicitly. Native coverage remains undeclared and its
@@ -383,13 +385,15 @@ An alpha tag can become visible to Packagist before its tag-ref rebuild
 finishes. Root promotion therefore builds and verifies branch-ref provenance,
 runs the exact-SHA hosted gates and, when required, the design-partner verifier,
 and proves that the recorded split `develop` commit has the exact Laravel
-subtree before GitHub Actions creates the annotated root tag. A second run at
-the tag requires the identically named annotated split tag, then rebuilds and
-verifies tag-ref provenance before creating the GitHub release. The split
-commit must be prepared first and tagged immediately after the root tag, but
-the tags remain separate promotions; this is not atomic cross-repository
-enforcement. Source code cannot prove or replace the hosted tag-protection
-rules or their actor-level GitHub Actions bypass.
+subtree before authorizing a repository administrator to create the tag. The
+split tag is created first; the root tag push then rebuilds and verifies
+tag-ref provenance before creating the GitHub release. The tags remain separate
+promotions; this is not atomic cross-repository enforcement. Both Packagist
+hooks remain paused until the GitHub prerelease and its assets are verified, so
+normal push-triggered crawls do not observe the intermediate tag ordering.
+Independent Packagist fallback crawls remain outside Drove's atomic control.
+Source code cannot prove or replace the hosted tag-protection rules or their
+repository-admin bypass.
 
 ## Non-goals
 
