@@ -194,10 +194,7 @@ final readonly class Collector
         try {
             $evidence = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new RuntimeException(
-                'Drove evidence artifact is not valid JSON.',
-                previous: $exception,
-            );
+            throw new RuntimeException('Drove evidence artifact is not valid JSON.', $exception->getCode(), previous: $exception);
         }
 
         if (! is_array($evidence)
@@ -480,7 +477,10 @@ final readonly class Collector
             $source = $this->source($root, $class->getAttribute('file'));
 
             foreach ($xpath->query('./*[local-name()="testMethod"]', $class) ?: [] as $method) {
-                if (! $method instanceof DOMElement || $method->getAttribute('id') === '') {
+                if (! $method instanceof DOMElement) {
+                    continue;
+                }
+                if ($method->getAttribute('id') === '') {
                     continue;
                 }
 
@@ -941,12 +941,12 @@ final readonly class Collector
 
         $summary = [
             'tests' => array_sum($counts),
-            'passed' => (int) ($counts['passed'] ?? 0),
-            'failed' => (int) ($counts['failed'] ?? 0),
+            'passed' => $counts['passed'] ?? 0,
+            'failed' => $counts['failed'] ?? 0,
             'errors' => 0,
-            'skipped' => (int) ($counts['skipped'] ?? 0),
-            'incomplete' => (int) ($counts['incomplete'] ?? 0),
-            'risky' => (int) ($counts['risky'] ?? 0),
+            'skipped' => $counts['skipped'] ?? 0,
+            'incomplete' => $counts['incomplete'] ?? 0,
+            'risky' => $counts['risky'] ?? 0,
             'assertions' => 0,
         ];
 
@@ -978,10 +978,7 @@ final readonly class Collector
         try {
             $decoded = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
-            throw new RuntimeException(
-                "Drove could not decode JSON artifact {$path}.",
-                previous: $exception,
-            );
+            throw new RuntimeException("Drove could not decode JSON artifact {$path}.", $exception->getCode(), previous: $exception);
         }
 
         if (! is_array($decoded)) {
@@ -1265,7 +1262,10 @@ final readonly class Collector
     private function removeTree(string $directory): void
     {
         foreach (scandir($directory) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
+            if ($entry === '.') {
+                continue;
+            }
+            if ($entry === '..') {
                 continue;
             }
 
