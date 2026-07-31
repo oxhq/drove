@@ -52,7 +52,7 @@ The following invariants apply to every feature declared supported:
 | 4. Native Laravel prepared runtime | **COMPLETE — HOSTED** | [Native Laravel #30569880652](https://github.com/oxhq/drove/actions/runs/30569880652) accepted the provider, C1–C30, fault, preflight, and cleanup matrix |
 | 5. Bounded one-fork execution | **COMPLETE — HOSTED** | [Native Topology #30569880771](https://github.com/oxhq/drove/actions/runs/30569880771) accepted topology, telemetry, reliability, cancellation, and controlled performance at `5984beb9` |
 | 6. Bridges and migration corpus | **COMPLETE — HOSTED** | [Full corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130) accepted the release-SHA pinned ladder ending with Filament |
-| 7. Public experimental release | **TECHNICAL `alpha.3` EVALUATION RELEASE — EXTERNAL EVIDENCE PENDING** | [`v0.4.0-alpha.3`](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.3) carries the schema-2 evaluator; candidate `v0.4.0-alpha.4` still requires 3 design partners and 2 retained migrations |
+| 7. Public experimental release | **TECHNICAL `alpha.3` EVALUATION RELEASE — EXTERNAL EVIDENCE PENDING** | [Native release #30597049719](https://github.com/oxhq/drove/actions/runs/30597049719) and [Published package #30597292729](https://github.com/oxhq/drove/actions/runs/30597292729) published and installed the schema-2 evaluator; candidate `v0.4.0-alpha.4` still requires 3 design partners and 2 retained migrations |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -394,8 +394,15 @@ external gate; the technical packaging and corpus evidence remain valid.
 The technical evaluation release `v0.4.0-alpha.3` carries the corrected
 schema-2 evaluator. It records an original baseline revision, reconstructs its
 dependency tree in a disposable detached worktree, and compares it with a
-strict descendant evaluation revision that installs Drove. No hosted run ID is
-recorded yet for `alpha.3`, and the release makes no external-validation claim.
+strict descendant evaluation revision that installs Drove.
+[External Corpus #30596079973](https://github.com/oxhq/drove/actions/runs/30596079973)
+accepted the exact release-SHA ladder ending in Filament,
+[Native release #30597049719](https://github.com/oxhq/drove/actions/runs/30597049719)
+published the four attested native targets, and
+[Published package #30597292729](https://github.com/oxhq/drove/actions/runs/30597292729)
+installed both Packagist packages on those targets. These are technical
+publication and compatibility proofs; the release makes no external-validation
+claim.
 
 Evidence from that tagged release gates candidate `v0.4.0-alpha.4`. The
 external ledger currently records 0 of 3 design partners and 0 of 2 retained

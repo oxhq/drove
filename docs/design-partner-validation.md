@@ -11,6 +11,14 @@ reconstructs an independent baseline from the recorded original revision.
 completed external evaluations plus two meaningful migrations retained in CI
 for at least 14 days.
 
+The evaluation release itself has hosted technical proof:
+[full corpus #30596079973](https://github.com/oxhq/drove/actions/runs/30596079973),
+[native publication #30597049719](https://github.com/oxhq/drove/actions/runs/30597049719),
+and
+[installed packages #30597292729](https://github.com/oxhq/drove/actions/runs/30597292729).
+Those runs make the evaluator installable and reproducible; they do not count
+as external partner submissions.
+
 The historical `alpha.2` schema-1 collector used one dependency tree and is
 superseded. Its evaluator output does not count toward the external gate.
 
