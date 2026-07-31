@@ -11,13 +11,14 @@
         "repository",
         "drove",
         "project_revision",
+        "evaluation_revision",
+        "dependency_state",
         "scanner",
-        "benchmark",
-        "migration"
+        "benchmark"
     ],
     "properties": {
         "schema": {
-            "const": 1
+            "const": 2
         },
         "evaluation_id": {
             "type": "string",
@@ -36,6 +37,12 @@
         },
         "project_revision": {
             "$ref": "#/$defs/revision"
+        },
+        "evaluation_revision": {
+            "$ref": "#/$defs/revision"
+        },
+        "dependency_state": {
+            "$ref": "#/$defs/dependency_state"
         },
         "scanner": {
             "type": "object",
@@ -57,7 +64,7 @@
                 },
                 "supported": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 2
                 },
                 "bridge_only": {
                     "type": "integer",
@@ -86,11 +93,11 @@
                 },
                 "selected": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 2
                 },
                 "case_ids": {
                     "type": "array",
-                    "minItems": 1,
+                    "minItems": 2,
                     "uniqueItems": true,
                     "items": {
                         "type": "string",
@@ -106,21 +113,30 @@
                 "runs": {
                     "type": "array",
                     "minItems": 3,
+                    "contains": {
+                        "type": "object",
+                        "required": [
+                            "runner",
+                            "processes",
+                            "observed_lanes"
+                        ],
+                        "properties": {
+                            "runner": {
+                                "const": "drove"
+                            },
+                            "processes": {
+                                "minimum": 2
+                            },
+                            "observed_lanes": {
+                                "minimum": 2
+                            }
+                        }
+                    },
                     "items": {
                         "$ref": "#/$defs/run"
                     }
                 }
             }
-        },
-        "migration": {
-            "oneOf": [
-                {
-                    "type": "null"
-                },
-                {
-                    "$ref": "#/$defs/migration"
-                }
-            ]
         }
     },
     "$defs": {
@@ -146,6 +162,69 @@
                 },
                 "revision": {
                     "$ref": "#/$defs/revision"
+                }
+            }
+        },
+        "dependency_state": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "baseline_lock_sha256",
+                "evaluation_lock_sha256",
+                "baseline_runner"
+            ],
+            "properties": {
+                "baseline_lock_sha256": {
+                    "$ref": "#/$defs/sha256"
+                },
+                "evaluation_lock_sha256": {
+                    "$ref": "#/$defs/sha256"
+                },
+                "baseline_runner": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "package",
+                        "version",
+                        "revision"
+                    ],
+                    "properties": {
+                        "package": {
+                            "enum": [
+                                "pestphp/pest",
+                                "phpunit/phpunit"
+                            ]
+                        },
+                        "version": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "revision": {
+                            "$ref": "#/$defs/revision"
+                        }
+                    },
+                    "oneOf": [
+                        {
+                            "properties": {
+                                "package": {
+                                    "const": "pestphp/pest"
+                                },
+                                "version": {
+                                    "const": "5.0.1"
+                                }
+                            }
+                        },
+                        {
+                            "properties": {
+                                "package": {
+                                    "const": "phpunit/phpunit"
+                                },
+                                "version": {
+                                    "const": "13.2.4"
+                                }
+                            }
+                        }
+                    ]
                 }
             }
         },
@@ -329,51 +408,6 @@
                     }
                 }
             ]
-        },
-        "migration": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "meaningful",
-                "drove_step_name",
-                "ci_started_at",
-                "ci_verified_at",
-                "ci_started_revision",
-                "ci_verified_revision",
-                "ci_started_run_url",
-                "ci_verified_run_url"
-            ],
-            "properties": {
-                "meaningful": {
-                    "const": true
-                },
-                "drove_step_name": {
-                    "type": "string",
-                    "minLength": 3
-                },
-                "ci_started_at": {
-                    "type": "string",
-                    "format": "date-time"
-                },
-                "ci_verified_at": {
-                    "type": "string",
-                    "format": "date-time"
-                },
-                "ci_started_revision": {
-                    "$ref": "#/$defs/revision"
-                },
-                "ci_verified_revision": {
-                    "$ref": "#/$defs/revision"
-                },
-                "ci_started_run_url": {
-                    "type": "string",
-                    "format": "uri"
-                },
-                "ci_verified_run_url": {
-                    "type": "string",
-                    "format": "uri"
-                }
-            }
         }
     }
 }

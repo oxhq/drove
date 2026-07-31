@@ -72,7 +72,7 @@ function designPartnerRequireHttpOk(array $headers, string $url): void
 function designPartnerDownload(
     string $url,
     array $headers = [],
-    int $maximumBytes = DROVE_MAXIMUM_EVIDENCE_BYTES,
+    int $maximumBytes = DROVE_MAXIMUM_GITHUB_BYTES,
 ): string {
     $context = stream_context_create([
         'http' => [
@@ -353,6 +353,7 @@ function designPartnerEvidenceIdentity(
         'repository' => 'repository',
         'drove' => 'drove',
         'project_revision' => 'project_revision',
+        'evaluation_revision' => 'evaluation_revision',
     ];
 
     foreach ($fields as $evidenceField => $ledgerField) {
@@ -440,7 +441,7 @@ function designPartnerVerifyDroveJob(array $response, string $stepName, string $
 
 function designPartnerIsDroveCommand(string $line): bool
 {
-    if (preg_match('/[#;&|`\\\\]|\$\(/', $line) === 1
+    if (preg_match('/[$#;&|`\\\\<>*?\[\]{}~]/', $line) === 1
         || preg_match(
             '/(?:\A|\s)(?:-h|-V|--help|--version|--compatibility|--list-(?:groups|suites|test-files|tests|tests-json|tests-xml))(?:=|\s|\z)/',
             $line,
@@ -448,10 +449,21 @@ function designPartnerIsDroveCommand(string $line): bool
         return false;
     }
 
-    return preg_match(
+    if (preg_match(
         '#\A\s*(?:(?:php)\s+)?(?:\./)?vendor/bin/drove(?:\s|$)#',
         $line,
-    ) === 1;
+    ) !== 1) {
+        return false;
+    }
+
+    $arguments = preg_split('/\s+/', trim($line));
+
+    return is_array($arguments)
+        && ! in_array('--do-not-fail-on-empty-test-suite', $arguments, true)
+        && count(array_filter(
+            $arguments,
+            static fn (string $argument): bool => $argument === '--fail-on-empty-test-suite',
+        )) === 1;
 }
 
 /**
@@ -618,6 +630,64 @@ function designPartnerVerifyComparison(
     }
 }
 
+/**
+ * @param  array<string, mixed>  $comparison
+ */
+function designPartnerVerifyEvaluationDelta(array $comparison, string $label): void
+{
+    $files = $comparison['files'] ?? null;
+
+    if (! is_array($files)
+        || ! array_is_list($files)
+        || count($files) < 3
+        || count($files) >= 300) {
+        designPartnerFail("{$label} must contain a complete GitHub files list with fewer than 300 entries.");
+    }
+
+    $required = array_fill_keys(
+        ['composer.json', 'composer.lock', '.drove/evaluation-config.json'],
+        false,
+    );
+    $seen = [];
+
+    foreach ($files as $file) {
+        $path = is_array($file) ? ($file['filename'] ?? null) : null;
+        $status = is_array($file) ? ($file['status'] ?? null) : null;
+
+        if (! is_string($path) || $path === '' || isset($seen[$path])) {
+            designPartnerFail("{$label} must contain unique changed paths.");
+        }
+        $seen[$path] = true;
+
+        if ($status === 'renamed') {
+            designPartnerFail("{$label} cannot contain renamed paths.");
+        }
+
+        if (! in_array($status, ['added', 'modified', 'removed'], true)) {
+            designPartnerFail("{$label} contains an unknown changed-file status.");
+        }
+
+        if (array_key_exists($path, $required)) {
+            if ($status === 'removed') {
+                designPartnerFail("{$label} cannot remove a required evaluation file.");
+            }
+            $required[$path] = true;
+
+            continue;
+        }
+
+        if (preg_match('#\A\.github/workflows/[^/]+\.ya?ml\z#', $path) !== 1) {
+            designPartnerFail("{$label} changes disallowed project path: {$path}.");
+        }
+    }
+
+    if (in_array(false, $required, true)) {
+        designPartnerFail(
+            "{$label} must change composer.json, composer.lock, and .drove/evaluation-config.json.",
+        );
+    }
+}
+
 function designPartnerVerifyEvaluationRevision(
     string $evaluatedRevision,
     string $releaseRevision,
@@ -666,10 +736,267 @@ function designPartnerVerifyPlatform(
 }
 
 /**
+ * @param  array<string, mixed>  $evidence
+ * @return array{
+ *     baseline_lock_sha256: string,
+ *     evaluation_lock_sha256: string,
+ *     baseline_runner: array{package: string, version: string, revision: string}
+ * }
+ */
+function designPartnerVerifyDependencyState(
+    array $evidence,
+    string $frontend,
+    string $label,
+): array {
+    $state = $evidence['dependency_state'] ?? null;
+
+    if (! is_array($state)
+        || count($state) !== 3
+        || ! array_key_exists('baseline_lock_sha256', $state)
+        || ! array_key_exists('evaluation_lock_sha256', $state)
+        || ! array_key_exists('baseline_runner', $state)) {
+        designPartnerFail(
+            "{$label}.dependency_state must contain exactly baseline_lock_sha256, evaluation_lock_sha256, and baseline_runner.",
+        );
+    }
+
+    foreach (['baseline_lock_sha256', 'evaluation_lock_sha256'] as $field) {
+        if (! is_string($state[$field])
+            || preg_match('/\A[0-9a-f]{64}\z/', $state[$field]) !== 1) {
+            designPartnerFail("{$label}.dependency_state.{$field} must be a lowercase SHA-256 hash.");
+        }
+    }
+
+    $runner = $state['baseline_runner'];
+
+    if (! is_array($runner)
+        || count($runner) !== 3
+        || ! array_key_exists('package', $runner)
+        || ! array_key_exists('version', $runner)
+        || ! array_key_exists('revision', $runner)
+        || ! is_string($runner['revision'])
+        || preg_match('/\A[0-9a-f]{40}\z/', $runner['revision']) !== 1) {
+        designPartnerFail(
+            "{$label}.dependency_state.baseline_runner must contain exactly package, version, and a lowercase 40-character revision.",
+        );
+    }
+
+    $expected = match ($frontend) {
+        'pest' => ['pestphp/pest', '5.0.1'],
+        'phpunit' => ['phpunit/phpunit', '13.2.4'],
+        default => designPartnerFail("{$label} has an unsupported frontend."),
+    };
+
+    if ([$runner['package'] ?? null, $runner['version'] ?? null] !== $expected) {
+        designPartnerFail(
+            "{$label}.dependency_state.baseline_runner must match the {$frontend} frontend and its supported version.",
+        );
+    }
+
+    return [
+        'baseline_lock_sha256' => $state['baseline_lock_sha256'],
+        'evaluation_lock_sha256' => $state['evaluation_lock_sha256'],
+        'baseline_runner' => [
+            'package' => $runner['package'],
+            'version' => $runner['version'],
+            'revision' => $runner['revision'],
+        ],
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function designPartnerComposerLock(string $contents, string $label): array
+{
+    try {
+        $lock = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+    } catch (JsonException $exception) {
+        designPartnerFail("{$label} is not valid JSON: {$exception->getMessage()}");
+    }
+
+    if (! is_array($lock)
+        || array_is_list($lock)
+        || ! is_array($lock['packages'] ?? null)
+        || ! array_is_list($lock['packages'])
+        || ! is_array($lock['packages-dev'] ?? null)
+        || ! array_is_list($lock['packages-dev'])) {
+        designPartnerFail("{$label} must be a Composer lock object with package lists.");
+    }
+
+    return $lock;
+}
+
+/**
+ * @param  array<string, mixed>  $lock
+ * @return null|array<string, mixed>
+ */
+function designPartnerComposerPackage(array $lock, string $name, string $label): ?array
+{
+    $match = null;
+
+    foreach ([...$lock['packages'], ...$lock['packages-dev']] as $package) {
+        if (! is_array($package)
+            || ! is_string($package['name'] ?? null)
+            || strcasecmp($package['name'], $name) !== 0) {
+            continue;
+        }
+
+        if ($match !== null) {
+            designPartnerFail("{$label} contains duplicate {$name} packages.");
+        }
+        $match = $package;
+    }
+
+    return $match;
+}
+
+/**
+ * @param  array<string, mixed>  $package
+ */
+function designPartnerComposerVersion(array $package): ?string
+{
+    $version = $package['pretty_version'] ?? $package['version'] ?? null;
+
+    if (! is_string($version)) {
+        return null;
+    }
+
+    return str_starts_with($version, 'v') ? substr($version, 1) : $version;
+}
+
+/**
+ * @param  array<string, mixed>  $package
+ */
+function designPartnerComposerRevision(array $package, string $label): string
+{
+    $references = [];
+
+    foreach (['source', 'dist'] as $kind) {
+        $reference = is_array($package[$kind] ?? null)
+            ? ($package[$kind]['reference'] ?? null)
+            : null;
+
+        if (is_string($reference) && $reference !== '') {
+            $references[] = $reference;
+        }
+    }
+    $references = array_values(array_unique($references));
+
+    if (count($references) !== 1
+        || preg_match('/\A[0-9a-f]{40}\z/', $references[0]) !== 1) {
+        designPartnerFail("{$label} must bind one exact lowercase 40-character package revision.");
+    }
+
+    return $references[0];
+}
+
+/**
+ * @param  array<string, mixed>  $lock
+ */
+function designPartnerVerifyDrovePackage(
+    array $lock,
+    string $tag,
+    string $revision,
+    string $label,
+): void {
+    $drove = designPartnerComposerPackage($lock, 'oxhq/drove', $label);
+
+    if ($drove === null
+        || designPartnerComposerVersion($drove) !== ltrim($tag, 'v')
+        || designPartnerComposerRevision($drove, $label) !== $revision) {
+        designPartnerFail(
+            "{$label} must contain oxhq/drove matching the evaluated tag and revision.",
+        );
+    }
+}
+
+/**
+ * @param  callable(string): string  $artifactLoader
+ * @param  array{
+ *     baseline_lock_sha256: string,
+ *     evaluation_lock_sha256: string,
+ *     baseline_runner: array{package: string, version: string, revision: string}
+ * }  $state
+ */
+function designPartnerVerifyDependencyLocks(
+    callable $artifactLoader,
+    array $state,
+    string $owner,
+    string $repository,
+    string $projectRevision,
+    string $evaluationRevision,
+    string $evaluatedTag,
+    string $evaluatedRevision,
+    string $label,
+): void {
+    $baselineUrl = "https://raw.githubusercontent.com/{$owner}/{$repository}/{$projectRevision}/composer.lock";
+    $evaluationUrl = "https://raw.githubusercontent.com/{$owner}/{$repository}/{$evaluationRevision}/composer.lock";
+    $baselineContents = $artifactLoader($baselineUrl);
+    $evaluationContents = $artifactLoader($evaluationUrl);
+
+    if (! hash_equals($state['baseline_lock_sha256'], hash('sha256', $baselineContents))
+        || ! hash_equals($state['evaluation_lock_sha256'], hash('sha256', $evaluationContents))) {
+        designPartnerFail("{$label} hashes do not match the immutable Composer locks.");
+    }
+
+    $baselineLock = designPartnerComposerLock($baselineContents, "{$label}.baseline");
+    $evaluationLock = designPartnerComposerLock($evaluationContents, "{$label}.evaluation");
+    $runnerState = $state['baseline_runner'];
+    $baselineRunner = designPartnerComposerPackage(
+        $baselineLock,
+        $runnerState['package'],
+        "{$label}.baseline",
+    );
+
+    if ($baselineRunner === null
+        || designPartnerComposerVersion($baselineRunner) !== $runnerState['version']
+        || designPartnerComposerRevision($baselineRunner, "{$label}.baseline_runner")
+            !== $runnerState['revision']
+        || designPartnerComposerPackage($baselineLock, 'oxhq/drove', "{$label}.baseline") !== null) {
+        designPartnerFail(
+            "{$label}.baseline must contain the exact declared frontend runner and exclude oxhq/drove.",
+        );
+    }
+
+    $evaluationRunner = designPartnerComposerPackage(
+        $evaluationLock,
+        $runnerState['package'],
+        "{$label}.evaluation",
+    );
+
+    if ($runnerState['package'] === 'phpunit/phpunit') {
+        if ($evaluationRunner === null
+            || designPartnerComposerVersion($evaluationRunner) !== $runnerState['version']
+            || designPartnerComposerRevision($evaluationRunner, "{$label}.evaluation_runner")
+                !== $runnerState['revision']) {
+            designPartnerFail(
+                "{$label}.evaluation must contain the exact declared PHPUnit runner.",
+            );
+        }
+    } elseif ($evaluationRunner !== null) {
+        designPartnerFail(
+            "{$label}.evaluation must replace pestphp/pest with oxhq/drove.",
+        );
+    }
+
+    designPartnerVerifyDrovePackage(
+        $evaluationLock,
+        $evaluatedTag,
+        $evaluatedRevision,
+        "{$label}.evaluation",
+    );
+}
+
+/**
  * @param  array<string, mixed>  $run
  */
-function designPartnerVerifyCommand(array $run, string $runner, string $label): void
-{
+function designPartnerVerifyCommand(
+    array $run,
+    string $runner,
+    int $processes,
+    string $label,
+): void {
     $arguments = $run['command_argv'] ?? null;
 
     if (! is_array($arguments) || ! array_is_list($arguments) || $arguments === []) {
@@ -692,13 +1019,63 @@ function designPartnerVerifyCommand(array $run, string $runner, string $label): 
         designPartnerFail("{$label}.command_argv must execute {$expected}.");
     }
 
-    foreach (array_slice($arguments, $executableIndex + 1) as $argument) {
+    $runnerArguments = array_slice($arguments, $executableIndex + 1);
+
+    foreach ($runnerArguments as $argument) {
         if (preg_match(
             '/\A(?:-h|-V|--help|--version|--compatibility|--list-(?:groups|suites|test-files|tests|tests-json|tests-xml))(?:=|\z)/',
             $argument,
         ) === 1) {
             designPartnerFail("{$label}.command_argv must execute tests, not an informational or listing mode.");
         }
+    }
+
+    $instrumentation = static fn (string $argument): bool => $argument === '--'
+        || preg_match(
+            '/\A--(?:parallel|processes|replay|replay-on-failure|log-junit|list-tests-xml|no-logging)(?:=|\z)/',
+            $argument,
+        ) === 1;
+
+    if ($runner !== 'drove') {
+        if ($processes !== 1 || array_any($runnerArguments, $instrumentation)) {
+            designPartnerFail(
+                "{$label}.command_argv baseline must be an uninstrumented C1 command.",
+            );
+        }
+
+        return;
+    }
+
+    if (! in_array($processes, [1, 2, 4, 8, 16, 30], true)) {
+        designPartnerFail("{$label}.processes must use the declared Drove concurrency matrix.");
+    }
+
+    $suffix = [
+        '--parallel',
+        "--processes={$processes}",
+        "--replay=.drove/evaluation-work/drove-c{$processes}-replay.json",
+    ];
+
+    if (array_slice($arguments, -count($suffix)) !== $suffix) {
+        designPartnerFail(
+            "{$label}.command_argv must contain the exact Collector instrumentation suffix.",
+        );
+    }
+
+    $baseArguments = array_slice(
+        $arguments,
+        $executableIndex + 1,
+        count($arguments) - $executableIndex - count($suffix) - 1,
+    );
+
+    if (count(array_filter(
+        $baseArguments,
+        static fn (string $argument): bool => $argument === '--pest',
+    )) !== 1
+        || array_any($baseArguments, $instrumentation)) {
+        designPartnerFail(
+            "{$label}.command_argv must contain one --pest bridge selector before Collector instrumentation.",
+        );
     }
 }
 
@@ -740,10 +1117,10 @@ function verifyDesignPartnerLedger(
         designPartnerFail('release revision must match the current checkout.', 2);
     }
 
-    if (($ledger['schema'] ?? null) !== 1
+    if (($ledger['schema'] ?? null) !== 2
         || ! is_array($ledger['evaluations'] ?? null)
         || ! array_is_list($ledger['evaluations'])) {
-        designPartnerFail('ledger must use schema 1 with an evaluations list.');
+        designPartnerFail('ledger must use schema 2 with an evaluations list.');
     }
 
     $evaluations = $ledger['evaluations'];
@@ -759,6 +1136,7 @@ function verifyDesignPartnerLedger(
     $ids = [];
     $teams = [];
     $repositories = [];
+    $repositoryOwners = [];
     $artifactOwners = [];
     $verifiedArtifacts = [];
     $migrations = 0;
@@ -774,6 +1152,7 @@ function verifyDesignPartnerLedger(
         $repositoryUrl = $evaluation['repository'] ?? null;
         $drove = $evaluation['drove'] ?? null;
         $projectRevision = $evaluation['project_revision'] ?? null;
+        $evaluationRevision = $evaluation['evaluation_revision'] ?? null;
         $evidenceRevision = $evaluation['evidence_revision'] ?? null;
 
         if (! is_string($id) || preg_match('/\A[a-z0-9][a-z0-9-]{2,63}\z/', $id) !== 1) {
@@ -800,11 +1179,19 @@ function verifyDesignPartnerLedger(
         }
         $repository = designPartnerRepository($repositoryUrl, "{$id}.repository");
         $repositoryKey = strtolower("{$repository['owner']}/{$repository['repository']}");
+        $repositoryOwner = strtolower($repository['owner']);
 
         if (isset($repositories[$repositoryKey])) {
             designPartnerFail("duplicate external repository: {$repositoryUrl}.");
         }
         $repositories[$repositoryKey] = true;
+
+        if (isset($repositoryOwners[$repositoryOwner])) {
+            designPartnerFail(
+                "duplicate external GitHub owner: {$repository['owner']}.",
+            );
+        }
+        $repositoryOwners[$repositoryOwner] = true;
 
         $evaluatedTag = is_array($drove) ? ($drove['tag'] ?? null) : null;
         $evaluatedRevision = is_array($drove) ? ($drove['revision'] ?? null) : null;
@@ -841,22 +1228,47 @@ function verifyDesignPartnerLedger(
             designPartnerFail("{$id}.project_revision must be a lowercase 40-character Git SHA.");
         }
 
-        if (! is_string($evidenceRevision)
-            || preg_match('/\A[0-9a-f]{40}\z/', $evidenceRevision) !== 1
-            || $evidenceRevision === $projectRevision) {
+        if (! is_string($evaluationRevision)
+            || preg_match('/\A[0-9a-f]{40}\z/', $evaluationRevision) !== 1
+            || $evaluationRevision === $projectRevision) {
             designPartnerFail(
-                "{$id}.evidence_revision must be a distinct lowercase 40-character Git SHA.",
+                "{$id}.evaluation_revision must be distinct from project_revision and use a lowercase 40-character Git SHA.",
             );
         }
 
+        if (! is_string($evidenceRevision)
+            || preg_match('/\A[0-9a-f]{40}\z/', $evidenceRevision) !== 1
+            || $evidenceRevision === $projectRevision
+            || $evidenceRevision === $evaluationRevision) {
+            designPartnerFail(
+                "{$id}.evidence_revision must be distinct from project_revision and evaluation_revision and use a lowercase 40-character Git SHA.",
+            );
+        }
+
+        $evaluationComparison = $comparisonLoader(
+            $repository['owner'],
+            $repository['repository'],
+            $projectRevision,
+            $evaluationRevision,
+        );
+        designPartnerVerifyComparison(
+            $evaluationComparison,
+            $projectRevision,
+            $evaluationRevision,
+            "{$id}.evaluation.revision_comparison",
+        );
+        designPartnerVerifyEvaluationDelta(
+            $evaluationComparison,
+            "{$id}.evaluation.changed_files",
+        );
         designPartnerVerifyComparison(
             $comparisonLoader(
                 $repository['owner'],
                 $repository['repository'],
-                $projectRevision,
+                $evaluationRevision,
                 $evidenceRevision,
             ),
-            $projectRevision,
+            $evaluationRevision,
             $evidenceRevision,
             "{$id}.evidence.revision_comparison",
         );
@@ -913,8 +1325,14 @@ function verifyDesignPartnerLedger(
             designPartnerFail("{$id}.evidence is not valid JSON: {$exception->getMessage()}");
         }
 
-        if (! is_array($evidence) || ($evidence['schema'] ?? null) !== 1) {
-            designPartnerFail("{$id}.evidence must be a schema 1 JSON object.");
+        if (! is_array($evidence) || ($evidence['schema'] ?? null) !== 2) {
+            designPartnerFail("{$id}.evidence must be a schema 2 JSON object.");
+        }
+
+        if (array_key_exists('migration', $evidence)) {
+            designPartnerFail(
+                "{$id}.evidence migration must be recorded later in the ledger, not in the measured artifact.",
+            );
         }
 
         designPartnerEvidenceIdentity($evaluation, $evidence, $id);
@@ -925,7 +1343,7 @@ function verifyDesignPartnerLedger(
         }
 
         $discovered = designPartnerInteger($scanner, 'discovered', "{$id}.evidence.scanner", 1);
-        $supported = designPartnerInteger($scanner, 'supported', "{$id}.evidence.scanner", 1);
+        $supported = designPartnerInteger($scanner, 'supported', "{$id}.evidence.scanner", 2);
         $bridgeOnly = designPartnerInteger($scanner, 'bridge_only', "{$id}.evidence.scanner");
         $rejected = designPartnerInteger($scanner, 'rejected', "{$id}.evidence.scanner");
 
@@ -946,7 +1364,7 @@ function verifyDesignPartnerLedger(
             designPartnerFail("{$id}.evidence.benchmark must contain at least three completed runs.");
         }
 
-        $selected = designPartnerInteger($benchmark, 'selected', "{$id}.evidence.benchmark", 1);
+        $selected = designPartnerInteger($benchmark, 'selected', "{$id}.evidence.benchmark", 2);
         $selectionHash = $benchmark['selection_sha256'] ?? null;
         $caseIds = $benchmark['case_ids'] ?? null;
 
@@ -1031,7 +1449,7 @@ function verifyDesignPartnerLedger(
                 designPartnerFail("{$label}.exit_code must be zero.");
             }
 
-            designPartnerVerifyCommand($run, $runner, $label);
+            designPartnerVerifyCommand($run, $runner, $processes, $label);
 
             if ($expectedFrontend === null) {
                 $expectedFrontend = $frontend;
@@ -1089,7 +1507,24 @@ function verifyDesignPartnerLedger(
             );
         }
 
-        $migration = $evidence['migration'] ?? null;
+        $dependencyState = designPartnerVerifyDependencyState(
+            $evidence,
+            $expectedFrontend,
+            "{$id}.evidence",
+        );
+        designPartnerVerifyDependencyLocks(
+            $artifactLoader,
+            $dependencyState,
+            $repository['owner'],
+            $repository['repository'],
+            $projectRevision,
+            $evaluationRevision,
+            $evaluatedTag,
+            $evaluatedRevision,
+            "{$id}.evidence.dependency_state",
+        );
+
+        $migration = $evaluation['migration'] ?? null;
 
         if ($migration === null) {
             continue;
@@ -1111,8 +1546,8 @@ function verifyDesignPartnerLedger(
             || preg_match('/\A[0-9a-f]{40}\z/', $startedRevision) !== 1
             || ! is_string($verifiedRevision)
             || preg_match('/\A[0-9a-f]{40}\z/', $verifiedRevision) !== 1
-            || $verifiedRevision !== $projectRevision) {
-            designPartnerFail("{$id}.migration must bind start and verification project revisions.");
+            || $verifiedRevision === $startedRevision) {
+            designPartnerFail("{$id}.migration must bind distinct start and verification revisions.");
         }
 
         if (! is_string($droveStepName)
@@ -1182,6 +1617,19 @@ function verifyDesignPartnerLedger(
             designPartnerFail("{$id}.migration CI runs must use the same push or pull_request event.");
         }
 
+        if ($startedRevision !== $evaluationRevision) {
+            designPartnerVerifyComparison(
+                $comparisonLoader(
+                    $repository['owner'],
+                    $repository['repository'],
+                    $evaluationRevision,
+                    $startedRevision,
+                ),
+                $evaluationRevision,
+                $startedRevision,
+                "{$id}.migration.evaluation_revision_comparison",
+            );
+        }
         designPartnerVerifyComparison(
             $comparisonLoader(
                 $repository['owner'],
@@ -1192,6 +1640,36 @@ function verifyDesignPartnerLedger(
             $startedRevision,
             $verifiedRevision,
             "{$id}.migration.revision_comparison",
+        );
+        $startedLockUrl = sprintf(
+            'https://raw.githubusercontent.com/%s/%s/%s/composer.lock',
+            $repository['owner'],
+            $repository['repository'],
+            $startedRevision,
+        );
+        designPartnerVerifyDrovePackage(
+            designPartnerComposerLock(
+                $artifactLoader($startedLockUrl),
+                "{$id}.migration.started_dependency_state",
+            ),
+            $evaluatedTag,
+            $evaluatedRevision,
+            "{$id}.migration.started_dependency_state",
+        );
+        $verifiedLockUrl = sprintf(
+            'https://raw.githubusercontent.com/%s/%s/%s/composer.lock',
+            $repository['owner'],
+            $repository['repository'],
+            $verifiedRevision,
+        );
+        designPartnerVerifyDrovePackage(
+            designPartnerComposerLock(
+                $artifactLoader($verifiedLockUrl),
+                "{$id}.migration.verified_dependency_state",
+            ),
+            $evaluatedTag,
+            $evaluatedRevision,
+            "{$id}.migration.verified_dependency_state",
         );
         designPartnerVerifyDroveJob(
             $jobLoader($repository['owner'], $repository['repository'], $startedUrl['run_id']),
@@ -1240,6 +1718,7 @@ function verifyDesignPartnerLedger(
         'release_tag' => $releaseTag,
         'release_revision' => $releaseRevision,
         'external_evaluations' => count($evaluations),
+        'external_repository_owners' => count($repositoryOwners),
         'meaningful_migrations' => $migrations,
         'verified_artifacts' => count($verifiedArtifacts),
     ];

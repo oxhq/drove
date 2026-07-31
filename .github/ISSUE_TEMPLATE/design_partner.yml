@@ -5,12 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        This is an evaluation, not an endorsement. Do not include proprietary tests, secrets, or unredacted application output.
+        This is an evaluation, not an endorsement. Only evidence from a canonical public GitHub repository can count toward the release gate. Private feedback remains useful but does not count. Do not include proprietary tests, secrets, or unredacted application output.
+        Benchmark evidence uses baseline R < evaluation E < artifact F. Retention is separate: CI start S may equal E or descend from it, verification V must strictly descend after 14 complete days, and the exact Drove v0.4.0-alpha.3 package revision must remain locked at S and V. Migration metadata belongs in the ledger submission, not the evaluation config or raw artifact.
   - type: input
     id: project
     attributes:
       label: Project and test stack
-      description: Public repository URL or an anonymized application/package description, plus Pest/PHPUnit/Laravel/Testbench versions.
+      description: Gate evidence requires a canonical public GitHub URL and stack versions. Private feedback may use a redacted description but will not count. Use v0.4.0-alpha.3 and its schema-2 protocol.
     validations:
       required: true
   - type: input
@@ -18,25 +19,24 @@ body:
     attributes:
       label: Evaluation environment
       description: Drove tag, PHP version, operating system, architecture, and intended process count.
-      placeholder: v0.4.0-alpha.2, PHP 8.4, Linux x86_64, 8 processes
+      placeholder: v0.4.0-alpha.3, PHP 8.4, Linux x86_64, 8 processes
     validations:
       required: true
   - type: textarea
     id: selection
     attributes:
       label: Proposed test selection
-      description: Approximate case/file count, bootstrap, database, filesystem, cache, queue, or external-service needs.
+      description: Approximate case/file count, bootstrap, database, filesystem, cache, queue, or external-service needs. For retention, also name the stable workflow and direct Drove step.
     validations:
       required: true
   - type: dropdown
     id: evidence
     attributes:
-      label: Publishable evidence
-      description: What sanitized result may Drove publish?
+      label: Evidence handling
+      description: Only named, normalized public evidence counts toward the release gate.
       options:
         - Named project and normalized result
-        - Anonymous project profile and normalized result
-        - Private engineering feedback only
+        - Private engineering feedback only (does not count toward the release gate)
     validations:
       required: true
   - type: checkboxes

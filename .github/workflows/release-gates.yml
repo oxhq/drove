@@ -190,15 +190,15 @@ jobs:
         set -euo pipefail
         php scripts/verify-release-version.php \
           > "$RUNNER_TEMP/release-candidate.json"
-        grep -Fq '"requested_tag": "v0.4.0-alpha.3"' \
+        grep -Fq '"requested_tag": "v0.4.0-alpha.4"' \
           "$RUNNER_TEMP/release-candidate.json"
         grep -Fq '"release_role": "evidence-gated-candidate"' \
           "$RUNNER_TEMP/release-candidate.json"
         grep -Fq '"requires_design_partner_evidence": true' \
           "$RUNNER_TEMP/release-candidate.json"
-        php scripts/verify-release-version.php v0.4.0-alpha.3 \
+        php scripts/verify-release-version.php v0.4.0-alpha.4 \
           --github-output > "$RUNNER_TEMP/release-candidate.output"
-        php scripts/verify-release-version.php v0.4.0-alpha.2 \
+        php scripts/verify-release-version.php v0.4.0-alpha.3 \
           --github-output > "$RUNNER_TEMP/release-evaluation.output"
         test "$(
           cat "$RUNNER_TEMP/release-candidate.output"
@@ -206,7 +206,7 @@ jobs:
         test "$(
           cat "$RUNNER_TEMP/release-evaluation.output"
         )" = $'release_role=technical-evaluation\nrequires_design_partner_evidence=false'
-        for rejected in v0.4.0-alpha.1 v0.4.0-alpha.4
+        for rejected in v0.4.0-alpha.2 v0.4.0-alpha.5
         do
           set +e
           php scripts/verify-release-version.php "$rejected" \
@@ -215,7 +215,7 @@ jobs:
           set -e
           test "$mismatch_exit" -ne 0
           grep -Fq \
-            "DROVE_RELEASE_VERSION_MISMATCH: expected v0.4.0-alpha.2 or v0.4.0-alpha.3, received $rejected." \
+            "DROVE_RELEASE_VERSION_MISMATCH: expected v0.4.0-alpha.3 or v0.4.0-alpha.4, received $rejected." \
             "$RUNNER_TEMP/release-version-mismatch.txt"
         done
 
@@ -295,13 +295,13 @@ jobs:
               "options": {
                 "symlink": false,
                 "versions": {
-                  "oxhq/drove": "0.4.0-alpha.2"
+                  "oxhq/drove": "0.4.0-alpha.3"
                 }
               }
             }
           ],
           "require": {
-            "oxhq/drove": "0.4.0-alpha.2"
+            "oxhq/drove": "0.4.0-alpha.3"
           }
         }
         JSON
@@ -340,8 +340,8 @@ jobs:
         }
         PHP
         php "$native_consumer/native-boundary.php"
-        test "$("$native_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
-        test "$("$native_consumer/vendor/bin/drove" --native --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$native_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.3"
+        test "$("$native_consumer/vendor/bin/drove" --native --version)" = "Drove 0.4.0-alpha.3"
         "$native_consumer/vendor/bin/drove" --help \
           | grep -Fq 'Drove native'
         set +e
@@ -362,7 +362,7 @@ jobs:
           );
           exit(
               ($registry["schema"] ?? null) === 1
-              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.2"
+              && ($registry["drove_version"] ?? null) === "0.4.0-alpha.3"
                   ? 0
                   : 1,
           );
@@ -379,7 +379,7 @@ jobs:
               "options": {
                 "symlink": false,
                 "versions": {
-                  "oxhq/drove": "0.4.0-alpha.2"
+                  "oxhq/drove": "0.4.0-alpha.3"
                 }
               }
             }
@@ -388,7 +388,7 @@ jobs:
             "brianium/paratest": "7.23.0",
             "nunomaduro/collision": "8.9.5",
             "nunomaduro/termwind": "2.4.0",
-            "oxhq/drove": "0.4.0-alpha.2",
+            "oxhq/drove": "0.4.0-alpha.3",
             "pestphp/pest-plugin": "5.0.0",
             "phpunit/phpunit": "13.2.4",
             "symfony/process": "8.1.0"
@@ -420,8 +420,8 @@ jobs:
         }
         PHP
         php "$bridge_consumer/bridge-boundary.php"
-        test "$("$bridge_consumer/vendor/bin/drove" --pest --version)" = "Drove 0.4.0-alpha.2"
-        test "$("$bridge_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.2"
+        test "$("$bridge_consumer/vendor/bin/drove" --pest --version)" = "Drove 0.4.0-alpha.3"
+        test "$("$bridge_consumer/vendor/bin/drove" --version)" = "Drove 0.4.0-alpha.3"
         mkdir -p "$bridge_consumer/tests"
         cat > "$bridge_consumer/tests/PackageBoundaryTest.php" <<'PHP'
         <?php
