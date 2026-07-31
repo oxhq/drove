@@ -21,7 +21,7 @@ compatible plugin surface installable during the extraction.
 | `oxhq/drove` | [Packagist](https://packagist.org/packages/oxhq/drove) |
 | `oxhq/drove-laravel` | [Packagist](https://packagist.org/packages/oxhq/drove-laravel) |
 | Linux and macOS native archives | [`v0.4.0-alpha.3` release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.3) |
-| Hosted external corpus | [External Corpus workflow](https://github.com/oxhq/drove/actions/workflows/corpus.yml) |
+| Hosted external corpus | [`alpha.3` full corpus #30596079973](https://github.com/oxhq/drove/actions/runs/30596079973) |
 | External design partners | [`docs/design-partner-validation.md`](docs/design-partner-validation.md) |
 
 The proven compatibility surface includes:
@@ -54,11 +54,12 @@ vendor/bin/drove --version
 vendor/bin/drove --compatibility
 ```
 
-The historical `v0.4.0-alpha.2`
-[published-package gate #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
+The `v0.4.0-alpha.3`
+[published-package gate #30597292729](https://github.com/oxhq/drove/actions/runs/30597292729)
 resolved both tagged packages from Packagist on Linux and macOS, x86_64 and
-ARM64. It is not hosted proof for `v0.4.0-alpha.3`; use the live authorities
-above for the exact current tag.
+ARM64. The
+[native release #30597049719](https://github.com/oxhq/drove/actions/runs/30597049719)
+built, attested, and published the four matching native archives.
 
 The native install does not install or trust Pest, PHPUnit, ParaTest,
 Collision, Termwind, Symfony Process, or the Pest Composer plugin.
@@ -163,16 +164,15 @@ The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
 Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
 nonserial cohort at 1, 2, 4, 8, 16, and 30 Drove processes plus its 28-case
-filesystem-sensitive cohort at 1. The historical `alpha.2` release-SHA full
-ladder was accepted in
-[External Corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130);
-the stored
+filesystem-sensitive cohort at 1. The `alpha.3` release-SHA full ladder was
+accepted in
+[External Corpus #30596079973](https://github.com/oxhq/drove/actions/runs/30596079973).
+The stored
 [compatibility benchmark](benchmarks/results/2026-07-30-corpus-2146dd4b.md)
 retains requested/observed lanes, counts, milliseconds, and memory sources as a
 single-sample diagnostic rather than a performance claim. Nucleus is
 deliberately excluded because its Docker/MySQL suite is not part of this
-portable corpus. The linked run proves `alpha.2` only; it is not hosted
-`alpha.3` evidence. The tagged
+portable corpus. The tagged
 [corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.3/benchmarks/corpus)
 records revisions, selections, dependency overlays, and normalization rules.
 
