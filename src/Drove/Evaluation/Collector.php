@@ -42,8 +42,12 @@ final readonly class Collector
         $root = $this->root($root);
         $configuration = $this->configuration($configuration);
         $this->assertRepository($root, $configuration['repository']);
-        $projectRevision = $this->gitRevision($root);
+        $projectRevision = $configuration['baseline_revision'];
+        $evaluationRevision = $this->gitRevision($root);
         $this->assertTrackedClean($root);
+        $this->assertTrackedFile($root, 'composer.lock');
+        $this->assertEvaluationDelta($root, $projectRevision, $evaluationRevision);
+        $this->assertNoTrackedVendor($root, $projectRevision);
         $platform = $this->platform();
         $package = $this->package();
         $work = $root.'/.drove/evaluation-work';
@@ -58,17 +62,106 @@ final readonly class Collector
             throw new RuntimeException('Drove could not create its evidence work directory.');
         }
 
+        $baselineContainer = null;
+        $baselineRoot = null;
+        $evaluationContainer = null;
+        $evaluationRoot = null;
+
         try {
-            $discovery = $this->discover(
+            $baselineContainer = $this->worktreeContainer('baseline');
+            $baselineRoot = $baselineContainer.'/project';
+            $this->createDetachedWorktree(
                 $root,
+                $baselineRoot,
+                $projectRevision,
+                'baseline',
+            );
+            $baselineRoot = $this->root($baselineRoot);
+            $this->assertRepository($baselineRoot, $configuration['repository']);
+
+            if ($this->gitRevision($baselineRoot) !== $projectRevision) {
+                throw new RuntimeException(
+                    'Drove created the baseline worktree at an unexpected revision.',
+                );
+            }
+
+            $evaluationContainer = $this->worktreeContainer('evaluation');
+            $evaluationRoot = $evaluationContainer.'/project';
+            $this->createDetachedWorktree(
+                $root,
+                $evaluationRoot,
+                $evaluationRevision,
+                'evaluation',
+            );
+            $evaluationRoot = $this->root($evaluationRoot);
+            $this->assertRepository($evaluationRoot, $configuration['repository']);
+
+            if ($this->gitRevision($evaluationRoot) !== $evaluationRevision) {
+                throw new RuntimeException(
+                    'Drove created the evaluation worktree at an unexpected revision.',
+                );
+            }
+
+            $this->assertTrackedClean($baselineRoot);
+            $this->assertTrackedClean($evaluationRoot);
+            $this->assertTrackedFile($baselineRoot, 'composer.lock');
+            $this->assertTrackedFile($evaluationRoot, 'composer.lock');
+            $composerInstall = [
+                'composer',
+                'install',
+                '--no-interaction',
+                '--no-progress',
+                '--prefer-dist',
+            ];
+            $baselineInstall = $this->measure(
+                $baselineRoot,
+                $composerInstall,
+                $work.'/composer-baseline-install.log',
+            );
+
+            if ($baselineInstall['exit_code'] !== 0) {
+                throw new RuntimeException(
+                    'Composer could not install the committed baseline lock.',
+                );
+            }
+
+            $evaluationInstall = $this->measure(
+                $evaluationRoot,
+                $composerInstall,
+                $work.'/composer-evaluation-install.log',
+            );
+
+            if ($evaluationInstall['exit_code'] !== 0) {
+                throw new RuntimeException(
+                    'Composer could not install the committed evaluation lock.',
+                );
+            }
+
+            $this->assertTrackedClean($baselineRoot, allowVendor: true);
+            $this->assertTrackedClean($evaluationRoot, allowVendor: true);
+            $dependencyState = $this->dependencyState(
+                $baselineRoot,
+                $evaluationRoot,
+                $configuration['frontend'],
+                $package,
+            );
+            $discovery = $this->discover(
+                $baselineRoot,
                 $configuration['baseline_command_argv'],
                 $work.'/selection.xml',
                 $work.'/selection.log',
             );
-            $caseIds = $this->caseIds($root, $discovery);
+            $caseIds = $this->caseIds($evaluationRoot, $discovery);
+
+            if (count($caseIds) < 2) {
+                throw new RuntimeException(
+                    'Drove evidence collection requires at least two selected cases.',
+                );
+            }
+
             $baselineCommand = $configuration['baseline_command_argv'];
             $baselineMeasurement = $this->measure(
-                $root,
+                $baselineRoot,
                 $baselineCommand,
                 $work.'/baseline.log',
             );
@@ -85,6 +178,13 @@ final readonly class Collector
             );
 
             $droveRuns = [];
+            $evaluationWork = $evaluationRoot.'/.drove/evaluation-work';
+
+            if (! @mkdir($evaluationWork, 0700, true) && ! is_dir($evaluationWork)) {
+                throw new RuntimeException(
+                    'Drove could not create its clean evaluation work directory.',
+                );
+            }
 
             foreach ([1, $configuration['parallel_processes']] as $processes) {
                 $replay = ".drove/evaluation-work/drove-c{$processes}-replay.json";
@@ -95,17 +195,25 @@ final readonly class Collector
                     "--replay={$replay}",
                 ];
                 $measurement = $this->measure(
-                    $root,
+                    $evaluationRoot,
                     $command,
                     "{$work}/drove-c{$processes}.log",
                 );
-                $replayContents = $this->jsonFile($root.'/'.$replay);
+                $replayContents = $this->jsonFile($evaluationRoot.'/'.$replay);
                 $replayResult = $this->replay(
                     $replayContents,
                     $processes,
                     $measurement['exit_code'],
                     $caseIds,
                 );
+
+                if ($processes === $configuration['parallel_processes']
+                    && $replayResult['observed_lanes'] < 2) {
+                    throw new RuntimeException(
+                        'Drove parallel replay must observe at least two lanes.',
+                    );
+                }
+
                 $summary = $this->summary($measurement['output']);
 
                 $renderedOutcomes = $summary;
@@ -139,19 +247,31 @@ final readonly class Collector
                 }
             }
 
-            if ($this->gitRevision($root) !== $projectRevision) {
-                throw new RuntimeException('The project revision changed during collection.');
+            if ($this->gitRevision($baselineRoot) !== $projectRevision
+                || $this->gitRevision($evaluationRoot) !== $evaluationRevision
+                || $this->gitRevision($root) !== $evaluationRevision) {
+                throw new RuntimeException(
+                    'A project revision changed during evidence collection.',
+                );
             }
 
+            $this->assertTrackedClean($baselineRoot, allowVendor: true);
+            $this->assertTrackedClean(
+                $evaluationRoot,
+                allowEvidenceWork: true,
+                allowVendor: true,
+            );
             $this->assertTrackedClean($root, allowEvidenceWork: true);
 
             return [
-                'schema' => 1,
+                'schema' => 2,
                 'evaluation_id' => $configuration['evaluation_id'],
                 'team' => $configuration['team'],
                 'repository' => $configuration['repository'],
                 'drove' => $package,
                 'project_revision' => $projectRevision,
+                'evaluation_revision' => $evaluationRevision,
+                'dependency_state' => $dependencyState,
                 'scanner' => [
                     'completed' => true,
                     'discovered' => count($caseIds),
@@ -171,10 +291,31 @@ final readonly class Collector
                     ],
                     'runs' => [$baseline, ...$droveRuns],
                 ],
-                'migration' => $configuration['migration'],
             ];
         } finally {
-            $this->removeDirectory($work);
+            try {
+                $this->removeDirectory($work);
+            } finally {
+                try {
+                    if (is_string($evaluationRoot) && is_string($evaluationContainer)) {
+                        $this->removeDetachedWorktree(
+                            $root,
+                            $evaluationRoot,
+                            $evaluationContainer,
+                            'evaluation',
+                        );
+                    }
+                } finally {
+                    if (is_string($baselineRoot) && is_string($baselineContainer)) {
+                        $this->removeDetachedWorktree(
+                            $root,
+                            $baselineRoot,
+                            $baselineContainer,
+                            'baseline',
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -198,26 +339,44 @@ final readonly class Collector
         }
 
         if (! is_array($evidence)
-            || ($evidence['schema'] ?? null) !== 1
+            || ($evidence['schema'] ?? null) !== 2
             || ! is_string($evidence['evaluation_id'] ?? null)
             || ! is_string($evidence['team'] ?? null)
             || ! is_string($evidence['repository'] ?? null)
             || ! is_array($evidence['drove'] ?? null)
             || ! is_string($evidence['project_revision'] ?? null)
-            || preg_match('/\A[0-9a-f]{40}\z/', $evidence['project_revision']) !== 1) {
+            || preg_match('/\A[0-9a-f]{40}\z/', $evidence['project_revision']) !== 1
+            || ! is_string($evidence['evaluation_revision'] ?? null)
+            || preg_match('/\A[0-9a-f]{40}\z/', $evidence['evaluation_revision']) !== 1
+            || ! is_array($evidence['dependency_state'] ?? null)) {
             throw new RuntimeException('Drove evidence artifact identity is invalid.');
         }
 
         $this->assertRepository($root, $evidence['repository']);
         $evidenceRevision = $this->gitRevision($root);
 
-        if ($evidenceRevision === $evidence['project_revision']
+        if ($evidence['evaluation_revision'] === $evidence['project_revision']
             || $this->git(
                 $root,
-                ['merge-base', '--is-ancestor', $evidence['project_revision'], $evidenceRevision],
+                [
+                    'merge-base',
+                    '--is-ancestor',
+                    $evidence['project_revision'],
+                    $evidence['evaluation_revision'],
+                ],
+            )['exit'] !== 0
+            || $evidenceRevision === $evidence['evaluation_revision']
+            || $this->git(
+                $root,
+                [
+                    'merge-base',
+                    '--is-ancestor',
+                    $evidence['evaluation_revision'],
+                    $evidenceRevision,
+                ],
             )['exit'] !== 0) {
             throw new RuntimeException(
-                'The artifact commit must descend from the distinct tested project revision.',
+                'Evidence revisions must form a strict project < evaluation < evidence chain.',
             );
         }
 
@@ -238,6 +397,7 @@ final readonly class Collector
             'repository' => $evidence['repository'],
             'drove' => $evidence['drove'],
             'project_revision' => $evidence['project_revision'],
+            'evaluation_revision' => $evidence['evaluation_revision'],
             'evidence_revision' => $evidenceRevision,
             'evidence' => [
                 'url' => sprintf(
@@ -261,19 +421,19 @@ final readonly class Collector
      *     frontend: 'pest'|'phpunit',
      *     runtime: 'php'|'laravel'|'testbench',
      *     parallel_processes: int,
+     *     baseline_revision: string,
      *     baseline_command_argv: list<string>,
-     *     drove_command_argv: list<string>,
-     *     migration: null|array<string, mixed>
+     *     drove_command_argv: list<string>
      * }
      */
     private function configuration(array $configuration): array
     {
         $allowed = [
             'baseline_command_argv',
+            'baseline_revision',
             'drove_command_argv',
             'evaluation_id',
             'frontend',
-            'migration',
             'parallel_processes',
             'repository',
             'runtime',
@@ -284,12 +444,14 @@ final readonly class Collector
         sort($keys, SORT_STRING);
 
         if (array_diff($keys, $allowed) !== []
-            || ($configuration['schema'] ?? null) !== 1
+            || ($configuration['schema'] ?? null) !== 2
             || ! is_string($configuration['evaluation_id'] ?? null)
             || preg_match('/\A[a-z0-9][a-z0-9-]{2,63}\z/', $configuration['evaluation_id']) !== 1
             || ! is_string($configuration['team'] ?? null)
             || trim($configuration['team']) === ''
             || ! is_string($configuration['repository'] ?? null)
+            || ! is_string($configuration['baseline_revision'] ?? null)
+            || preg_match('/\A[0-9a-f]{40}\z/', $configuration['baseline_revision']) !== 1
             || ! in_array($configuration['frontend'] ?? null, ['pest', 'phpunit'], true)
             || ! in_array($configuration['runtime'] ?? null, ['php', 'laravel', 'testbench'], true)
             || ! in_array($configuration['parallel_processes'] ?? null, self::CONCURRENCY, true)) {
@@ -314,12 +476,6 @@ final readonly class Collector
             );
         }
 
-        $migration = $configuration['migration'] ?? null;
-
-        if ($migration !== null) {
-            $this->migration($migration);
-        }
-
         /** @var array{
          *     evaluation_id: string,
          *     team: string,
@@ -327,9 +483,9 @@ final readonly class Collector
          *     frontend: 'pest'|'phpunit',
          *     runtime: 'php'|'laravel'|'testbench',
          *     parallel_processes: int,
+         *     baseline_revision: string,
          *     baseline_command_argv: list<string>,
-         *     drove_command_argv: list<string>,
-         *     migration: null|array<string, mixed>
+         *     drove_command_argv: list<string>
          * } $validated
          */
         $validated = [
@@ -339,9 +495,9 @@ final readonly class Collector
             'frontend' => $configuration['frontend'],
             'runtime' => $configuration['runtime'],
             'parallel_processes' => $configuration['parallel_processes'],
+            'baseline_revision' => $configuration['baseline_revision'],
             'baseline_command_argv' => $baseline,
             'drove_command_argv' => $drove,
-            'migration' => $migration,
         ];
 
         return $validated;
@@ -390,36 +546,6 @@ final readonly class Collector
         return $value;
     }
 
-    private function migration(mixed $migration): void
-    {
-        if (! is_array($migration)) {
-            throw new InvalidArgumentException('migration must be an object or null.');
-        }
-
-        $required = [
-            'ci_started_at',
-            'ci_started_revision',
-            'ci_started_run_url',
-            'ci_verified_at',
-            'ci_verified_revision',
-            'ci_verified_run_url',
-            'drove_step_name',
-            'meaningful',
-        ];
-        $keys = array_keys($migration);
-        sort($keys, SORT_STRING);
-
-        if ($keys !== $required
-            || ($migration['meaningful'] ?? null) !== true
-            || array_any(
-                array_diff($required, ['meaningful']),
-                static fn (string $field): bool => ! is_string($migration[$field] ?? null)
-                    || $migration[$field] === '',
-            )) {
-            throw new InvalidArgumentException('migration evidence is incomplete.');
-        }
-    }
-
     /**
      * @param  list<string>  $command
      * @return array<string, array{id: string, source: string}>
@@ -430,7 +556,6 @@ final readonly class Collector
         string $output,
         string $log,
     ): array {
-        $relativeOutput = '.drove/evaluation-work/'.basename($output);
         $measurement = $this->measure(
             $root,
             [
@@ -438,7 +563,7 @@ final readonly class Collector
                 '--do-not-cache-result',
                 '--no-logging',
                 '--list-tests-xml',
-                $relativeOutput,
+                $output,
             ],
             $log,
         );
@@ -965,7 +1090,7 @@ final readonly class Collector
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<array-key, mixed>
      */
     private function jsonFile(string $path): array
     {
@@ -1066,6 +1191,386 @@ final readonly class Collector
         return $identity;
     }
 
+    private function worktreeContainer(string $purpose): string
+    {
+        $container = str_replace(
+            '\\',
+            '/',
+            sys_get_temp_dir()."/drove-evaluation-{$purpose}-".bin2hex(random_bytes(16)),
+        );
+
+        if (! @mkdir($container, 0700)) {
+            throw new RuntimeException(
+                "Drove could not create a private {$purpose} directory.",
+            );
+        }
+
+        if (! @chmod($container, 0700)) {
+            @rmdir($container);
+
+            throw new RuntimeException(
+                "Drove could not secure its private {$purpose} directory.",
+            );
+        }
+
+        return $container;
+    }
+
+    private function createDetachedWorktree(
+        string $root,
+        string $worktreeRoot,
+        string $revision,
+        string $purpose,
+    ): void {
+        if ($this->git(
+            $root,
+            ['worktree', 'add', '--detach', $worktreeRoot, $revision],
+        )['exit'] !== 0
+            || ! is_dir($worktreeRoot)
+            || ! @chmod($worktreeRoot, 0700)) {
+            throw new RuntimeException(
+                "Drove could not create the detached {$purpose} worktree.",
+            );
+        }
+    }
+
+    private function removeDetachedWorktree(
+        string $root,
+        string $worktreeRoot,
+        string $container,
+        string $purpose,
+    ): void {
+        $removeFailed = is_dir($worktreeRoot)
+            && $this->git(
+                $root,
+                ['worktree', 'remove', '--force', $worktreeRoot],
+            )['exit'] !== 0;
+        $directoryFailure = null;
+
+        try {
+            if (is_dir($container)) {
+                $this->removeWorktreeDirectory($container);
+            }
+        } catch (RuntimeException $exception) {
+            $directoryFailure = $exception;
+        }
+
+        $pruneFailed = $this->git($root, ['worktree', 'prune'])['exit'] !== 0;
+
+        if ($removeFailed || $pruneFailed || $directoryFailure instanceof RuntimeException) {
+            throw new RuntimeException(
+                "Drove could not remove and prune its {$purpose} worktree.",
+                previous: $directoryFailure,
+            );
+        }
+    }
+
+    private function removeWorktreeDirectory(string $directory): void
+    {
+        $temporary = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/');
+
+        if (dirname($directory) !== $temporary
+            || preg_match(
+                '/\Adrove-evaluation-(?:baseline|evaluation)-[0-9a-f]{32}\z/D',
+                basename($directory),
+            ) !== 1) {
+            throw new RuntimeException('Drove refused to remove an unsafe worktree path.');
+        }
+
+        $this->removeTree($directory);
+    }
+
+    private function assertNoTrackedVendor(string $root, string $revision): void
+    {
+        $tracked = $this->git(
+            $root,
+            ['ls-tree', '-r', '--name-only', '-z', $revision, '--', 'vendor'],
+            false,
+        );
+
+        if ($tracked['exit'] !== 0) {
+            throw new RuntimeException(
+                'Drove evidence could not inspect the baseline Composer tree.',
+            );
+        }
+
+        if ($tracked['output'] !== '') {
+            throw new RuntimeException(
+                'The baseline revision must not contain tracked vendor files.',
+            );
+        }
+    }
+
+    private function assertEvaluationDelta(
+        string $root,
+        string $projectRevision,
+        string $evaluationRevision,
+    ): void {
+        if ($projectRevision === $evaluationRevision
+            || $this->git(
+                $root,
+                ['merge-base', '--is-ancestor', $projectRevision, $evaluationRevision],
+            )['exit'] !== 0) {
+            throw new RuntimeException(
+                'The project revision must be a strict ancestor of the evaluation revision.',
+            );
+        }
+
+        $renames = $this->git(
+            $root,
+            [
+                'diff',
+                '--diff-filter=R',
+                '--name-only',
+                '-z',
+                "{$projectRevision}..{$evaluationRevision}",
+            ],
+            false,
+        );
+
+        if ($renames['exit'] !== 0 || $renames['output'] !== '') {
+            throw new RuntimeException(
+                'Evaluation revision must not contain renamed project paths.',
+            );
+        }
+
+        $diff = $this->git(
+            $root,
+            [
+                'diff',
+                '--no-renames',
+                '--name-only',
+                '-z',
+                "{$projectRevision}..{$evaluationRevision}",
+            ],
+            false,
+        );
+
+        if ($diff['exit'] !== 0) {
+            throw new RuntimeException('Drove evidence could not inspect the evaluation delta.');
+        }
+
+        $changed = [];
+
+        foreach (array_filter(
+            explode("\0", $diff['output']),
+            static fn (string $path): bool => $path !== '',
+        ) as $path) {
+            $changed[] = $path;
+
+            if (in_array(
+                $path,
+                ['composer.json', 'composer.lock', '.drove/evaluation-config.json'],
+                true,
+            )) {
+                continue;
+            }
+
+            if (preg_match('#\A\.github/workflows/[^/]+\.ya?ml\z#', $path) === 1) {
+                continue;
+            }
+
+            throw new RuntimeException(
+                "Evaluation revision changes unsupported project path: {$path}.",
+            );
+        }
+
+        foreach (['composer.json', 'composer.lock', '.drove/evaluation-config.json'] as $required) {
+            if (! in_array($required, $changed, true)) {
+                throw new RuntimeException(
+                    "Evaluation revision must change required project path: {$required}.",
+                );
+            }
+        }
+    }
+
+    /**
+     * @param  'pest'|'phpunit'  $frontend
+     * @param  array{tag: string, revision: string}  $drove
+     * @return array{
+     *     baseline_lock_sha256: string,
+     *     evaluation_lock_sha256: string,
+     *     baseline_runner: array{package: string, version: string, revision: string}
+     * }
+     */
+    private function dependencyState(
+        string $baselineRoot,
+        string $evaluationRoot,
+        string $frontend,
+        array $drove,
+    ): array {
+        $baselineLockPath = $baselineRoot.'/composer.lock';
+        $evaluationLockPath = $evaluationRoot.'/composer.lock';
+        $baselineInstalledPath = $baselineRoot.'/vendor/composer/installed.json';
+        $evaluationInstalledPath = $evaluationRoot.'/vendor/composer/installed.json';
+
+        foreach ([
+            $baselineLockPath,
+            $evaluationLockPath,
+            $baselineInstalledPath,
+            $evaluationInstalledPath,
+        ] as $path) {
+            if (! is_file($path)) {
+                throw new RuntimeException(
+                    'Independent baseline evidence requires both Composer locks and installed.json files.',
+                );
+            }
+        }
+
+        $this->assertTrackedFile($baselineRoot, 'composer.lock');
+        $this->assertTrackedFile($evaluationRoot, 'composer.lock');
+
+        $baselineLock = $this->jsonFile($baselineLockPath);
+        $evaluationLock = $this->jsonFile($evaluationLockPath);
+        $baselineInstalled = $this->jsonFile($baselineInstalledPath);
+        $evaluationInstalled = $this->jsonFile($evaluationInstalledPath);
+        [$runnerPackage, $runnerVersion] = $frontend === 'pest'
+            ? ['pestphp/pest', '5.0.1']
+            : ['phpunit/phpunit', '13.2.4'];
+        $lockedRunner = $this->composerPackage($baselineLock, $runnerPackage);
+        $installedRunner = $this->composerPackage($baselineInstalled, $runnerPackage);
+
+        if ($lockedRunner === null
+            || $installedRunner === null
+            || $this->composerVersion($lockedRunner) !== $runnerVersion
+            || $this->composerVersion($installedRunner) !== $runnerVersion
+            || $this->composerPackage($baselineLock, 'oxhq/drove') !== null
+            || $this->composerPackage($baselineInstalled, 'oxhq/drove') !== null) {
+            throw new RuntimeException(
+                "Baseline Composer state must contain {$runnerPackage} {$runnerVersion} and exclude oxhq/drove.",
+            );
+        }
+
+        $runnerReferences = $this->composerReferences($lockedRunner);
+        $runnerRevision = count($runnerReferences) === 1 ? $runnerReferences[0] : null;
+
+        if (! is_string($runnerRevision)
+            || preg_match('/\A[0-9a-f]{40}\z/', $runnerRevision) !== 1
+            || $this->composerReferences($installedRunner) !== [$runnerRevision]) {
+            throw new RuntimeException(
+                'Installed baseline runner must match the exact locked revision.',
+            );
+        }
+
+        $evaluationLockedRunner = $this->composerPackage($evaluationLock, $runnerPackage);
+        $evaluationInstalledRunner = $this->composerPackage(
+            $evaluationInstalled,
+            $runnerPackage,
+        );
+        $evaluationDrove = $this->composerPackage($evaluationLock, 'oxhq/drove');
+        $evaluationInstalledDrove = $this->composerPackage(
+            $evaluationInstalled,
+            'oxhq/drove',
+        );
+        $expectedVersion = ltrim($drove['tag'], 'v');
+
+        if ($frontend === 'phpunit') {
+            if ($evaluationLockedRunner === null
+                || $evaluationInstalledRunner === null
+                || $this->composerVersion($evaluationLockedRunner) !== $runnerVersion
+                || $this->composerVersion($evaluationInstalledRunner) !== $runnerVersion
+                || $this->composerReferences($evaluationLockedRunner) !== [$runnerRevision]
+                || $this->composerReferences($evaluationInstalledRunner) !== [$runnerRevision]) {
+                throw new RuntimeException(
+                    'Evaluation Composer state must use the exact baseline PHPUnit runner.',
+                );
+            }
+        } elseif ($evaluationLockedRunner !== null || $evaluationInstalledRunner !== null) {
+            throw new RuntimeException(
+                'Evaluation Composer state must replace pestphp/pest with oxhq/drove.',
+            );
+        }
+
+        if ($evaluationDrove === null
+            || $evaluationInstalledDrove === null
+            || $this->composerVersion($evaluationDrove) !== $expectedVersion
+            || $this->composerVersion($evaluationInstalledDrove) !== $expectedVersion
+            || $this->composerReferences($evaluationDrove) !== [$drove['revision']]
+            || $this->composerReferences($evaluationInstalledDrove) !== [$drove['revision']]) {
+            throw new RuntimeException(
+                'Evaluation Composer state must contain oxhq/drove matching the evaluated tag and revision.',
+            );
+        }
+
+        $baselineHash = hash_file('sha256', $baselineLockPath);
+        $evaluationHash = hash_file('sha256', $evaluationLockPath);
+
+        if (! is_string($baselineHash) || ! is_string($evaluationHash)) {
+            throw new RuntimeException('Drove evidence could not hash Composer lock state.');
+        }
+
+        return [
+            'baseline_lock_sha256' => $baselineHash,
+            'evaluation_lock_sha256' => $evaluationHash,
+            'baseline_runner' => [
+                'package' => $runnerPackage,
+                'version' => $runnerVersion,
+                'revision' => $runnerRevision,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $document
+     * @return null|array<string, mixed>
+     */
+    private function composerPackage(array $document, string $name): ?array
+    {
+        $packages = array_is_list($document)
+            ? $document
+            : [
+                ...(is_array($document['packages'] ?? null) ? $document['packages'] : []),
+                ...(is_array($document['packages-dev'] ?? null) ? $document['packages-dev'] : []),
+            ];
+
+        foreach ($packages as $package) {
+            if (is_array($package)
+                && is_string($package['name'] ?? null)
+                && strcasecmp($package['name'], $name) === 0) {
+                return $package;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $package
+     */
+    private function composerVersion(array $package): ?string
+    {
+        $version = $package['pretty_version'] ?? $package['version'] ?? null;
+
+        if (! is_string($version)) {
+            return null;
+        }
+
+        return str_starts_with($version, 'v')
+            ? substr($version, 1)
+            : $version;
+    }
+
+    /**
+     * @param  array<string, mixed>  $package
+     * @return list<string>
+     */
+    private function composerReferences(array $package): array
+    {
+        $references = [];
+
+        foreach (['source', 'dist'] as $kind) {
+            $reference = is_array($package[$kind] ?? null)
+                ? ($package[$kind]['reference'] ?? null)
+                : null;
+
+            if (is_string($reference) && $reference !== '') {
+                $references[] = $reference;
+            }
+        }
+
+        return array_values(array_unique($references));
+    }
+
     private function root(string $root): string
     {
         $resolved = realpath($root);
@@ -1075,6 +1580,13 @@ final readonly class Collector
         }
 
         return str_replace('\\', '/', $resolved);
+    }
+
+    private function assertTrackedFile(string $root, string $path): void
+    {
+        if ($this->git($root, ['ls-files', '--error-unmatch', '--', $path])['exit'] !== 0) {
+            throw new RuntimeException("Drove evidence requires tracked {$path}.");
+        }
     }
 
     private function relativeFile(string $root, string $path): string
@@ -1104,6 +1616,7 @@ final readonly class Collector
     private function assertTrackedClean(
         string $root,
         bool $allowEvidenceWork = false,
+        bool $allowVendor = false,
     ): void {
         $untracked = $this->git(
             $root,
@@ -1121,7 +1634,9 @@ final readonly class Collector
             explode("\0", $untracked['output']),
             static fn (string $path): bool => $path !== ''
                 && (! $allowEvidenceWork
-                    || ! str_starts_with($path, '.drove/evaluation-work/')),
+                    || ! str_starts_with($path, '.drove/evaluation-work/'))
+                && (! $allowVendor
+                    || ($path !== 'vendor' && ! str_starts_with($path, 'vendor/'))),
         ));
 
         if ($this->git($root, ['diff', '--quiet'])['exit'] !== 0

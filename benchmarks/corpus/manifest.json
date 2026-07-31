@@ -1,7 +1,7 @@
 {
     "schema_version": 5,
     "initial_proof_revision": "cc182e4263da6b4c5c1e5b7c4f9d23a5ebdc0346",
-    "candidate_version": "0.4.0-alpha.2",
+    "candidate_version": "0.4.0-alpha.3",
     "evaluation_version": "0.4.0-alpha.1",
     "release_overlay_version": "0.4.0-alpha.1",
     "ladder": [

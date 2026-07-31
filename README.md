@@ -10,17 +10,17 @@ by the lifecycle kernel, and scheduled through the Rust-backed Drover engine.
 The Composer package is `oxhq/drove`; it replaces Pest 5.0.1 only to keep the
 compatible plugin surface installable during the extraction.
 
-> **Experimental alpha:** `v0.4.0-alpha.2` is not a stable compatibility
-> promise. It is the technical evaluation release and does not claim external
-> validation. The candidate `v0.4.0-alpha.3` remains gated by design-partner
-> evidence. Use the live authorities below to verify package availability,
-> native assets, and hosted evidence for an exact release.
+> **Experimental alpha:** `v0.4.0-alpha.3` is the technical evaluation release,
+> not a stable compatibility promise. It does not claim external validation.
+> Its schema-2 evidence will gate candidate `v0.4.0-alpha.4`. Use the live
+> authorities below to verify package availability, native assets, and hosted
+> evidence for an exact release.
 
 | Public artifact | Live authority |
 | --- | --- |
 | `oxhq/drove` | [Packagist](https://packagist.org/packages/oxhq/drove) |
 | `oxhq/drove-laravel` | [Packagist](https://packagist.org/packages/oxhq/drove-laravel) |
-| Linux and macOS native archives | [`v0.4.0-alpha.2` release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) |
+| Linux and macOS native archives | [`v0.4.0-alpha.3` release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.3) |
 | Hosted external corpus | [External Corpus workflow](https://github.com/oxhq/drove/actions/workflows/corpus.yml) |
 | External design partners | [`docs/design-partner-validation.md`](docs/design-partner-validation.md) |
 
@@ -48,15 +48,17 @@ The proven compatibility surface includes:
 Install the tagged packages from Packagist:
 
 ```bash
-composer require --dev oxhq/drove:^0.4@alpha
+composer require --dev oxhq/drove:0.4.0-alpha.3
 vendor/bin/drove-install-native
 vendor/bin/drove --version
 vendor/bin/drove --compatibility
 ```
 
-The [published-package gate #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
-resolved both tagged packages from Packagist and passed on Linux and macOS,
-x86_64 and ARM64.
+The historical `v0.4.0-alpha.2`
+[published-package gate #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
+resolved both tagged packages from Packagist on Linux and macOS, x86_64 and
+ARM64. It is not hosted proof for `v0.4.0-alpha.3`; use the live authorities
+above for the exact current tag.
 
 The native install does not install or trust Pest, PHPUnit, ParaTest,
 Collision, Termwind, Symfony Process, or the Pest Composer plugin.
@@ -93,11 +95,13 @@ package.
 Laravel/Testbench users will also install the matching alpha:
 
 ```bash
-composer require --dev oxhq/drove-laravel:^0.4@alpha
+composer require --dev oxhq/drove-laravel:0.4.0-alpha.3
 ```
 
 Drove's packaged `vendor/bin/pest` is a bridge alias, not an independent Pest
-baseline. Use separate dependency trees for comparisons. See the
+baseline. Gate-counting comparisons use the `v0.4.0-alpha.3` schema-2 collector,
+which reconstructs the original dependency tree from a recorded revision.
+`alpha.2` evaluator output does not count. See the
 [migration, troubleshooting, and rollback guide](docs/migration-from-pest.md).
 
 ## Run the compatibility gate
@@ -159,15 +163,17 @@ The external correctness ladder is Pest, InvoiceShelf, Livewire, then Filament.
 Each rung is a curated compatibility cohort, not whole-suite adoption proof.
 The pinned ladder covers all four rungs, ending with Filament's 677-case
 nonserial cohort at 1, 2, 4, 8, 16, and 30 Drove processes plus its 28-case
-filesystem-sensitive cohort at 1. The release-SHA full ladder is accepted in
+filesystem-sensitive cohort at 1. The historical `alpha.2` release-SHA full
+ladder was accepted in
 [External Corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130);
 the stored
 [compatibility benchmark](benchmarks/results/2026-07-30-corpus-2146dd4b.md)
 retains requested/observed lanes, counts, milliseconds, and memory sources as a
 single-sample diagnostic rather than a performance claim. Nucleus is
 deliberately excluded because its Docker/MySQL suite is not part of this
-portable corpus. The tagged
-[corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.2/benchmarks/corpus)
+portable corpus. The linked run proves `alpha.2` only; it is not hosted
+`alpha.3` evidence. The tagged
+[corpus source](https://github.com/oxhq/drove/tree/v0.4.0-alpha.3/benchmarks/corpus)
 records revisions, selections, dependency overlays, and normalization rules.
 
 ## Bridge coverage, interruption, and replay

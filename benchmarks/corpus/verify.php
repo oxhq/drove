@@ -25,7 +25,7 @@ if (($manifest['ladder'] ?? null) !== ['pest', 'invoiceshelf', 'livewire', 'fila
     $errors[] = 'manifest ladder must keep Filament last';
 }
 
-if (($manifest['candidate_version'] ?? null) !== '0.4.0-alpha.2'
+if (($manifest['candidate_version'] ?? null) !== '0.4.0-alpha.3'
     || ($manifest['evaluation_version'] ?? null) !== '0.4.0-alpha.1'
     || ($manifest['release_overlay_version'] ?? null)
         !== ($manifest['evaluation_version'] ?? null)) {

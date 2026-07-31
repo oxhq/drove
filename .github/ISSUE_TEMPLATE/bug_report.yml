@@ -34,7 +34,7 @@ body:
     attributes:
       label: Drove Version
       description: Include the exact tag or commit.
-      placeholder: v0.4.0-alpha.2
+      placeholder: v0.4.0-alpha.3
     validations:
       required: true
   - type: input

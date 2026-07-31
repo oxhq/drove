@@ -52,7 +52,7 @@ The following invariants apply to every feature declared supported:
 | 4. Native Laravel prepared runtime | **COMPLETE — HOSTED** | [Native Laravel #30569880652](https://github.com/oxhq/drove/actions/runs/30569880652) accepted the provider, C1–C30, fault, preflight, and cleanup matrix |
 | 5. Bounded one-fork execution | **COMPLETE — HOSTED** | [Native Topology #30569880771](https://github.com/oxhq/drove/actions/runs/30569880771) accepted topology, telemetry, reliability, cancellation, and controlled performance at `5984beb9` |
 | 6. Bridges and migration corpus | **COMPLETE — HOSTED** | [Full corpus #30587352130](https://github.com/oxhq/drove/actions/runs/30587352130) accepted the release-SHA pinned ladder ending with Filament |
-| 7. Public experimental release | **TECHNICAL RELEASE PUBLISHED — EXTERNAL EVIDENCE PENDING** | [`v0.4.0-alpha.2`](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) is installable and [Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018) passed; candidate `v0.4.0-alpha.3` still requires 3 design partners and 2 retained migrations |
+| 7. Public experimental release | **TECHNICAL `alpha.3` EVALUATION RELEASE — EXTERNAL EVIDENCE PENDING** | [`v0.4.0-alpha.3`](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.3) carries the schema-2 evaluator; candidate `v0.4.0-alpha.4` still requires 3 design partners and 2 retained migrations |
 
 No phase is complete merely because its code exists. Its exit proof must be
 recorded in hosted CI with the fixture, command, revision, and normalized
@@ -373,25 +373,35 @@ Exit gates:
   is not native-frontend coverage evidence.
 - At least three external design partners run the scanner and benchmark. At
   least two migrate a meaningful suite, retain Drove in CI for two weeks, and
-  report reproducible before/after artifacts.
+  report reproducible before/after artifacts. Benchmark evidence proves
+  **R < evaluation E < artifact F**. Each retained migration separately proves
+  **E <= CI start S < verification V** and keeps the exact `alpha.3` Drove
+  package revision locked at **S** and **V** for at least 14 complete days.
 - Public release notes distinguish native guarantees, bridge compatibility,
   known unsupported surfaces, and evidence that remains local or experimental.
 
-The technical evaluation release `v0.4.0-alpha.2` is published on
-[GitHub](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2) and
+The historical technical release `v0.4.0-alpha.2` was published on GitHub and
 Packagist.
 [Native release #30588903021](https://github.com/oxhq/drove/actions/runs/30588903021)
 built, attested, and published all four native targets from the annotated tag.
 [Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
 resolved both tagged Composer packages and passed the installed-consumer gate
 on those four targets. This technical release intentionally makes no external
-validation claim; it is the installable build that unaffiliated teams evaluate.
+validation claim. Its single-tree evaluator cannot provide an independent Pest
+or PHPUnit baseline, so `alpha.2` evaluation output does not count toward the
+external gate; the technical packaging and corpus evidence remain valid.
 
-The candidate `v0.4.0-alpha.3` remains blocked: the external ledger currently
-records 0 of 3 design partners and 0 of 2 retained migrations. Its release path
-requires two artifact-backed migrations retained for at least 14 days. Drove
-does not manufacture repository-owned evidence or apply that irreducibly
-external gate to the build needed to collect it.
+The technical evaluation release `v0.4.0-alpha.3` carries the corrected
+schema-2 evaluator. It records an original baseline revision, reconstructs its
+dependency tree in a disposable detached worktree, and compares it with a
+strict descendant evaluation revision that installs Drove. No hosted run ID is
+recorded yet for `alpha.3`, and the release makes no external-validation claim.
+
+Evidence from that tagged release gates candidate `v0.4.0-alpha.4`. The
+external ledger currently records 0 of 3 design partners and 0 of 2 retained
+migrations; the candidate requires two artifact-backed migrations retained for
+at least 14 days. Drove does not manufacture repository-owned evidence or apply
+that irreducibly external gate to the build needed to collect it.
 
 An alpha tag can become visible to Packagist before its tag-ref rebuild
 finishes. Root promotion therefore builds and verifies branch-ref provenance,

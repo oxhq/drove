@@ -41,7 +41,7 @@ scopes create zero hosts. Aggregate PID and memory telemetry includes both.
 
 The Composer archive includes this runtime note but excludes Rust sources and
 development fixtures. Run these commands from the matching tagged
-[source checkout](https://github.com/oxhq/drove/tree/v0.4.0-alpha.2).
+[source checkout](https://github.com/oxhq/drove/tree/v0.4.0-alpha.3).
 
 The standalone ABI smoke is:
 

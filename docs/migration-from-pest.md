@@ -2,21 +2,19 @@
 
 Drove keeps a deliberately small Pest surface while Drove owns scope planning,
 scope lifecycle, native scheduling, result aggregation, and rendering. The
-technical evaluation [GitHub release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.2),
+technical evaluation [GitHub release](https://github.com/oxhq/drove/releases/tag/v0.4.0-alpha.3),
 [Packagist package](https://packagist.org/packages/oxhq/drove), and
 [hosted workflows](https://github.com/oxhq/drove/actions) are the live
-authorities for the exact `v0.4.0-alpha.2` artifacts.
-[Native release #30588903021](https://github.com/oxhq/drove/actions/runs/30588903021)
-published the four native targets, and
-[Published package #30589230018](https://github.com/oxhq/drove/actions/runs/30589230018)
-resolved both tagged packages from Packagist on all four targets. This release
-intentionally precedes external validation; evidence collected with it gates
-candidate `v0.4.0-alpha.3`.
+authorities for the exact `v0.4.0-alpha.3` artifacts. This technical evaluation
+release intentionally makes no external-validation claim; evidence collected
+with its schema-2 evaluator gates candidate `v0.4.0-alpha.4`. The historical
+`alpha.2` schema-1 collector used one dependency tree and is superseded; its
+output does not count.
 
 ## Install
 
 ```bash
-composer require --dev oxhq/drove:^0.4@alpha
+composer require --dev oxhq/drove:0.4.0-alpha.3
 vendor/bin/drove-install-native
 vendor/bin/drove --version
 vendor/bin/drove --compatibility
@@ -52,7 +50,7 @@ To build from source, use the tagged repository checkout. Building the library
 additionally requires Rust 1.88:
 
 ```bash
-git clone --branch v0.4.0-alpha.2 --depth 1 \
+git clone --branch v0.4.0-alpha.3 --depth 1 \
   https://github.com/oxhq/drove.git
 cd drove
 composer install
@@ -81,11 +79,59 @@ declares that it replaces Pest 5.0.1 for plugin compatibility.
 
 `oxhq/drove` replaces `pestphp/pest` in Composer, and Drove's packaged
 `vendor/bin/pest` is a compatibility alias. It is not an independent Pest
-baseline. Run Pest and Drove from separate clean worktrees or containers bound
-to the same project revision and selected case IDs. Preserve the original
-Pest `composer.json` and lock for the baseline; install Drove only in the
-evaluation checkout. A semantic or assertion difference is a compatibility
-bug.
+baseline. For a gate-counting evaluation, record the clean original revision
+**R**, create evaluation branch **E** from it, and install Drove only in **E**.
+Schema-2 `baseline_revision` binds the comparison to the full 40-character
+SHA for **R**. The collector creates fresh detached worktrees at **R** and
+**E**, runs `composer install` from each unchanged tracked lock, executes the
+baseline in the first and Drove in the second, then removes both. Users do not
+prepare or reuse either `vendor` tree.
+
+Across `R..E`, `composer.json`, `composer.lock`, and
+`.drove/evaluation-config.json` must each be changed and cannot be removed or
+renamed. Beyond those three files, only direct `.github/workflows/*.yml` or
+`.github/workflows/*.yaml` files may change. If Drove needs a source or test
+edit, that checkout does not qualify for the external compatibility gate.
+
+The baseline dependency tree is intentionally exact:
+
+| Frontend | Package required in both the original lock and installed baseline |
+| --- | --- |
+| Pest | `pestphp/pest` `5.0.1` |
+| PHPUnit | `phpunit/phpunit` `13.2.4` |
+
+The original lock at **R** must exclude `oxhq/drove`, and **R** must not track
+`vendor`; the collector validates the freshly installed baseline metadata
+against the lock. The evaluation lock must contain the exact tagged
+`oxhq/drove` version and source revision being evaluated. The Pest bridge in
+**E** additionally requires
+`brianium/paratest ^7.23.0`,
+`nunomaduro/collision ^8.9.5`, `nunomaduro/termwind ^2.4.0`,
+`pestphp/pest-plugin ^5.0.0`, `phpunit/phpunit 13.2.4`, and
+`symfony/process ^8.1.0`.
+
+Record **R** before modifying dependencies, then create **E**:
+
+```bash
+R="$(git rev-parse HEAD)"
+git switch -c drove-evaluation
+```
+
+Install the exact `v0.4.0-alpha.3` tag only in **E**, set
+`baseline_revision` to **R**, commit the allowed Composer/configuration
+changes, and follow the schema-2 protocol in
+[`design-partner-validation.md`](design-partner-validation.md). A semantic,
+status, assertion, or selected-case difference is a compatibility bug.
+
+Benchmark evidence follows **R < E < F**: baseline, evaluation, then sealed
+artifact. Retained-migration metadata is added later to the ledger, never to
+the evaluation config or raw benchmark artifact. Its first successful direct
+Drove CI revision **S** may equal **E** or descend from it; verification
+revision **V** must strictly descend from **S** after at least 14 complete
+days. `composer.lock` at **S** and **V** must contain the same exact
+`oxhq/drove` `0.4.0-alpha.3` version and package revision. Application code may
+evolve between **S** and **V**; both runs must use the same workflow path,
+event, and stable direct Drove step.
 
 ### Troubleshoot an installation
 
