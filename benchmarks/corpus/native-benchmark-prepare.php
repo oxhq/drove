@@ -81,6 +81,7 @@ function nativeBenchmarkPrepareConfig(
             nativeBenchmarkRequire(mkdir($context, 0700), "Cannot create the $corpus build context.");
             nativeBenchmarkRunnerProcess(['git', 'clone', '--quiet', '--no-hardlinks', '--no-checkout', $checkout, $clone]);
             nativeBenchmarkRunnerProcess(['git', '-C', $clone, 'config', 'core.autocrlf', 'false']);
+            nativeBenchmarkRunnerProcess(['git', '-C', $clone, 'config', 'core.longpaths', 'true']);
             nativeBenchmarkRunnerProcess(['git', '-C', $clone, 'checkout', '--quiet', '--detach', $expectedRevisions[$corpus]]);
             $contexts[$corpus] = $context;
         }
