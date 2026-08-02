@@ -1,6 +1,6 @@
 .git
 .temp
-vendor
+**/vendor
 work
 results
 outputs
