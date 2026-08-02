@@ -74,6 +74,7 @@ try {
             'stdout' => $case['stdout'] ?? null,
             'stderr' => $case['stderr'] ?? null,
         ], $nativeCases) : null;
+        is_array($nativeCaseRows) && usort($nativeCaseRows, static fn (array $left, array $right): int => $left['id'] <=> $right['id']);
         $runnable = $pestExpected['cases'] - ($pestExpected['statuses']['skipped'] ?? 0);
         nativeBenchmarkRequire(
             ($proof['schema'] ?? null) === 1
