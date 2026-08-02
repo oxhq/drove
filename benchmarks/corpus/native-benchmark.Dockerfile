@@ -30,8 +30,10 @@ case "$DROVE_NATIVE_BENCHMARK_CORPUS/$DROVE_NATIVE_BENCHMARK_RUNNER" in
     invoiceshelf/baseline)
         cd /corpus
         composer install --no-interaction --no-progress --no-scripts --prefer-dist --quiet
+        git checkout -- composer.lock
         composer dump-autoload --no-interaction --no-scripts --optimize --quiet
         php artisan package:discover --ansi >/dev/null
+        git checkout -- composer.lock
         ;;
     invoiceshelf/native)
         cd /corpus
