@@ -175,6 +175,7 @@ an external `DROVER_LIBRARY` separately.
 | `test()`, `it()`, `describe()`, expectations | Native | Compiled into Drove Scope IR. |
 | `beforeAll`, `beforeEach`, `afterEach`, `afterAll` | Native | Drove owns scope hooks; generated Pest cases preserve per-test hook order. |
 | Named and positional datasets | Compatible | Every selected row receives a stable case ID. |
+| PHP shutdown callbacks | Unsupported | Forked task workers terminate with `_exit`; migration reports `DROVE_NATIVE_UNSUPPORTED_SHUTDOWN_CALLBACK`. Use an explicit Drove lifecycle hook instead. |
 | Custom `TestCase`, `uses()`, `setUp()`, `tearDown()` | Compatible | Instance lifecycle runs in the test child. |
 | Generated Pest static class lifecycle | Compatible subset | Conventional `setUpBeforeClass()` / `tearDownAfterClass()` wrap Pest `beforeAll` / `afterAll`; generated-case attribute class hooks are rejected. |
 | Skips and todos | Compatible | Status and reason are preserved. |
@@ -222,12 +223,12 @@ own kernel lifecycle or scheduling.
 The migration API scans source with PHP tokens and never executes the file:
 
 ```php
-use Drove\Bridge\CompatibilityRegistry;
+use Drove\Compatibility\Registry;
 use Drove\Migration\CodemodOptions;
 use Drove\Migration\Migrator;
 use Drove\Migration\Scanner;
 
-$scanner = new Scanner(CompatibilityRegistry::load());
+$scanner = new Scanner(Registry::load());
 $migrator = new Migrator($scanner);
 $result = $migrator->migrate(
     file_get_contents('tests/Feature/InvoiceTest.php'),

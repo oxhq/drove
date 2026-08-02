@@ -14,6 +14,8 @@ use Throwable;
  */
 final class PcntlScheduler implements Scheduler
 {
+    private static mixed $libc = null;
+
     /** @var array<string, array{read: resource, write: resource}> */
     private array $pools;
 
@@ -48,6 +50,12 @@ final class PcntlScheduler implements Scheduler
             if (! function_exists($function)) {
                 throw new RuntimeException(sprintf('Drove requires %s().', $function));
             }
+        }
+
+        try {
+            self::$libc ??= \FFI::cdef('void _exit(int status);');
+        } catch (Throwable $throwable) {
+            throw new RuntimeException('Drove could not bind the PHP scheduler child-exit boundary.', 0, $throwable);
         }
 
         if ($runId === ''
@@ -128,21 +136,11 @@ final class PcntlScheduler implements Scheduler
         try {
             while ($pending !== [] || $children !== []) {
                 foreach (array_keys($pending) as $ordinal) {
-                    if ($interruption->current() !== null) {
-                        break;
-                    }
-
                     $task = $pending[$ordinal];
                     $permitNames = $task['permit'] ? $this->poolNames($task['scopes']) : [];
 
                     if ($permitNames !== [] && ! $this->tryAcquire($permitNames)) {
                         continue;
-                    }
-
-                    if ($interruption->current() !== null) {
-                        $this->release($permitNames);
-
-                        break;
                     }
 
                     $this->rememberPermits($permitNames);
@@ -465,7 +463,7 @@ final class PcntlScheduler implements Scheduler
                 $this->terminateActiveChildren();
                 $this->releaseHeldPermits();
 
-                exit(128 + SIGTERM);
+                $this->childExit(128 + SIGTERM);
             });
         }
 
@@ -492,7 +490,7 @@ final class PcntlScheduler implements Scheduler
             );
             fclose($socket);
 
-            exit(1);
+            $this->childExit(1);
         }
 
         $startedNs = hrtime(true);
@@ -619,7 +617,14 @@ final class PcntlScheduler implements Scheduler
         $this->releaseHeldPermits();
         fclose($socket);
 
-        exit($status === 'passed' ? 0 : 1);
+        $this->childExit($status === 'passed' ? 0 : 1);
+    }
+
+    private function childExit(int $status): never
+    {
+        self::$libc->_exit($status);
+
+        throw new RuntimeException('The PHP scheduler child exit returned unexpectedly.');
     }
 
     /**

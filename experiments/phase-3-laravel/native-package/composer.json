@@ -1,0 +1,56 @@
+{
+    "name": "drove/native-package-proof",
+    "description": "Bridge-free Laravel package runtime proof.",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../..",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "oxhq/drove": "0.4.0-alpha.1"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../../../packages/drove-laravel",
+            "options": {
+                "reference": "none",
+                "symlink": false,
+                "versions": {
+                    "oxhq/drove-laravel": "0.4.0-alpha.1"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-ffi": "*",
+        "ext-pcntl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_sqlite": "*",
+        "calebporzio/sushi": "^2.5.4",
+        "laravel/framework": "^13.0",
+        "livewire/livewire": "dev-main",
+        "oxhq/drove": "^0.4@alpha",
+        "oxhq/drove-laravel": "^0.4@alpha"
+    },
+    "config": {
+        "allow-plugins": false,
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "*"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

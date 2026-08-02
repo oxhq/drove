@@ -5,8 +5,8 @@ declare(strict_types=1);
 
 use Drove\Evaluation\Collector;
 
-require_once dirname(__DIR__).'/src/Drove/Bridge/CompatibilityStatus.php';
-require_once dirname(__DIR__).'/src/Drove/Bridge/CompatibilityRegistry.php';
+require_once dirname(__DIR__).'/src/Drove/Compatibility/Status.php';
+require_once dirname(__DIR__).'/src/Drove/Compatibility/Registry.php';
 require_once dirname(__DIR__).'/src/Drove/Migration/Finding.php';
 require_once dirname(__DIR__).'/src/Drove/Migration/Scanner.php';
 require_once dirname(__DIR__).'/src/Drove/Kernel/NativeLibrary.php';

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Drove\Bridge;
+namespace Drove\Compatibility;
 
-enum CompatibilityStatus: string
+enum Status: string
 {
     case Supported = 'supported';
     case Unsupported = 'unsupported';

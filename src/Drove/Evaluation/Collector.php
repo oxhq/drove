@@ -8,8 +8,8 @@ use Composer\InstalledVersions;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
-use Drove\Bridge\CompatibilityRegistry;
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Registry;
+use Drove\Compatibility\Status;
 use Drove\Kernel\NativeLibrary;
 use Drove\Migration\Finding;
 use Drove\Migration\Scanner;
@@ -675,14 +675,14 @@ final readonly class Collector
      */
     private function caseIds(string $root, array $cases): array
     {
-        $scanner = new Scanner(CompatibilityRegistry::load());
+        $scanner = new Scanner(Registry::load());
 
         foreach (array_unique(array_column($cases, 'source')) as $source) {
             $findings = $scanner->scanFile($root.'/'.$source);
 
             if (array_any(
                 $findings,
-                static fn (Finding $finding): bool => $finding->status !== CompatibilityStatus::Supported,
+                static fn (Finding $finding): bool => $finding->status !== Status::Supported,
             )) {
                 throw new RuntimeException(
                     "Selected source {$source} has a non-supported scanner finding.",

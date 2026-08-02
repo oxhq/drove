@@ -42,6 +42,10 @@ final class ApplicationRuntime implements EnvironmentRuntime
 
     private readonly ScopeContext $scope;
 
+    private ?LaravelTestContext $testContext = null;
+
+    private ?int $testContextPid = null;
+
     private function __construct(
         private readonly Application $application,
         private readonly DatabaseStateProvider $state,
@@ -252,6 +256,26 @@ final class ApplicationRuntime implements EnvironmentRuntime
     public function scopeContext(): ScopeContext
     {
         return $this->scope;
+    }
+
+    public function testContext(): LaravelTestContext
+    {
+        $pid = getmypid();
+
+        if (! is_int($pid)) {
+            throw new StateAdapterException(
+                'Native Laravel could not resolve the current process ID.',
+            );
+        }
+
+        if ($this->testContextPid !== $pid) {
+            $this->testContext = new LaravelTestContext($this->application);
+            $this->testContextPid = $pid;
+        }
+
+        return $this->testContext ?? throw new StateAdapterException(
+            'Native Laravel could not create its test context.',
+        );
     }
 
     /**

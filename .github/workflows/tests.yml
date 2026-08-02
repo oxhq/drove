@@ -71,6 +71,29 @@ jobs:
       if: matrix.os == 'ubuntu-latest' && matrix.php == '8.4'
       run: composer test:native-phase-1:static
 
+    - name: Native class frontend and pinned Livewire migration
+      if: matrix.os == 'ubuntu-latest' && matrix.php == '8.4'
+      shell: bash
+      run: |
+        set -euo pipefail
+        git init .temp/livewire-native-inspect
+        git -C .temp/livewire-native-inspect remote add origin https://github.com/livewire/livewire.git
+        git -C .temp/livewire-native-inspect fetch --depth=1 origin 9c1450739d30c9b0b223ad6512be2a33f8f62f96
+        git -C .temp/livewire-native-inspect checkout --detach FETCH_HEAD
+        test "$(git -C .temp/livewire-native-inspect rev-parse HEAD)" = 9c1450739d30c9b0b223ad6512be2a33f8f62f96
+        test -z "$(git -C .temp/livewire-native-inspect status --porcelain)"
+        composer test:native-expectation-catalog
+        composer test:native-expectation-catalog:static
+        composer test:native-corpus-inventory
+        composer test:native-corpus-inventory:static
+        composer test:native-benchmark
+        composer test:native-benchmark:static
+        composer test:native-class-frontend
+        composer test:native-class-migration
+        composer test:native-class-migration:static
+        composer test:native-laravel-migration:static
+        composer test:native-corpus-1:static
+
     - name: Native Phase 1 C1/C4 parity
       if: matrix.os == 'ubuntu-latest' && matrix.php == '8.4'
       shell: bash
@@ -116,7 +139,7 @@ jobs:
                   || ($summary["lifecycle_checked"]["nested_trace"] ?? null) !== ["before_each", "before_each", "after_each", "after_each"]
                   || ($summary["lifecycle_checked"]["failed_trace"] ?? null) !== ["before_each:passed", "before_each:passed", "after_each:passed", "after_each:passed"]
                   || ($summary["lifecycle_checked"]["scope_hook_counts"] ?? null) !== ["before_all" => 2, "after_all" => 2]
-                  || $summary["test_count"] !== 7) {
+                  || $summary["test_count"] !== 13) {
                   throw new RuntimeException($label." summary contains invalid proof metrics.");
               }
               foreach (["plan_hash", "semantic_hash"] as $field) {
@@ -126,17 +149,17 @@ jobs:
               }
               if (! is_array($summary["executor_pids"])
                   || ! array_is_list($summary["executor_pids"])
-                  || count($summary["executor_pids"]) !== 7
-                  || count(array_unique($summary["executor_pids"], SORT_REGULAR)) !== 7) {
-                  throw new RuntimeException($label." executor_pids must contain seven unique PIDs.");
+                  || count($summary["executor_pids"]) !== 13
+                  || count(array_unique($summary["executor_pids"], SORT_REGULAR)) !== 13) {
+                  throw new RuntimeException($label." executor_pids must contain thirteen unique PIDs.");
               }
               foreach ($summary["executor_pids"] as $pid) {
                   if (! is_int($pid) || $pid <= 0) {
                       throw new RuntimeException($label." executor_pids must be positive integers.");
                   }
               }
-              if (! is_array($summary["tests"]) || ! array_is_list($summary["tests"]) || count($summary["tests"]) !== 7) {
-                  throw new RuntimeException($label." tests must contain exactly seven results.");
+              if (! is_array($summary["tests"]) || ! array_is_list($summary["tests"]) || count($summary["tests"]) !== 13) {
+                  throw new RuntimeException($label." tests must contain exactly thirteen results.");
               }
 
               return [

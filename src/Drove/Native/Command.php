@@ -147,6 +147,8 @@ final class Command
                 foreach ($files as $file) {
                     require $file;
                 }
+
+                (new ClassFrontend)->declareFiles($files);
             },
             $root,
             'Drove native',

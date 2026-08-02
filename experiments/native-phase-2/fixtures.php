@@ -41,6 +41,16 @@ final class AlphaEntrypoint implements Entrypoint
         {
             public function match(MatchInput $input): MatchResult
             {
+                if (
+                    ! is_string($input->case['id'] ?? null)
+                    || ! str_starts_with((string) ($input->case['name'] ?? ''), 'extension case ')
+                    || ! str_ends_with((string) ($input->case['source']['path'] ?? ''), 'experiments/native-phase-2/suite.php')
+                    || ($input->case['dataset'] ?? null) !== null
+                    || $input->case['groups'] !== []
+                ) {
+                    throw new RuntimeException('The matcher did not receive normalized native case identity.');
+                }
+
                 return is_int($input->actual) && $input->actual % 2 === 0
                     ? MatchResult::pass()
                     : MatchResult::fail('Expected an even integer.');

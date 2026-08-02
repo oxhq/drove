@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Drove\Migration;
 
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Status;
 use InvalidArgumentException;
 use JsonSerializable;
 
@@ -12,7 +12,7 @@ final readonly class Finding implements JsonSerializable
 {
     public function __construct(
         public string $surface,
-        public CompatibilityStatus $status,
+        public Status $status,
         public string $construct,
         public string $path,
         public int $line,

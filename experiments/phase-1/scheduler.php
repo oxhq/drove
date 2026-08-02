@@ -90,21 +90,23 @@ $assert(
     'An out-of-memory fatal error was not classified.',
 );
 
+$shutdownSentinel = sys_get_temp_dir().'/drove-pcntl-shutdown-'.bin2hex(random_bytes(8));
 $cleanup = new PcntlScheduler('scheduler-cleanup', 1, termGraceMs: 25);
 $started = hrtime(true);
 $cleanupRun = $cleanup->map(
-    [$task('hung-shutdown', timeout: 200)],
-    static function (): string {
-        register_shutdown_function(static fn () => usleep(1_500_000));
+    [$task('suppressed-shutdown', timeout: 200)],
+    static function () use ($shutdownSentinel): string {
+        register_shutdown_function(static fn () => file_put_contents($shutdownSentinel, 'ran'));
 
         return 'terminal-sent';
     },
 );
 $cleanupMs = (hrtime(true) - $started) / 1_000_000;
 $assert(
-    $cleanupRun['results'][0]['failure']['kind'] === FailureKind::Timeout->value
-        && $cleanupMs < 700,
-    'A child remained alive after its terminal frame and escaped the timeout bound.',
+    $cleanupRun['results'][0]['status'] === 'passed'
+        && $cleanupMs < 700
+        && ! file_exists($shutdownSentinel),
+    'The PHP scheduler executed inherited shutdown work past the task boundary.',
 );
 
 $escaped = new PcntlScheduler('scheduler-escaped', 1, termGraceMs: 25);

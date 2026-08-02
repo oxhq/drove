@@ -150,8 +150,45 @@
         ],
         "test:native-phase-6-bridges": "php experiments/native-phase-6-bridges/proof.php",
         "test:native-phase-6-bridges:static": [
-            "phpstan analyse src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges --no-progress --memory-limit=512M",
-            "pint --test src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges packages/drove-laravel/src/TestbenchBridge.php"
+            "phpstan analyse src/Drove/Compatibility src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Compatibility src/Drove/CompatibilityRegistry.php src/Drove/Bridge src/Drove/Migration src/Drove/Native/Surface/DependencyGuard.php experiments/native-phase-6-bridges packages/drove-laravel/src/TestbenchBridge.php"
+        ],
+        "test:native-corpus-1": "bash experiments/native-corpus-1/run.sh",
+        "test:native-corpus-1:environment": "bash experiments/native-corpus-1/run.sh --lock-only",
+        "test:native-corpus-1:static": [
+            "@test:native-corpus-1:environment",
+            "phpstan analyse experiments/native-corpus-1/proof.php experiments/native-corpus-1/PestCorpusCodemod.php experiments/native-corpus-1/fixtures.php experiments/native-corpus-1/exclusions.php experiments/native-corpus-1/generate-baseline.php experiments/native-corpus-1/dataset-diagnostic-command.php experiments/native-corpus-1/dataset-diagnostics benchmarks/corpus/PestDatasetIdentity.php benchmarks/corpus/verify-native-pest-environment.php --no-progress --memory-limit=512M",
+            "pint --test experiments/native-corpus-1 benchmarks/corpus/PestDatasetIdentity.php benchmarks/corpus/verify-native-pest-environment.php"
+        ],
+        "test:native-corpus-inventory": "php benchmarks/corpus/verify-native-surface-inventory.php",
+        "test:native-corpus-inventory:static": [
+            "phpstan analyse benchmarks/corpus/PestDatasetIdentity.php benchmarks/corpus/generate-native-surface-inventory.php benchmarks/corpus/verify-native-surface-inventory.php experiments/native-corpus-1/PestCorpusCodemod.php experiments/native-corpus-1/codemod-options.php experiments/native-invoiceshelf-corpus/codemod-options.php experiments/native-filament-corpus/profile.php experiments/native-filament-corpus/case-parity.php experiments/native-filament-corpus/generate-baseline.php experiments/native-filament-corpus/verify-baseline.php experiments/native-filament-corpus/gate.php --no-progress --memory-limit=512M",
+            "pint --test benchmarks/corpus/PestDatasetIdentity.php benchmarks/corpus/generate-native-surface-inventory.php benchmarks/corpus/verify-native-surface-inventory.php experiments/native-corpus-1/codemod-options.php experiments/native-invoiceshelf-corpus/codemod-options.php experiments/native-filament-corpus/profile.php experiments/native-filament-corpus/case-parity.php experiments/native-filament-corpus/generate-baseline.php experiments/native-filament-corpus/verify-baseline.php experiments/native-filament-corpus/gate.php experiments/native-filament-corpus/proof.php"
+        ],
+        "test:native-benchmark": "php benchmarks/corpus/native-benchmark-self-test.php",
+        "test:native-benchmark:static": [
+            "phpstan analyse benchmarks/corpus/PestDatasetIdentity.php benchmarks/corpus/native-benchmark.php benchmarks/corpus/native-benchmark-corpora.php benchmarks/corpus/native-benchmark-evidence.php benchmarks/corpus/native-benchmark-measure.php benchmarks/corpus/native-benchmark-prepare.php benchmarks/corpus/native-benchmark-runner.php benchmarks/corpus/native-benchmark-self-test.php experiments/native-invoiceshelf-corpus/gate.php experiments/native-filament-corpus/case-parity.php experiments/native-filament-corpus/gate.php experiments/phase-3-laravel/native-package/gate.php --no-progress --memory-limit=512M",
+            "pint --test benchmarks/corpus/native-benchmark.php benchmarks/corpus/native-benchmark-corpora.php benchmarks/corpus/native-benchmark-evidence.php benchmarks/corpus/native-benchmark-measure.php benchmarks/corpus/native-benchmark-prepare.php benchmarks/corpus/native-benchmark-runner.php benchmarks/corpus/native-benchmark-self-test.php experiments/native-invoiceshelf-corpus/gate.php experiments/native-filament-corpus/gate.php experiments/phase-3-laravel/native-package/gate.php"
+        ],
+        "test:native-expectation-catalog": "php experiments/native-expectation-catalog/proof.php",
+        "test:native-expectation-catalog:static": [
+            "phpstan analyse src/Drove/Native/Expectation.php src/Drove/Migration/Scanner.php src/Drove/Migration/Migrator.php src/Drove/Native/Surface/SupportedSurface.php experiments/native-expectation-catalog/proof.php --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Native/Expectation.php src/Drove/Migration/Scanner.php src/Drove/Migration/Migrator.php src/Drove/Native/Surface/SupportedSurface.php experiments/native-expectation-catalog"
+        ],
+        "test:native-class-frontend": "php experiments/native-class-frontend/proof.php",
+        "test:native-class-migration": "php experiments/native-class-migration/proof.php",
+        "test:native-class-migration:static": [
+            "phpstan analyse src/Drove/Native/Attributes src/Drove/Native/ClassFrontend.php src/Drove/Migration/AssertionCallMigrator.php src/Drove/Migration/ClassMigrator.php experiments/native-class-frontend experiments/native-class-migration --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Native/Attributes src/Drove/Native/ClassFrontend.php src/Drove/Migration/AssertionCallMigrator.php src/Drove/Migration/ClassMigrator.php experiments/native-class-frontend experiments/native-class-migration"
+        ],
+        "test:native-laravel-migration": "php experiments/native-laravel-migration/proof.php",
+        "test:native-laravel-migration:static": [
+            "phpstan analyse src/Drove/Migration/AssertionCallMigrator.php src/Drove/Migration/LaravelMigrator.php src/Drove/Migration/LaravelMigrationResult.php experiments/native-laravel-migration --no-progress --memory-limit=512M",
+            "pint --test src/Drove/Migration/AssertionCallMigrator.php src/Drove/Migration/LaravelMigrator.php src/Drove/Migration/LaravelMigrationResult.php experiments/native-laravel-migration"
+        ],
+        "test:native-livewire-package": [
+            "Composer\\Config::disableProcessTimeout",
+            "php experiments/phase-3-laravel/native-package/gate.php"
         ],
         "test:package-boundary": "php scripts/verify-package-boundary.php",
         "test:parallel": "php bin/pest --exclude-group=integration --parallel --processes=3",

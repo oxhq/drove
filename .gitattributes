@@ -5,6 +5,9 @@
 /benchmarks                           export-ignore
 /docker                               export-ignore
 /experiments                          export-ignore
+/experiments/native-corpus-1/baseline.json text eol=lf
+/benchmarks/corpus/locks/*.lock          text eol=lf
+*.sh                                    text eol=lf
 /native/drover/abi-smoke.c            export-ignore
 /native/drover/Cargo.lock             export-ignore
 /native/drover/Cargo.toml             export-ignore

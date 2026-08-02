@@ -1,0 +1,134 @@
+{
+    "schema": 1,
+    "measurement_kind": "correctness-only",
+    "corpus": "InvoiceShelf/InvoiceShelf",
+    "commit": "403a4d67225a153838ec126c484339abf60229d1",
+    "proof": "experiments/native-invoiceshelf-corpus/proof.php",
+    "selection": {
+        "files": 47,
+        "cases": 202,
+        "assertions": 328,
+        "case_names_sha256": "fd5cde4956db4190ada9f6ae83bfe934377686ade020f17763ec6fcb2eaabc6a",
+        "source_identity_sha256": "cce8db4965fa15ccbda5036e65633ad85a4631dd98e00533c229380d06f7e930",
+        "case_semantics_sha256": "7159f3f05f154ffb9f0112f9f74d6a98147482b3d1fddbc5af8f392e4f79c057",
+        "named_dataset_cases": 29,
+        "numeric_dataset_cases": 4
+    },
+    "independent_baseline": {
+        "runner": "Pest 4.4.3 / PHPUnit 12.5.14",
+        "manifest_sha256": "d698b896b72569a943689d79e1e42852ecd8accfd4072f655e02286bdb32fb00",
+        "lock_sha256": "d208f91d6c45de03bb2684b76051db6de28a6983b1c454bbc999e9c171df0342",
+        "packages": 179,
+        "contains_drove": false,
+        "normalized_rows": 202,
+        "fields": [
+            "id",
+            "status",
+            "assertions",
+            "stdout",
+            "stderr"
+        ],
+        "exact_native_match": true
+    },
+    "prepared_database": {
+        "format": "sqlite-logical-v1",
+        "sha256": "a0045ae4d7b5c7f0124843b5b1d14d12e62cf153823498bf2cfd8940cf0b606e",
+        "tables": 48,
+        "columns": 563,
+        "rows": 161,
+        "migrations": 155,
+        "addresses": 0
+    },
+    "database_preparation_clock": "2000-01-01 00:00:00 UTC",
+    "database_digest_mutation": {
+        "table": "settings",
+        "before_sha256": "a0045ae4d7b5c7f0124843b5b1d14d12e62cf153823498bf2cfd8940cf0b606e",
+        "mutated_sha256": "4a5ae9eed139bf78d7d6a1c332241af02081c2dc8ef43838bcd29afceeaf7bf6",
+        "restored_sha256": "a0045ae4d7b5c7f0124843b5b1d14d12e62cf153823498bf2cfd8940cf0b606e",
+        "detected": true,
+        "rollback_restored": true
+    },
+    "application_tree": {
+        "excluded": [
+            ".git",
+            "vendor"
+        ],
+        "files": 1513,
+        "sha256_before": "bedf7670bb036233bc34c6863850a3958f57dd84030d86edb22e3485561ab1f7",
+        "sha256_after_fault_and_matrix": "bedf7670bb036233bc34c6863850a3958f57dd84030d86edb22e3485561ab1f7",
+        "unchanged": true
+    },
+    "external_test_runtime": {
+        "pest": false,
+        "phpunit": false,
+        "testbench": false,
+        "project_base_test_case": false
+    },
+    "runs": [
+        {
+            "requested_processes": 1,
+            "observed_peak_lanes": 1,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        },
+        {
+            "requested_processes": 2,
+            "observed_peak_lanes": 2,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        },
+        {
+            "requested_processes": 4,
+            "observed_peak_lanes": 4,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        },
+        {
+            "requested_processes": 8,
+            "observed_peak_lanes": 8,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        },
+        {
+            "requested_processes": 16,
+            "observed_peak_lanes": 16,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        },
+        {
+            "requested_processes": 30,
+            "observed_peak_lanes": 30,
+            "runnable_cases": 202,
+            "telemetry_cases": 202,
+            "unique_executor_pids": 202,
+            "distinct_descendant_pids": 202,
+            "one_child_pid_per_case": true,
+            "semantic_match": true
+        }
+    ],
+    "proof_boundary": {
+        "timings_recorded": false,
+        "performance_interpretation": false,
+        "c1_optimization_claim": false
+    }
+}

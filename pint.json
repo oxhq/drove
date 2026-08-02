@@ -1,0 +1,8 @@
+{
+    "preset": "laravel",
+    "exclude": [
+        ".temp",
+        "work",
+        "experiments/phase-3-laravel/native-package/tmp"
+    ]
+}

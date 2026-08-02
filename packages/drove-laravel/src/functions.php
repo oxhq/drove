@@ -6,6 +6,9 @@ namespace Drove\Laravel;
 
 use Closure;
 use Drove\Laravel\Contracts\DatabaseStateProvider;
+use Illuminate\Container\Container;
+use Illuminate\Foundation\Application;
+use LogicException;
 
 use function Drove\Native\environment;
 
@@ -28,4 +31,87 @@ function laravel(
             $prepare,
         ),
     );
+}
+
+function laravelContext(): LaravelTestContext
+{
+    $application = Container::getInstance();
+
+    if (! $application instanceof Application
+        || ! $application->bound(ApplicationRuntime::class)) {
+        throw new LogicException(
+            'Drove Laravel test helpers require an active native Laravel environment.',
+        );
+    }
+
+    $runtime = $application->make(ApplicationRuntime::class);
+
+    return $runtime->testContext();
+}
+
+/** @param array<string, string> $headers */
+function get(string $uri, array $headers = []): LaravelResponse
+{
+    return laravelContext()->get($uri, $headers);
+}
+
+/** @param array<string, string> $headers */
+function getJson(
+    string $uri,
+    array $headers = [],
+    int $options = 0,
+): LaravelResponse {
+    return laravelContext()->getJson($uri, $headers, $options);
+}
+
+/**
+ * @param  array<array-key, mixed>  $data
+ * @param  array<string, string>  $headers
+ */
+function postJson(
+    string $uri,
+    array $data = [],
+    array $headers = [],
+    int $options = 0,
+): LaravelResponse {
+    return laravelContext()->postJson($uri, $data, $headers, $options);
+}
+
+/**
+ * @param  array<array-key, mixed>  $data
+ * @param  array<string, string>  $headers
+ */
+function putJson(
+    string $uri,
+    array $data = [],
+    array $headers = [],
+    int $options = 0,
+): LaravelResponse {
+    return laravelContext()->putJson($uri, $data, $headers, $options);
+}
+
+/**
+ * @param  array<array-key, mixed>  $data
+ * @param  array<string, string>  $headers
+ */
+function patchJson(
+    string $uri,
+    array $data = [],
+    array $headers = [],
+    int $options = 0,
+): LaravelResponse {
+    return laravelContext()->patchJson($uri, $data, $headers, $options);
+}
+
+/**
+ * @param  array<array-key, mixed>  $data
+ * @param  array<string, string>  $headers
+ */
+function deleteJson(
+    string $uri,
+    array $data = [],
+    array $headers = [],
+    int $options = 0,
+): LaravelResponse {
+    return laravelContext()->deleteJson($uri, $data, $headers, $options);
 }

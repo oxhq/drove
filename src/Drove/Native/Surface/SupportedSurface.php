@@ -65,6 +65,20 @@ final readonly class SupportedSurface implements JsonSerializable
     }
 
     /**
+     * @return array<string, true>
+     */
+    public function methodSet(string $context): array
+    {
+        if (! in_array($context, ['declaration', 'expectation', 'hook'], true)) {
+            throw new UnexpectedValueException(
+                sprintf('Drove does not define a supported method context named [%s].', $context),
+            );
+        }
+
+        return $this->names('methods', $context);
+    }
+
+    /**
      * @return list<array{
      *     code: string,
      *     construct: string,
@@ -117,6 +131,7 @@ final readonly class SupportedSurface implements JsonSerializable
 
         $declarations = $this->names('functions', 'declaration');
         $expectations = $this->names('functions', 'expectation');
+        $hooks = $this->names('functions', 'hook');
         $unsupportedFunctions = $this->codes('functions');
         $unsupportedMethods = $this->codes('methods');
         $knownFunctions = array_fill_keys([
@@ -207,7 +222,9 @@ final readonly class SupportedSurface implements JsonSerializable
 
             $context = isset($declarations[$name])
                 ? 'declaration'
-                : (isset($expectations[$name]) ? 'expectation' : null);
+                : (isset($expectations[$name])
+                    ? 'expectation'
+                    : (isset($hooks[$name]) ? 'hook' : null));
 
             if ($context === null) {
                 continue;
@@ -291,7 +308,7 @@ final readonly class SupportedSurface implements JsonSerializable
         }
 
         $methods = $this->section('methods');
-        $this->exactKeys($methods, ['context', 'declaration', 'expectation'], 'methods');
+        $this->exactKeys($methods, ['context', 'declaration', 'expectation', 'hook'], 'methods');
 
         foreach ($methods as $name => $values) {
             $this->identifierList($values, 'methods.'.$name);
@@ -304,7 +321,7 @@ final readonly class SupportedSurface implements JsonSerializable
         $diagnostics = $this->section('diagnostics');
         $this->exactKeys(
             $diagnostics,
-            ['declaration_method', 'expectation_method', 'frontend', 'function_alias', 'higher_order', 'parse'],
+            ['declaration_method', 'expectation_method', 'frontend', 'function_alias', 'higher_order', 'hook_method', 'parse'],
             'diagnostics',
         );
         $this->codeMap($diagnostics, 'diagnostics');

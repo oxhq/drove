@@ -21,6 +21,7 @@ final readonly class LifecycleExecutor
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $enterDescendant
      * @param  null|Closure(ScopeContext, array<string, mixed>): void  $leaveDescendant
      * @param  null|Closure(ScopeContext, list<array<string, mixed>>): void  $afterDispatch
+     * @param  null|Closure(array<string, mixed>): void  $runtimeAudit
      */
     public function __construct(
         private Scheduler $scheduler,
@@ -30,6 +31,7 @@ final readonly class LifecycleExecutor
         private ?Closure $enterDescendant = null,
         private ?Closure $leaveDescendant = null,
         private ?Closure $afterDispatch = null,
+        private ?Closure $runtimeAudit = null,
     ) {
         //
     }
@@ -52,6 +54,12 @@ final readonly class LifecycleExecutor
             $this->scopeContext($root, $context ?? new ScopeContext),
             [],
         );
+        $this->runtimeAudit?->__invoke([
+            'id' => $this->string($root, 'id'),
+            'kind' => 'root',
+            'scope_id' => $this->string($root, 'id'),
+            'scopes' => [$this->string($root, 'id')],
+        ]);
         $finishedNs = hrtime(true);
         $testIndexes = [];
 
@@ -406,10 +414,14 @@ final readonly class LifecycleExecutor
                         $jobKind = $job['kind'];
                         $jobLevels = $frame['levels'];
                         $descendantContext = $jobKind === 'test'
-                            ? $jobContext->child(['test_id' => $task['id']])
+                            ? $jobContext->child([
+                                'test_id' => $task['id'],
+                                'case' => ['id' => $task['id']] + $this->testMetadata($jobNode),
+                            ])
                             : $this->scopeContext($jobNode, $jobContext);
                         $result = null;
                         $primaryFailure = null;
+                        $auditFailure = null;
 
                         try {
                             $this->enterDescendant?->__invoke($descendantContext, $task);
@@ -428,8 +440,18 @@ final readonly class LifecycleExecutor
                             }
                         }
 
+                        try {
+                            $this->runtimeAudit?->__invoke($task);
+                        } catch (Throwable $throwable) {
+                            $auditFailure = $throwable;
+                        }
+
                         if ($primaryFailure instanceof Throwable) {
                             throw $primaryFailure;
+                        }
+
+                        if ($auditFailure instanceof Throwable) {
+                            throw $auditFailure;
                         }
 
                         return $result;
@@ -579,6 +601,22 @@ final readonly class LifecycleExecutor
      * @return array<string, mixed>
      */
     private function runTest(array $test, array $levels, ScopeContext $context): array
+    {
+        clearstatcache();
+
+        try {
+            return $this->executeTestLifecycle($test, $levels, $context);
+        } finally {
+            clearstatcache();
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $test
+     * @param  list<array{id: string, before_each: list<string>, after_each: list<string>}>  $levels
+     * @return array<string, mixed>
+     */
+    private function executeTestLifecycle(array $test, array $levels, ScopeContext $context): array
     {
         $testId = $this->string($test, 'id');
 
