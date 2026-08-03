@@ -548,6 +548,7 @@ $verify = static fn (
     callable $candidateRunLoader,
     callable $candidateJobLoader,
     callable $candidateComparisonLoader,
+    bool $partial = false,
 ): array => verifyDesignPartnerLedger(
     $candidateLedger,
     'v0.4.0-alpha.2',
@@ -558,6 +559,7 @@ $verify = static fn (
     $candidateJobLoader,
     $candidateComparisonLoader,
     new DateTimeImmutable('2026-07-01T00:00:00Z'),
+    $partial,
 );
 $result = $verify($ledger, $artifactLoader, $runLoader, $jobLoader, $comparisonLoader);
 
@@ -569,6 +571,50 @@ if (($result['external_evaluations'] ?? null) !== 3
 }
 
 $checks = 1;
+$schemaContents = file_get_contents(dirname(__DIR__).'/docs/design-partner-evidence.schema.json');
+$schema = is_string($schemaContents)
+    ? json_decode($schemaContents, true, flags: JSON_THROW_ON_ERROR)
+    : null;
+
+if (($schema['$defs']['run']['properties']['memory_source']['const'] ?? null) !== 'rss') {
+    throw new RuntimeException('Design-partner memory_source schema drifted from the verifier.');
+}
+$checks++;
+
+$partialLedger = ['schema' => 2, 'evaluations' => [$ledger['evaluations'][2]]];
+$partialResult = $verify(
+    $partialLedger,
+    $artifactLoader,
+    $runLoader,
+    $jobLoader,
+    $comparisonLoader,
+    true,
+);
+
+if (($partialResult['gate'] ?? null) !== 'design-partner-evidence-partial'
+    || ($partialResult['status'] ?? null) !== 'validated'
+    || ($partialResult['release_gate_satisfied'] ?? null) !== false
+    || ($partialResult['external_evaluations'] ?? null) !== 1
+    || ($partialResult['meaningful_migrations'] ?? null) !== 0) {
+    throw new RuntimeException('Partial design-partner validation must never satisfy the release gate.');
+}
+$checks++;
+
+$invalidPartialLedger = $partialLedger;
+$invalidPartialLedger['evaluations'][0]['unexpected'] = true;
+expectDesignPartnerFailure(
+    fn (): array => $verify(
+        $invalidPartialLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+        true,
+    ),
+    'contains unknown field unexpected',
+);
+$checks++;
+
 $expectFailure = static function (callable $test, string $message) use (&$checks): void {
     expectDesignPartnerFailure($test, $message);
     $checks++;
@@ -632,6 +678,40 @@ $expectFailure(
         $comparisonLoader,
     ),
     'requires at least 3 completed external evaluations',
+);
+$expectFailure(
+    fn (): array => $verify(
+        $partialLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+    ),
+    'requires at least 3 completed external evaluations',
+);
+$unknownLedger = $ledger;
+$unknownLedger['unexpected'] = true;
+$expectFailure(
+    fn (): array => $verify(
+        $unknownLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+    ),
+    'ledger contains unknown field unexpected',
+);
+$unknownEvaluationLedger = $ledger;
+$unknownEvaluationLedger['evaluations'][0]['unexpected'] = true;
+$expectFailure(
+    fn (): array => $verify(
+        $unknownEvaluationLedger,
+        $artifactLoader,
+        $runLoader,
+        $jobLoader,
+        $comparisonLoader,
+    ),
+    'evaluations[0] contains unknown field unexpected',
 );
 $duplicateOwnerLedger = $ledger;
 $duplicateOwnerLedger['evaluations'][2]['repository'] =
@@ -817,6 +897,10 @@ $expectInvoiceEvidenceFailure(
     'evidence identity does not match ledger field evaluation_revision',
 );
 $expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): bool => $evidence['unexpected'] = true,
+    'evidence contains unknown field unexpected',
+);
+$expectInvoiceEvidenceFailure(
     static function (array &$evidence): void {
         unset($evidence['dependency_state']);
     },
@@ -988,6 +1072,18 @@ $expectInvoiceEvidenceFailure(
         unset($evidence['benchmark']['runs'][0]['command_argv']);
     },
     'command_argv must be a non-empty argument list',
+);
+$expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): bool => $evidence['benchmark']['runs'][0]['unexpected'] = true,
+    'runs[0] contains unknown field unexpected',
+);
+$expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): int => $evidence['benchmark']['runs'][0]['observed_lanes'] = 1,
+    'runs[0] contains unknown field observed_lanes',
+);
+$expectInvoiceEvidenceFailure(
+    static fn (array &$evidence): string => $evidence['benchmark']['runs'][0]['memory_source'] = 'private-bytes',
+    'has an unsupported runner, frontend, runtime, memory source, or process count',
 );
 $expectInvoiceEvidenceFailure(
     static fn (array &$evidence): array => $evidence['benchmark']['runs'][1]['command_argv'] = ['vendor/bin/pest'],

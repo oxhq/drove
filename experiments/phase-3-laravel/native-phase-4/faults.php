@@ -7,9 +7,22 @@ require __DIR__.'/support.php';
 
 try {
     $identity = nativePhaseFourIdentity();
+    $providers = array_slice($_SERVER['argv'] ?? [], 1);
+    $providers = $providers === []
+        ? ['sqlite-memory', 'sqlite-copy']
+        : array_values(array_unique($providers));
+
+    if (array_any(
+        $providers,
+        static fn (mixed $provider): bool => ! is_string($provider)
+            || ! in_array($provider, ['sqlite-memory', 'sqlite-copy', 'transaction'], true),
+    )) {
+        throw new RuntimeException('Unknown native Laravel fault provider.');
+    }
+
     $cases = [];
 
-    foreach (['sqlite-memory', 'sqlite-copy'] as $provider) {
+    foreach ($providers as $provider) {
         foreach ([
             'prepare',
             'enter',
@@ -68,6 +81,36 @@ try {
                 throw new RuntimeException('Native Laravel fault case identity diverged.');
             }
 
+            if ($provider === 'transaction') {
+                $expectedFragment = match ($fault) {
+                    'prepare' => 'native-phase-4 fault prepare',
+                    'enter' => 'Database connection mysql has an open transaction during enterDescendant.',
+                    'leave' => 'left transaction depth 2',
+                    'cleanup' => 'Database connection mysql has an open transaction during afterDispatch.',
+                };
+                $expectedRootTransactionDepth = $fault === 'cleanup' ? 1 : 0;
+
+                if (($case['failure_fragment'] ?? null) !== $expectedFragment
+                    || ($case['failure_fragment_checked'] ?? null) !== true
+                    || ($case['fault_injection_count'] ?? null) !== 1
+                    || ($case['adapter_boot_count'] ?? null) !== ($fault === 'prepare' ? 0 : 1)
+                    || ($case['prepared_database_rows_before_fixture_teardown'] ?? null) !== ['prepared']
+                    || ($case['prepared_table_present_before_fixture_teardown'] ?? null) !== true
+                    || ($case['prepared_table_present_after_fixture_teardown'] ?? null) !== false
+                    || ($case['fixture_teardown_checked'] ?? null) !== true
+                    || ($case['root_transaction_depth_before_fixture_teardown'] ?? null) !== $expectedRootTransactionDepth
+                    || ($case['provider_residue_count_before_harness_cleanup'] ?? null) !== 0
+                    || ($case['harness_cleanup_required'] ?? null) !== ($fault === 'cleanup')
+                    || ($case['generated_artifact_count'] ?? null) !== 0
+                    || ($case['sqlite_artifact_count'] ?? null) !== 0
+                    || ($case['phpunit_loaded'] ?? null) !== false
+                    || ($case['testbench_loaded'] ?? null) !== false) {
+                    throw new RuntimeException(
+                        'Native Laravel transaction fault cleanup evidence diverged.',
+                    );
+                }
+            }
+
             $cases[] = $case;
         }
     }
@@ -76,6 +119,7 @@ try {
         'schema' => 1,
         'ok' => true,
         ...$identity,
+        'providers' => $providers,
         'case_count' => count($cases),
         'fault_scope' => 'mixed',
         'prepare_failure_case_count' => count(array_filter(

@@ -123,6 +123,8 @@ jobs:
         docker run --rm drove-phase-three-laravel php proof-data-provider.php
 
     - name: Phase 3 Laravel MySQL transaction proof
+      env:
+        EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       run: |
         set -euo pipefail
         docker run --rm \
@@ -133,3 +135,38 @@ jobs:
           --env DB_USERNAME=drove \
           --env DB_PASSWORD=drove \
           drove-phase-three-laravel php proof-mysql.php
+
+        artifact_dir="${RUNNER_TEMP}/native-laravel-transaction"
+        mkdir -p "$artifact_dir"
+        docker run --rm \
+          --network host \
+          --env DB_HOST=127.0.0.1 \
+          --env DB_PORT=3306 \
+          --env DB_DATABASE=drove \
+          --env DB_USERNAME=drove \
+          --env DB_PASSWORD=drove \
+          --env DROVE_EVIDENCE_REVISION="$EXPECTED_SHA" \
+          drove-phase-three-laravel \
+          php -d ffi.enable=true native-phase-4/faults.php transaction \
+          | tee "$artifact_dir/transaction-faults.json"
+        php -r '
+          $proof = json_decode(file_get_contents($argv[1]), true, 128, JSON_THROW_ON_ERROR);
+          if (($proof["schema"] ?? null) !== 1
+              || ($proof["ok"] ?? null) !== true
+              || ($proof["evidence_revision"] ?? null) !== getenv("EXPECTED_SHA")
+              || ($proof["providers"] ?? null) !== ["transaction"]
+              || ($proof["case_count"] ?? null) !== 4
+              || ($proof["prepare_failure_case_count"] ?? null) !== 1
+              || ($proof["provider_internal_partial_failure_case_count"] ?? null) !== 3) {
+              throw new RuntimeException("Native transaction fault matrix is invalid.");
+          }
+        ' "$artifact_dir/transaction-faults.json"
+
+    - name: Upload native transaction fault evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: native-laravel-transaction-faults-${{ github.event.pull_request.head.sha || github.sha }}
+        path: ${{ runner.temp }}/native-laravel-transaction/*.json
+        if-no-files-found: error
+        retention-days: 90

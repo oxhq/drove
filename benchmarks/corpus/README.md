@@ -19,14 +19,15 @@ must pass before any revision can claim the recorded calibration.
 Nucleus is intentionally excluded. The portable ladder uses Pest,
 InvoiceShelf, Livewire, and finally Filament.
 
-## Hosted tiers
+## Hosted gates
 
-`.github/workflows/corpus.yml` runs:
-
-- **Required smoke** on pull requests and `develop`: Pest plus InvoiceShelf.
-- **Full ladder** weekly, manually, and for `v0.*` tags: full-suite
-  classification followed by the calibrated execution cohorts for Pest,
-  InvoiceShelf, Livewire, and finally Filament.
+`.github/workflows/corpus.yml` keeps the bridge-free native ladder separate and
+runs Pest, InvoiceShelf, Livewire, and finally Filament on every pull request
+and `develop` push. `.github/workflows/compatibility-corpus.yml` independently
+runs full-suite classification, the installed bridge/dependency guard, and all
+calibrated compatibility cohorts on pull requests, `develop`, the weekly
+schedule, manual dispatches, and `v0.*` tags. Filament is the final,
+non-skippable rung in both workflows.
 
 The full Livewire selection retains all 288 calibrated cases at one process.
 Its separate 36-case cohort uses seven unchanged Testbench files whose test
@@ -46,9 +47,9 @@ The calibrated Filament cohort runs its 677 parallel-safe cases at
 run starts from a fresh copy of one migrated database and verifies its SHA-256,
 an empty snapshot directory, and the absence of transient SQLite files.
 
-The workflow uploads raw logs, measurement JSON, normalized results, replay
-metadata, and one aggregate `benchmark-report.json` for 90 days. The gate
-rejects:
+The compatibility workflow uploads raw logs, measurement JSON, normalized
+results, replay metadata, and one aggregate `benchmark-report.json` for 90
+days. The gate rejects:
 
 - a corpus commit or selected-file count mismatch;
 - a changed selected source root;
