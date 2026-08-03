@@ -7,7 +7,9 @@ use Drove\Evaluation\Collector;
 
 require_once dirname(__DIR__).'/src/Drove/Compatibility/Status.php';
 require_once dirname(__DIR__).'/src/Drove/Compatibility/Registry.php';
+require_once dirname(__DIR__).'/src/Drove/Migration/CodemodOptions.php';
 require_once dirname(__DIR__).'/src/Drove/Migration/Finding.php';
+require_once dirname(__DIR__).'/src/Drove/Native/Surface/SupportedSurface.php';
 require_once dirname(__DIR__).'/src/Drove/Migration/Scanner.php';
 require_once dirname(__DIR__).'/src/Drove/Kernel/NativeLibrary.php';
 require_once dirname(__DIR__).'/src/Drove/Evaluation/Collector.php';

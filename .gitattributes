@@ -1,3 +1,4 @@
+/.dockerignore                        export-ignore
 /.github                              export-ignore
 /.idea                                export-ignore
 /.temp                                export-ignore
@@ -41,6 +42,7 @@
 /phpstan-pest-extension.neon          export-ignore
 /phpstan.neon                         export-ignore
 /phpunit.xml                          export-ignore
+/pint.json                            export-ignore
 /rector.php                           export-ignore
 /RELEASE.md                           export-ignore
 *.swo                                 export-ignore

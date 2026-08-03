@@ -284,7 +284,7 @@ foreach ($tracked as $source) {
     $sourcePath = $source['path'] ?? null;
     $expected = $source['sha256'] ?? null;
     $actual = is_string($sourcePath) && is_file($root.'/'.$sourcePath)
-        ? hash_file('sha256', $root.'/'.$sourcePath)
+        ? hashSource($root.'/'.$sourcePath)
         : false;
 
     if (! is_string($expected) || ! is_string($actual) || ! hash_equals($expected, $actual)) {
@@ -302,3 +302,14 @@ echo json_encode([
     'totals' => $totals,
     'sha256' => hash('sha256', $contents),
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL;
+
+function hashSource(string $path): string
+{
+    $contents = file_get_contents($path);
+
+    if (! is_string($contents)) {
+        throw new RuntimeException("Cannot hash $path");
+    }
+
+    return hash('sha256', str_replace(["\r\n", "\r"], "\n", $contents));
+}

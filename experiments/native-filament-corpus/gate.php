@@ -343,6 +343,7 @@ php /drove/benchmarks/corpus/measure.php \
     "/artifacts/filament-pest-${DROVE_FILAMENT_BASELINE_COHORT}-c1.raw.log" -- \
     php -d auto_prepend_file= vendor/bin/pest --configuration=phpunit.xml.dist \
         "$DROVE_FILAMENT_BASELINE_GROUP" \
+        --do-not-cache-result \
         "--log-junit=/artifacts/filament-pest-${DROVE_FILAMENT_BASELINE_COHORT}-c1.xml" \
         $(cat "$selection")
 SH;

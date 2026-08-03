@@ -10,11 +10,11 @@
     "source_contract": {
         "manifest_schema_version": 5,
         "manifest_path": "benchmarks/corpus/manifest.json",
-        "manifest_sha256": "f871873a0420f186dbe675044b890431c55a60f6f48d50a4114e2e9f4c20be58",
+        "manifest_sha256": "970c755add710b7abf02e9c5ae35b450011221b0dac75690b2e0f4be06cb22c4",
         "generator_path": "benchmarks/corpus/generate-native-surface-inventory.php",
-        "generator_sha256": "a39c19cacc12f62487c3453ddb66a0bbb26d72f60465ea2a0aae1a924ddd755c",
+        "generator_sha256": "2dd9b414a03291cfe14e62881b70bae28c9360dd81f72f232996da6d2cfb011f",
         "verifier_path": "benchmarks/corpus/verify-native-surface-inventory.php",
-        "verifier_sha256": "410c4d350513ba6330cf531bf6b03aacc2951f15f7eb7dbb7c8a7f292d416682",
+        "verifier_sha256": "12bc50be4303cba345c1ccffd3f3104eaf4c9f476416ce089db6106c9425e991",
         "selector_path": "benchmarks/corpus/select.sh",
         "selector_sha256": "2f6a6bbba2b114b371c2e3d6aa0fe64b618e7c271bd6cf8ce8ad42ef55cb446b",
         "native_surface_path": "src/Drove/Native/Surface/supported-surface.json",
@@ -27,11 +27,11 @@
         "migration_analyzers": [
             {
                 "path": "benchmarks/corpus/generate-native-surface-inventory.php",
-                "sha256": "a39c19cacc12f62487c3453ddb66a0bbb26d72f60465ea2a0aae1a924ddd755c"
+                "sha256": "2dd9b414a03291cfe14e62881b70bae28c9360dd81f72f232996da6d2cfb011f"
             },
             {
                 "path": "benchmarks/corpus/verify-native-surface-inventory.php",
-                "sha256": "410c4d350513ba6330cf531bf6b03aacc2951f15f7eb7dbb7c8a7f292d416682"
+                "sha256": "12bc50be4303cba345c1ccffd3f3104eaf4c9f476416ce089db6106c9425e991"
             },
             {
                 "path": "experiments/native-corpus-1/PestCorpusCodemod.php",

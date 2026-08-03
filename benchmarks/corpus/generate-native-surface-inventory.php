@@ -1557,13 +1557,13 @@ function findingBlocker(string $stage, Finding $finding): array
 
 function hashFile(string $path): string
 {
-    $hash = hash_file('sha256', $path);
+    $contents = file_get_contents($path);
 
-    if (! is_string($hash)) {
+    if (! is_string($contents)) {
         throw new RuntimeException("Cannot hash $path");
     }
 
-    return $hash;
+    return hash('sha256', str_replace(["\r\n", "\r"], "\n", $contents));
 }
 
 function gitBlobHash(string $root, string $path): string

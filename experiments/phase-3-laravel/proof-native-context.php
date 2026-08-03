@@ -232,7 +232,7 @@ try {
         || ($run['exit_code'] ?? null) !== 0
         || count($tests) !== 2
         || array_column($tests, 'status') !== ['passed', 'passed']
-        || array_column($tests, 'assertions') !== [11, 9]
+        || array_column($tests, 'assertions') !== [11, 10]
         || $rootRows !== [['id' => 1, 'value' => 'prepared']]
         || $phpunitLoadedBefore
         || $phpunitLoadedAfter

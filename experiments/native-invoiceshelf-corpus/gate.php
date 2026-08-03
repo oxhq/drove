@@ -393,7 +393,7 @@ SH,
 set -eu
 find tests/Unit tests/Feature/Customer -type f -name '*.php' -print | LC_ALL=C sort > /tmp/selection
 test "$(wc -l < /tmp/selection | tr -d '[:space:]')" = 47
-php vendor/bin/pest --configuration=phpunit.xml --colors=never \
+php vendor/bin/pest --configuration=phpunit.xml --colors=never --do-not-cache-result \
     --log-junit=/artifacts/invoiceshelf-pest-baseline.xml $(cat /tmp/selection)
 SH,
     ], $root, 900);
