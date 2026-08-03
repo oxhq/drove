@@ -144,7 +144,9 @@ gates, release policy, and tag-ref attestations.
 9. Record both native-release run IDs (branch promotion and tag publication),
    the exact tags, root and split commits, and published-package workflow
    runs, Packagist versions, and normalized consumer artifacts in the release
-   notes.
+   notes. A technical evaluation release must also link directly to the
+   design-partner guide and submission form, including the native-library step
+   required before its evaluator runs.
 
 Packagist publication and GitHub artifacts are separate gates. A green source
 workflow does not prove either one. The temporary webhook pause prevents a

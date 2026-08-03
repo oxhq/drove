@@ -7,6 +7,7 @@ body:
       value: |
         This is an evaluation, not an endorsement. Only evidence from a canonical public GitHub repository can count toward the release gate. Private feedback remains useful but does not count. Do not include proprietary tests, secrets, or unredacted application output.
         Benchmark evidence uses baseline R < evaluation E < artifact F. Retention is separate: CI start S may equal E or descend from it, verification V must strictly descend after 14 complete days, and the exact Drove v0.4.0-alpha.3 package revision must remain locked at S and V. Migration metadata belongs in the ledger submission, not the evaluation config or raw artifact.
+        Before `vendor/bin/drove-evaluate collect`, run `vendor/bin/drove-install-native` and invoke the collector with the absolute package-local `DROVER_LIBRARY` shown in the design-partner guide.
   - type: input
     id: project
     attributes:

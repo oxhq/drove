@@ -23,14 +23,22 @@ $package = [
     'revision' => str_repeat('a', 40),
 ];
 $originalPath = getenv('PATH');
+$originalNativeLibrary = getenv('DROVER_LIBRARY');
 $checks = 0;
 
 try {
     mkdir($root, 0700, true);
     mkdir($root.'/tests', 0700, true);
     mkdir($fakeBin, 0700, true);
+    mkdir($directory.'/native', 0700, true);
+    file_put_contents($directory.'/libdrover.so', "fixture\n");
+    file_put_contents(
+        $fakeBin.'/native-library',
+        realpath($directory.'/libdrover.so')."\n",
+    );
     evidenceFakeComposer($fakeBin);
     putenv('PATH='.$fakeBin.PATH_SEPARATOR.(is_string($originalPath) ? $originalPath : ''));
+    putenv('DROVER_LIBRARY='.$directory.'/native/../libdrover.so');
     file_put_contents(
         $root.'/.gitignore',
         "/vendor/\n/.drove/evaluation-work/\n",
@@ -376,6 +384,9 @@ PHP,
     ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL;
 } finally {
     is_string($originalPath) ? putenv('PATH='.$originalPath) : putenv('PATH');
+    is_string($originalNativeLibrary)
+        ? putenv('DROVER_LIBRARY='.$originalNativeLibrary)
+        : putenv('DROVER_LIBRARY');
     evidenceRemove($directory);
 }
 
@@ -474,6 +485,11 @@ declare(strict_types=1);
 
 $expected = ['install', '--no-interaction', '--no-progress', '--prefer-dist'];
 
+if (getenv('DROVER_LIBRARY') !== false) {
+    fwrite(STDERR, "native library leaked into Composer\n");
+    exit(63);
+}
+
 if (array_slice($argv, 1) !== $expected) {
     fwrite(STDERR, "unexpected Composer argv\n");
     usleep(50_000);
@@ -562,6 +578,7 @@ file_put_contents(
 );
 if (is_array($drove)) {
     copy(__DIR__.'/drove-fixture', getcwd().'/vendor/bin/drove');
+    copy(__DIR__.'/native-library', getcwd().'/vendor/fixture-native-library');
     chmod(getcwd().'/vendor/bin/drove', 0755);
     file_put_contents(
         getcwd().'/vendor/fixture-observed-lanes',
@@ -581,6 +598,11 @@ PHP,
 <?php
 
 declare(strict_types=1);
+
+if (getenv('DROVER_LIBRARY') !== false) {
+    fwrite(STDERR, "native library leaked into baseline\n");
+    exit(63);
+}
 
 $count = (int) trim((string) file_get_contents(dirname(__DIR__).'/fixture-case-count'));
 $exit = (int) trim((string) file_get_contents(dirname(__DIR__).'/fixture-baseline-exit'));
@@ -620,6 +642,16 @@ PHP,
 <?php
 
 declare(strict_types=1);
+
+$library = getenv('DROVER_LIBRARY');
+$expectedLibrary = trim((string) file_get_contents(dirname(__DIR__).'/fixture-native-library'));
+
+if (! is_string($library)
+    || $library !== $expectedLibrary
+    || realpath($library) !== $library) {
+    fwrite(STDERR, "Drove did not receive the canonical native library\n");
+    exit(63);
+}
 
 $processes = 1;
 $replay = null;
