@@ -12,7 +12,12 @@ LABEL org.oxhq.drove.native-benchmark.corpus="$DROVE_NATIVE_BENCHMARK_CORPUS" \
 
 COPY --from=corpus-source /corpus/ /corpus/
 
-RUN git config --system --add safe.directory /corpus
+RUN if [ "$DROVE_NATIVE_BENCHMARK_CORPUS" = pest ]; then \
+        mv /corpus /pest; \
+        ln -s /pest /corpus; \
+        git config --system --add safe.directory /pest; \
+    fi \
+    && git config --system --add safe.directory /corpus
 
 RUN --mount=type=cache,target=/root/.composer/cache <<'SH'
 set -eu
