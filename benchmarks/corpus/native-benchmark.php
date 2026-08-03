@@ -1451,6 +1451,7 @@ function nativeBenchmarkDockerCommand(string $image, array $quotas, string $corp
 
     return [
         'docker', 'run', '--rm', '--network=none',
+        ...($corpus === 'livewire' ? ['--read-only'] : []),
         '--name={container_name}',
         '--label=org.oxhq.drove.native-benchmark.job-timeout-seconds={job_timeout_seconds}',
         '--cpus='.rtrim(rtrim(sprintf('%.6F', $quotas['cpu_cores']), '0'), '.'),

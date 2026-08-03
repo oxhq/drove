@@ -12,11 +12,15 @@ LABEL org.oxhq.drove.native-benchmark.corpus="$DROVE_NATIVE_BENCHMARK_CORPUS" \
 
 COPY --from=corpus-source /corpus/ /corpus/
 
-RUN if [ "$DROVE_NATIVE_BENCHMARK_CORPUS" = pest ]; then \
-        mv /corpus /pest; \
-        ln -s /pest /corpus; \
-        git config --system --add safe.directory /pest; \
-    fi \
+RUN case "$DROVE_NATIVE_BENCHMARK_CORPUS" in \
+        pest) canonical=/pest ;; \
+        invoiceshelf|filament) canonical=/app ;; \
+        livewire) canonical=/livewire ;; \
+        *) echo "Unknown native benchmark corpus: $DROVE_NATIVE_BENCHMARK_CORPUS" >&2; exit 2 ;; \
+    esac \
+    && mv /corpus "$canonical" \
+    && ln -s "$canonical" /corpus \
+    && git config --system --add safe.directory "$canonical" \
     && git config --system --add safe.directory /corpus
 
 RUN --mount=type=cache,target=/root/.composer/cache <<'SH'

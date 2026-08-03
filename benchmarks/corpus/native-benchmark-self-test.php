@@ -217,8 +217,16 @@ try {
         'pest',
         'native',
     );
+    $livewireDockerCommand = nativeBenchmarkDockerCommand(
+        'sha256:'.str_repeat('b', 64),
+        ['cpu_cores' => 30.0, 'memory_bytes' => 17_179_869_184],
+        'livewire',
+        'native',
+    );
     nativeBenchmarkRequire(
         in_array('--network=none', $dockerCommand, true)
+            && ! in_array('--read-only', $dockerCommand, true)
+            && in_array('--read-only', $livewireDockerCommand, true)
             && in_array('--name={container_name}', $dockerCommand, true)
             && in_array('--label=org.oxhq.drove.native-benchmark.job-timeout-seconds={job_timeout_seconds}', $dockerCommand, true)
             && in_array('--cpus=30', $dockerCommand, true)
