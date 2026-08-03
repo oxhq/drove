@@ -515,7 +515,13 @@ function nativeBenchmarkRunnerRemoveTree(string $directory): void
             foreach ($iterator as $entry) {
                 $path = $entry->getPathname();
 
-                if ($entry->isDir() && ! $entry->isLink()) {
+                if ($entry->isLink()) {
+                    @unlink($path);
+
+                    continue;
+                }
+
+                if ($entry->isDir()) {
                     @chmod($path, 0700);
                     @rmdir($path);
 

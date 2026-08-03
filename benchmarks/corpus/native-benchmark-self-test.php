@@ -20,9 +20,20 @@ try {
         file_put_contents($cleanupSibling, 'sibling') === 7,
         'Could not create the native benchmark cleanup sibling.',
     );
+    $cleanupLink = $cleanupFixture.DIRECTORY_SEPARATOR.'external-link';
+    $siblingMode = null;
+
+    if (@symlink($cleanupSibling, $cleanupLink)) {
+        nativeBenchmarkRequire(chmod($cleanupSibling, 0640), 'Could not set cleanup sibling permissions.');
+        $siblingMode = fileperms($cleanupSibling);
+        nativeBenchmarkRequire(is_int($siblingMode), 'Could not read cleanup sibling permissions.');
+    }
+
     nativeBenchmarkRunnerRemoveTree($cleanupFixture);
     nativeBenchmarkRequire(
-        ! file_exists($cleanupFixture) && file_get_contents($cleanupSibling) === 'sibling',
+        ! file_exists($cleanupFixture)
+            && file_get_contents($cleanupSibling) === 'sibling'
+            && ($siblingMode === null || fileperms($cleanupSibling) === $siblingMode),
         'Native benchmark cleanup escaped its exact target or left fixture residue.',
     );
 
