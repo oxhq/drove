@@ -76,6 +76,7 @@ try {
         ], $nativeCases) : null;
         is_array($nativeCaseRows) && usort($nativeCaseRows, static fn (array $left, array $right): int => $left['id'] <=> $right['id']);
         $runnable = $pestExpected['cases'] - ($pestExpected['statuses']['skipped'] ?? 0);
+        $observedLanes = $proof['native']['concurrency']['observed_peak_lanes'] ?? null;
         nativeBenchmarkRequire(
             ($proof['schema'] ?? null) === 1
                 && ($proof['corpus'] ?? null) === 'pest'
@@ -93,7 +94,9 @@ try {
                 && ($proof['native']['concurrency']['telemetry_cases'] ?? null) === $runnable
                 && ($proof['native']['concurrency']['unique_executor_pids'] ?? null) === $runnable
                 && ($proof['native']['concurrency']['one_child_pid_per_case'] ?? null) === true
-                && ($proof['native']['concurrency']['observed_peak_lanes'] ?? null) === $processes
+                && is_int($observedLanes)
+                && $observedLanes >= 1
+                && $observedLanes <= min($processes, $runnable)
                 && ($proof['forbidden_runtime']['classes'] ?? null) === []
                 && ($proof['forbidden_runtime']['files'] ?? null) === []
                 && ($proof['dependency_loader']['status'] ?? null) === 'n5',

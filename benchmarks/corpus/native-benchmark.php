@@ -650,7 +650,7 @@ function nativeBenchmarkValidateObservation(array $observation, array $job): voi
                 && is_int($runnableCases)
                 && $runnableCases === $expectedRunnableCases
                 && $forks === $runnableCases
-                && $lanes === min($job['requested_processes'], $runnableCases),
+                && $lanes <= $runnableCases,
             "{$job['job_id']} changed native isolation semantics or batched tests.",
         );
     } else {

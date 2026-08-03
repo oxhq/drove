@@ -192,6 +192,12 @@ XML, LOCK_EX);
         $wall = $baseline
             ? 100 + $job['repetition']
             : round(1_000 / $job['requested_processes'], 3) + $job['repetition'];
+        $observedLanes = $baseline ? 1 : min($job['requested_processes'], $job['expected']['cases']);
+
+        if ($job['corpus'] === 'pest' && $job['runner'] === 'native' && $job['requested_processes'] === 2 && $job['repetition'] === 1) {
+            $observedLanes--;
+        }
+
         $observation = [
             'schema_version' => 1,
             'job_id' => $job['job_id'],
@@ -216,7 +222,7 @@ XML, LOCK_EX);
                     : ['preparation' => 3, 'planning' => 2, 'execution' => max(0, $wall - 10), 'verification' => 5],
             ],
             'topology' => [
-                'observed_lanes' => $baseline ? 1 : min($job['requested_processes'], $job['expected']['cases']),
+                'observed_lanes' => $observedLanes,
                 'forks' => $baseline ? 0 : $job['expected']['cases'],
                 'runnable_cases' => $baseline ? null : $job['expected']['cases'],
                 'strategy' => $baseline ? 'upstream' : 'isolated-per-test',
@@ -297,6 +303,19 @@ XML, LOCK_EX);
             ),
         'Self-test report did not preserve the native C1 scaling identity.',
     );
+    $pestC2 = array_values(array_filter(
+        $report['groups'],
+        static fn (array $group): bool => $group['corpus'] === 'pest'
+            && $group['runner'] === 'native'
+            && $group['requested_processes'] === 2,
+    ));
+    nativeBenchmarkRequire(
+        count($pestC2) === 1
+            && $pestC2[0]['observed_lanes']['min'] === 1.0
+            && $pestC2[0]['observed_lanes']['median'] === 2.0
+            && $pestC2[0]['observed_lanes']['max'] === 2.0,
+        'Self-test report did not preserve measured under-saturation.',
+    );
     nativeBenchmarkRequire(
         nativeBenchmarkStatistics([1, 2, 3, 4])['median'] === 2.5
             && nativeBenchmarkStatistics([1, 2, 3, 4])['p95'] === 4.0,
@@ -360,12 +379,20 @@ XML, LOCK_EX);
     ))[0];
     $nativeExecutionJob = nativeBenchmarkExecutionJob($nativeJob, $artifacts);
     $invalid = nativeBenchmarkReadJson($artifacts.DIRECTORY_SEPARATOR.$nativeJob['job_id'].'.json');
-    $invalid['topology']['observed_lanes']--;
+    $invalid['topology']['observed_lanes'] = 0;
     nativeBenchmarkSelfTestRejects(
         static function () use ($invalid, $nativeExecutionJob): void {
             nativeBenchmarkValidateObservation($invalid, $nativeExecutionJob);
         },
-        'isolation semantics',
+        'impossible observed lanes',
+    );
+    $invalid = nativeBenchmarkReadJson($artifacts.DIRECTORY_SEPARATOR.$nativeJob['job_id'].'.json');
+    $invalid['topology']['observed_lanes'] = $nativeJob['requested_processes'] + 1;
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($invalid, $nativeExecutionJob): void {
+            nativeBenchmarkValidateObservation($invalid, $nativeExecutionJob);
+        },
+        'impossible observed lanes',
     );
     $invalid = nativeBenchmarkReadJson($artifacts.DIRECTORY_SEPARATOR.$nativeJob['job_id'].'.json');
     $invalid['topology']['runnable_cases'] = 1;

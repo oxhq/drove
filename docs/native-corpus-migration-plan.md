@@ -142,6 +142,8 @@ Deliverables:
 - C1, C2, C4, C8, C16, and C30 run at least five times in randomized order on
   recorded CPU and memory quotas. Reports include median, p95, dispersion,
   observed lanes, wall time, phase time, forks, PSS, RSS, and cgroup peak.
+- Observed lanes preserve actual corpus overlap within the requested cap; the
+  deliberate N5 barrier, not incidental short-test duration, proves full lane capacity.
 
 Exit gate:
 

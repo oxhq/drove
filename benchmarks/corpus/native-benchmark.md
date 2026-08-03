@@ -91,10 +91,12 @@ php benchmarks/corpus/native-benchmark-measure.php JOB OBSERVATION RAW -- COMMAN
 
 Upstream baselines expose `execution` and `verification` phases and use topology
 identity `upstream` / `runner-native`. Native Drove must expose exactly
-`preparation`, `planning`, `execution`, and `verification`, saturate the
-requested lanes, and satisfy `forks === runnable_cases` at every width,
-including C1. Skipped declarations remain in the outcome but do not fork;
-there is no batch or alternate C1 mode.
+`preparation`, `planning`, `execution`, and `verification`, report the actual
+observed lanes within the requested/runnable bound, and satisfy
+`forks === runnable_cases` at every width, including C1. Short real workloads
+need not incidentally saturate the requested cap; the N5 barrier fixture proves
+exact C1-C30 capacity separately. Skipped declarations remain in the outcome
+but do not fork; there is no batch or alternate C1 mode.
 
 The measurement wrapper adds monotonic wall milliseconds, aggregate process
 tree RSS/PSS peaks, fresh-container cgroup peak, OOM counters, platform,
