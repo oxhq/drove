@@ -112,7 +112,7 @@ final class DroverScheduler implements Scheduler
 
     private bool $cancellationRequested = false;
 
-    private ?string $emergencyReserve = null;
+    private string $emergencyReserve;
 
     /**
      * @var array{
@@ -592,7 +592,7 @@ final class DroverScheduler implements Scheduler
             $socket,
             $task,
         ): void {
-            $emergencyReserve = null;
+            $emergencyReserve = '';
 
             if (getmypid() !== $reporterPid || $report->finished) {
                 return;
