@@ -545,16 +545,15 @@ try {
         'peak_outstanding_tasks' => min(2 * $processes, 36),
         'outstanding_task_limit' => 2 * $processes,
     ];
-    $naturalTopology = ($topology['schema'] ?? null) === 1
-        && ($topology['forks'] ?? null) === 36
-        && ($topology['scope_workers'] ?? null) === 0
-        && ($topology['executor_workers'] ?? null) === 36
-        && ($topology['process_anchors'] ?? null) === 0
-        && is_int($topology['peak_live_pids'] ?? null)
+    $naturalTopology = $topology['schema'] === 1
+        && $topology['forks'] === 36
+        && $topology['scope_workers'] === 0
+        && $topology['executor_workers'] === 36
+        && $topology['process_anchors'] === 0
         && $topology['peak_live_pids'] >= 1
         && $topology['peak_live_pids'] <= $expectedTopology['peak_live_pids']
-        && ($topology['peak_outstanding_tasks'] ?? null) === $topology['peak_live_pids']
-        && ($topology['outstanding_task_limit'] ?? null) === 2 * $processes;
+        && $topology['peak_outstanding_tasks'] === $topology['peak_live_pids']
+        && $topology['outstanding_task_limit'] === 2 * $processes;
     cohortAssert(
         $capacityProofEnabled ? $topology === $expectedTopology : $naturalTopology,
         'Native Livewire violated the one-fork-per-case topology: '.json_encode(
