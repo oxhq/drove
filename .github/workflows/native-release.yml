@@ -394,9 +394,9 @@ jobs:
           release_sha="$(git rev-parse HEAD)"
           details="$(
             gh api --paginate \
-              "repos/$GH_REPO/actions/workflows/corpus.yml/runs?branch=develop&event=workflow_dispatch&head_sha=$release_sha&per_page=100" \
+              "repos/$GH_REPO/actions/workflows/compatibility-corpus.yml/runs?branch=develop&event=workflow_dispatch&head_sha=$release_sha&per_page=100" \
               --jq '.workflow_runs[]
-                | select(.display_title == "External Corpus (full)")
+                | select(.display_title == "Compatibility Corpus (full)")
                 | [.run_number, .run_attempt, .id, .conclusion, .event, .path, .head_sha, .display_title]
                 | @tsv' |
               LC_ALL=C sort -t $'\t' -k1,1n -k2,2n |
@@ -408,9 +408,9 @@ jobs:
           test "$run_attempt" -gt 0
           test "$conclusion" = success
           test "$event" = workflow_dispatch
-          test "$path" = ".github/workflows/corpus.yml"
+          test "$path" = ".github/workflows/compatibility-corpus.yml"
           test "$head_sha" = "$release_sha"
-          test "$display_title" = "External Corpus (full)"
+          test "$display_title" = "Compatibility Corpus (full)"
           artifact_name="corpus-full-$release_sha-attempt-$run_attempt"
           artifact_details="$(
             gh api "repos/$GH_REPO/actions/runs/$run_id/artifacts?per_page=100" \
@@ -454,6 +454,7 @@ jobs:
             native-laravel.yml
             native-topology.yml
             bridge-coverage.yml
+            corpus.yml
           )
           for workflow in "${workflows[@]}"; do
             details="$(

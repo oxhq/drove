@@ -1,0 +1,1433 @@
+{
+    "schema": 1,
+    "corpus": "InvoiceShelf/InvoiceShelf",
+    "commit": "403a4d67225a153838ec126c484339abf60229d1",
+    "runner": {
+        "pest": "v4.4.3",
+        "phpunit": "12.5.14"
+    },
+    "command": "php vendor/bin/pest --configuration=phpunit.xml --colors=never --log-junit=invoiceshelf-pest-baseline.xml tests/Feature/Customer/AuthTest.php tests/Feature/Customer/DashboardTest.php tests/Feature/Customer/EmailLogTokenTest.php tests/Feature/Customer/EstimateTest.php tests/Feature/Customer/ExpenseTest.php tests/Feature/Customer/InvoiceTest.php tests/Feature/Customer/PaymentTest.php tests/Feature/Customer/ProfileTest.php tests/Unit/AddressCountryLocalizationTest.php tests/Unit/AddressTest.php tests/Unit/AiConfigurationServiceTest.php tests/Unit/AiDriverFactoryTest.php tests/Unit/AiToolRegistryTest.php tests/Unit/CompanySettingTest.php tests/Unit/CompanyTest.php tests/Unit/Console/UpdateCommandTest.php tests/Unit/CountryTest.php tests/Unit/CustomFieldTest.php tests/Unit/CustomFieldValueTest.php tests/Unit/CustomerTest.php tests/Unit/DocumentTotalsTest.php tests/Unit/EstimateItemTest.php tests/Unit/EstimateTest.php tests/Unit/ExchangeRateDriverFactoryTest.php tests/Unit/ExchangeRateLogTest.php tests/Unit/ExpenseCategoryTest.php tests/Unit/ExpenseTest.php tests/Unit/GotenbergHostValidationTest.php tests/Unit/InvoiceItemTest.php tests/Unit/InvoiceTest.php tests/Unit/ItemTest.php tests/Unit/OpenRouterDriverTest.php tests/Unit/PaymentMethodTest.php tests/Unit/PaymentTest.php tests/Unit/PdfHtmlSanitizerTest.php tests/Unit/PrivateNetworkGuardTest.php tests/Unit/PromptLoaderTest.php tests/Unit/RecurringInvoiceTest.php tests/Unit/RegistryDriverTest.php tests/Unit/Rules/IdnEmailTest.php tests/Unit/Rules/PublicHttpUrlTest.php tests/Unit/SafeOrderByTest.php tests/Unit/SettingTest.php tests/Unit/TaxTest.php tests/Unit/TaxTypeTest.php tests/Unit/UnitTest.php tests/Unit/UserTest.php",
+    "manifest_sha256": "d698b896b72569a943689d79e1e42852ecd8accfd4072f655e02286bdb32fb00",
+    "lock_sha256": "d208f91d6c45de03bb2684b76051db6de28a6983b1c454bbc999e9c171df0342",
+    "normalization": "source path, declaration name, typed dataset key, status, assertion count, stdout, stderr",
+    "tests": 202,
+    "passed": 202,
+    "assertions": 328,
+    "case_semantics_sha256": "7159f3f05f154ffb9f0112f9f74d6a98147482b3d1fddbc5af8f392e4f79c057",
+    "cases": [
+        {
+            "id": "test:file:tests/Feature/Customer/AuthTest.php::customer%20can%20login%20to%20the%20customer%20portal",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/AuthTest.php::customer%20portal%20guest%20entrypoints%20return%20the%20spa%20shell",
+            "status": "passed",
+            "assertions": 8,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/AuthTest.php::customer%20portal%20login%20rejects%20invalid%20credentials",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/AuthTest.php::customer%20portal%20login%20rejects%20portal-disabled%20customers",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/DashboardTest.php::customer%20dashboard",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EmailLogTokenTest.php::email-log%20token%20enforces%20the%20mailable%20type%20%28no%20cross-type%20disclosure%29",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EmailLogTokenTest.php::json%20invoice%20endpoint%20enforces%20link%20expiry",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EmailLogTokenTest.php::json%20invoice%20endpoint%20returns%20the%20invoice%20for%20a%20valid%20token",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EstimateTest.php::customer%20estimate%20mark%20as%20accepted",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EstimateTest.php::customer%20estimate%20mark%20as%20rejected",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EstimateTest.php::get%20customer%20estimate",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/EstimateTest.php::get%20customer%20estimates",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/ExpenseTest.php::get%20customer%20expense",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/ExpenseTest.php::get%20customer%20expenses",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/InvoiceTest.php::get%20customer%20invoice",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/InvoiceTest.php::get%20customer%20invoices",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/PaymentTest.php::get%20customer%20payment",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/PaymentTest.php::get%20customer%20payments",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/ProfileTest.php::get%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/ProfileTest.php::update%20customer%20profile",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Feature/Customer/ProfileTest.php::update%20customer%20profile%20using%20a%20form%20request",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressCountryLocalizationTest.php::it%20falls%20back%20to%20database%20name%20when%20intl%20lookup%20fails",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressCountryLocalizationTest.php::it%20returns%20localized%20country%20name%20for%20French%20locale",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressCountryLocalizationTest.php::it%20returns%20localized%20country%20name%20for%20German%20locale",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressCountryLocalizationTest.php::it%20returns%20null%20when%20address%20has%20no%20country",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressTest.php::an%20address%20belongs%20to%20country",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressTest.php::an%20address%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AddressTest.php::an%20address%20belongs%20to%20user",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::company%20save%20with%20toggle%20OFF%20only%20persists%20the%20toggle%20and%20discards%20driver%20fields",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::company%20save%20with%20toggle%20ON%20encrypts%20and%20persists%20driver%20fields",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::listDrivers%20returns%20driver%20metadata%20from%20the%20Registry",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::makeDriver%20instantiates%20a%20driver%20from%20the%20resolved%20config",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::makeDriver%20returns%20null%20when%20ai%20is%20disabled",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::reading%20global%20config%20decrypts%20the%20api%20key",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::resolveForCompany%20returns%20company%20config%20when%20use_custom_ai_config%20is%20YES",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::resolveForCompany%20returns%20global%20config%20when%20company%20has%20no%20custom%20override",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::resolveForCompany%20returns%20null%20when%20company%20opts%20out%20via%20override",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::resolveForCompany%20returns%20null%20when%20global%20ai_enabled%20is%20NO",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiConfigurationServiceTest.php::saving%20global%20config%20encrypts%20the%20api%20key%20at%20rest",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiDriverFactoryTest.php::availableDrivers%20merges%20built-in%20and%20Registry-registered%20drivers",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiDriverFactoryTest.php::make%20resolves%20Registry-only%20drivers%20via%20metadata",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiDriverFactoryTest.php::make%20resolves%20the%20built-in%20openrouter%20driver",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiDriverFactoryTest.php::make%20throws%20for%20unknown%20drivers",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiToolRegistryTest.php::execute%20injects%20companyId%20and%20userId%20into%20the%20tool%20and%20returns%20its%20result",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiToolRegistryTest.php::execute%20throws%20for%20unknown%20tool%20names",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiToolRegistryTest.php::register%20stores%20a%20tool%20by%20its%20name",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/AiToolRegistryTest.php::schemas%20returns%20OpenAI-format%20tool%20entries%20for%20every%20registered%20tool",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanySettingTest.php::company%20setting%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanySettingTest.php::get%20settings",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanySettingTest.php::set%20settings",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanyTest.php::a%20company%20belongs%20to%20many%20users",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanyTest.php::company%20has%20many%20company%20settings",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CompanyTest.php::company%20has%20many%20customers",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Console/UpdateCommandTest.php::it%20reads%20installed%20version%20from%20version%20file",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CountryTest.php::country%20has%20many%20addresses",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomFieldTest.php::custom%20field%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomFieldTest.php::custom%20field%20has%20many%20custom%20field%20value",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomFieldValueTest.php::custom%20field%20value%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomFieldValueTest.php::custom%20field%20value%20belongs%20to%20custom%20field",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20belongs%20to%20currency",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20has%20many%20addresses",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20has%20many%20estimates",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20has%20many%20expenses",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20has%20many%20invoices",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::customer%20has%20many%20payments",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::it%20customer%20has%20one%20billing%20address",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/CustomerTest.php::it%20customer%20has%20one%20shipping%20address",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::applies%20document%20discount%20and%20document-level%20tax",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::applies%20per-item%20discount%20only%20when%20discount_per_item%20is%20YES",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::excludes%20tax%20from%20total%20when%20tax_included",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::sums%20item%20totals%20from%20price%20and%20quantity%2C%20ignoring%20client-supplied%20item%20totals",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::supports%20negative%20quantities",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/DocumentTotalsTest.php::uses%20per-item%20taxes%20%28not%20document%20taxes%29%20when%20tax_per_item%20is%20YES",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateItemTest.php::estimate%20item%20belongs%20to%20estimate",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateItemTest.php::estimate%20item%20belongs%20to%20item",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateItemTest.php::estimate%20item%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::create%20estimate",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::create%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::create%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::estimate%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::estimate%20has%20many%20estimate%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::estimate%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/EstimateTest.php::update%20estimate",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateDriverFactoryTest.php::availableDrivers%20merges%20built-in%20and%20Registry-registered%20drivers",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateDriverFactoryTest.php::make%20resolves%20Registry-only%20drivers%20via%20metadata",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateDriverFactoryTest.php::make%20resolves%20built-in%20drivers%20from%20the%20factory%20map",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateDriverFactoryTest.php::make%20throws%20for%20unknown%20drivers",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateLogTest.php::add%20exchange%20rate%20log",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExchangeRateLogTest.php::an%20exchange%20rate%20log%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExpenseCategoryTest.php::expense%20category%20has%20many%20expenses",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExpenseTest.php::expense%20belongs%20to%20category",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExpenseTest.php::expense%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ExpenseTest.php::expense%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/GotenbergHostValidationTest.php::gotenberg%20host%20allows%20a%20public%20address",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/GotenbergHostValidationTest.php::gotenberg%20host%20rejects%20private%2C%20loopback%20and%20link-local%20addresses::dataset:index:0",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/GotenbergHostValidationTest.php::gotenberg%20host%20rejects%20private%2C%20loopback%20and%20link-local%20addresses::dataset:index:1",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/GotenbergHostValidationTest.php::gotenberg%20host%20rejects%20private%2C%20loopback%20and%20link-local%20addresses::dataset:index:2",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/GotenbergHostValidationTest.php::gotenberg%20host%20rejects%20private%2C%20loopback%20and%20link-local%20addresses::dataset:index:3",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceItemTest.php::invoice%20item%20belongs%20to%20invoice",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceItemTest.php::invoice%20item%20belongs%20to%20item",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceItemTest.php::invoice%20item%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::create%20invoice",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::create%20items",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::create%20taxes",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::get%20previous%20status",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::invoice%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::invoice%20has%20many%20invoice%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::invoice%20has%20many%20payments",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::invoice%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/InvoiceTest.php::update%20invoice",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ItemTest.php::an%20item%20belongs%20to%20unit",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ItemTest.php::an%20item%20has%20many%20estimate%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ItemTest.php::an%20item%20has%20many%20invoice%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/ItemTest.php::an%20item%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/OpenRouterDriverTest.php::rejects%20a%20private%20base%20URL%20before%20making%20any%20request",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/OpenRouterDriverTest.php::the%20thrown%20AI%20exception%20carries%20the%20invalid_base_url%20error%20key",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PaymentMethodTest.php::payment%20method%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PaymentMethodTest.php::payment%20method%20has%20many%20payment",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PaymentTest.php::payment%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PaymentTest.php::payment%20belongs%20to%20invoice",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PaymentTest.php::payment%20belongs%20to%20payment%20method",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20normalizes%20legacy%20closing-br%20markup%20so%20lines%20are%20not%20collapsed%20in%20PDF%20output",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20preserves%20basic%20formatting%20tags",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20removes%20img%20tags%20that%20could%20trigger%20SSRF%20during%20PDF%20rendering",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20returns%20empty%20string%20for%20empty%20input",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20strips%20SSRF%20vectors%20injected%20via%20address-template%20placeholders",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20strips%20iframe%20and%20link%20tags%20that%20could%20trigger%20SSRF",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20strips%20on%2A%20event%20handler%20attributes%20from%20allowed%20tags",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PdfHtmlSanitizerTest.php::it%20strips%20style%20and%20link%20attributes%20that%20may%20carry%20URLs",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::assertAllowed%20is%20silent%20on%20a%20public%20URL",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::assertAllowed%20throws%20on%20a%20blocked%20URL",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20allows%20public%20addresses%20and%20fails%20open%20on%20unresolvable%20hosts::dataset:name:cloudflare%20dns%20literal",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20allows%20public%20addresses%20and%20fails%20open%20on%20unresolvable%20hosts::dataset:name:google%20dns%20literal%20with%20path",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20allows%20public%20addresses%20and%20fails%20open%20on%20unresolvable%20hosts::dataset:name:public%20literal",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20allows%20public%20addresses%20and%20fails%20open%20on%20unresolvable%20hosts::dataset:name:unresolvable%20.invalid%20%28fail-open%29",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:bad%20scheme%20file",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:bad%20scheme%20ftp",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:broadcast",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:cgnat%20100.64%2F10",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:ipv4-mapped%20v6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:link-local%20%2F%20cloud%20metadata",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:link-local%20v6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:localhost",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:loopback%20v4",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:loopback%20v4%20with%20port%2Fpath",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:loopback%20v6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:no%20scheme%20or%20host",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:rfc1918%2010%2F8",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:rfc1918%2010%2F8%20upper",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:rfc1918%20172.16%2F12",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:rfc1918%20172.31",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:rfc1918%20192.168%2F16",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:ula%20v6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20flags%20private%2C%20loopback%2C%20reserved%20and%20bad-scheme%20URLs::dataset:name:unspecified%200.0.0.0",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::blockedReason%20returns%20null%20for%20an%20empty%20string",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::ipInCidr%20handles%20v4%20boundaries%20and%20rejects%20cross-family%20comparisons",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PrivateNetworkGuardTest.php::ipIsBlocked%20classifies%20individual%20addresses",
+            "status": "passed",
+            "assertions": 7,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PromptLoaderTest.php::load%20returns%20a%20trimmed%20template%20when%20no%20placeholders%20are%20provided",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PromptLoaderTest.php::load%20substitutes%20placeholders%20in%20the%20chat-system%20template",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/PromptLoaderTest.php::load%20throws%20when%20the%20template%20file%20is%20missing",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RecurringInvoiceTest.php::recurring%20invoice%20belongs%20to%20customer",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RecurringInvoiceTest.php::recurring%20invoice%20has%20many%20invoice%20items",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RecurringInvoiceTest.php::recurring%20invoice%20has%20many%20invoices",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RecurringInvoiceTest.php::recurring%20invoice%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::allDrivers%20returns%20an%20empty%20array%20for%20unknown%20types",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::driverMeta%20returns%20null%20for%20unknown%20drivers",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::flush%20does%20not%20clear%20driver%20registrations",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::flushDrivers%20clears%20all%20driver%20registrations",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::registerDriver%20stores%20driver%20metadata%20under%20its%20type",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/RegistryDriverTest.php::registerExchangeRateDriver%20delegates%20to%20registerDriver%20with%20the%20exchange_rate%20type",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::accepts%20IDN%20email%20with%20accented%20domain",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::accepts%20IDN%20email%20with%20umlaut%20domain",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::accepts%20empty%20string%20without%20failing",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::accepts%20null%20without%20failing",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::accepts%20standard%20email%20addresses",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::rejects%20email%20with%20multiple%20at%20signs",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/IdnEmailTest.php::rejects%20invalid%20email%20without%20at%20sign",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::fails%20for%20private%20or%20reserved%20URLs::dataset:name:cloud%20metadata",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::fails%20for%20private%20or%20reserved%20URLs::dataset:name:localhost",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::fails%20for%20private%20or%20reserved%20URLs::dataset:name:loopback",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::fails%20for%20private%20or%20reserved%20URLs::dataset:name:rfc1918",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::passes%20for%20empty%20values%20so%20it%20composes%20with%20nullable",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::passes%20for%20public%20URLs::dataset:name:https%20literal",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/Rules/PublicHttpUrlTest.php::passes%20for%20public%20URLs::dataset:name:unresolvable%20host%20fails%20open",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/SafeOrderByTest.php::allows%20a%20plain%20column",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/SafeOrderByTest.php::allows%20a%20table-qualified%20column%20so%20joined%2Faliased%20sorts%20keep%20working",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/SafeOrderByTest.php::clamps%20the%20direction%20to%20asc%2Fdesc",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/SafeOrderByTest.php::rejects%20sql%20expressions%20in%20the%20order-by%20field",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/SettingTest.php::set%20setting",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20estimate",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20estimate%20item",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20invoice",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20invoice%20item",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20item",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20recurring%20invoice",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTest.php::tax%20belongs%20to%20tax%20type",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/TaxTypeTest.php::tax%20type%20has%20many%20taxes",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/UnitTest.php::unit%20belongs%20to%20company",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/UnitTest.php::unit%20has%20many%20items",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/UserTest.php::user%20belongs%20to%20currency",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:file:tests/Unit/UserTest.php::user%20belongs%20to%20many%20companies",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        }
+    ]
+}

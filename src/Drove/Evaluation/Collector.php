@@ -8,8 +8,8 @@ use Composer\InstalledVersions;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
-use Drove\Bridge\CompatibilityRegistry;
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Registry;
+use Drove\Compatibility\Status;
 use Drove\Kernel\NativeLibrary;
 use Drove\Migration\Finding;
 use Drove\Migration\Scanner;
@@ -50,6 +50,7 @@ final readonly class Collector
         $this->assertNoTrackedVendor($root, $projectRevision);
         $platform = $this->platform();
         $package = $this->package();
+        $nativeLibrary = $this->nativeLibrary();
         $work = $root.'/.drove/evaluation-work';
 
         if (file_exists($work)) {
@@ -198,6 +199,7 @@ final readonly class Collector
                     $evaluationRoot,
                     $command,
                     "{$work}/drove-c{$processes}.log",
+                    $nativeLibrary,
                 );
                 $replayContents = $this->jsonFile($evaluationRoot.'/'.$replay);
                 $replayResult = $this->replay(
@@ -675,14 +677,14 @@ final readonly class Collector
      */
     private function caseIds(string $root, array $cases): array
     {
-        $scanner = new Scanner(CompatibilityRegistry::load());
+        $scanner = new Scanner(Registry::load());
 
         foreach (array_unique(array_column($cases, 'source')) as $source) {
             $findings = $scanner->scanFile($root.'/'.$source);
 
             if (array_any(
                 $findings,
-                static fn (Finding $finding): bool => $finding->status !== CompatibilityStatus::Supported,
+                static fn (Finding $finding): bool => $finding->status !== Status::Supported,
             )) {
                 throw new RuntimeException(
                     "Selected source {$source} has a non-supported scanner finding.",
@@ -700,8 +702,19 @@ final readonly class Collector
      * @param  list<string>  $command
      * @return array{exit_code: int, wall_ms: int, peak_memory_bytes: int, output: string}
      */
-    private function measure(string $root, array $command, string $rawPath): array
-    {
+    private function measure(
+        string $root,
+        array $command,
+        string $rawPath,
+        ?string $nativeLibrary = null,
+    ): array {
+        $environment = getenv();
+        unset($environment['DROVER_LIBRARY']);
+
+        if ($nativeLibrary !== null) {
+            $environment['DROVER_LIBRARY'] = $nativeLibrary;
+        }
+
         $raw = fopen($rawPath, 'xb');
 
         if ($raw === false) {
@@ -721,6 +734,7 @@ final readonly class Collector
                 ],
                 $pipes,
                 $root,
+                $environment,
                 options: ['bypass_shell' => true],
             );
 
@@ -1156,6 +1170,19 @@ final readonly class Collector
         ];
 
         return $platform;
+    }
+
+    private function nativeLibrary(): string
+    {
+        $library = realpath(NativeLibrary::resolve());
+
+        if (! is_string($library) || ! is_file($library) || ! is_readable($library)) {
+            throw new RuntimeException(
+                'Drove evidence requires an installed readable native library.',
+            );
+        }
+
+        return $library;
     }
 
     /**

@@ -61,6 +61,7 @@
         "proof:guards": "php proof-runtime-guards.php",
         "proof:mysql": "php proof-mysql.php",
         "proof:native": "php proof-native-runtime.php",
+        "proof:native-context": "php proof-native-context.php",
         "proof:testbench-guards": "php proof-testbench-guards.php",
         "proof:testbench": "php proof-testbench.php"
     },

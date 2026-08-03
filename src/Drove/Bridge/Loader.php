@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Drove\Bridge;
 
+use Drove\Compatibility\Registry;
 use RuntimeException;
 use UnexpectedValueException;
 
 final readonly class Loader
 {
     public function __construct(
-        private CompatibilityRegistry $registry,
+        private Registry $registry,
     ) {
         //
     }

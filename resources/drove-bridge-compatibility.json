@@ -74,6 +74,12 @@
             "diagnostic": "DROVE_NATIVE_SUPPORTED_TEST",
             "status": "supported"
         },
+        "php.shutdown-callback": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_NATIVE_UNSUPPORTED_SHUTDOWN_CALLBACK",
+            "status": "unsupported"
+        },
         "migration.parse-error": {
             "bridge": null,
             "codemod": null,
@@ -132,6 +138,12 @@
             "bridge": null,
             "codemod": null,
             "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_HIGHER_ORDER",
+            "status": "unsupported"
+        },
+        "pest.hook-proxy": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_HOOK_PROXY",
             "status": "unsupported"
         },
         "pest.mutation-testing": {
@@ -216,6 +228,30 @@
             "bridge": null,
             "codemod": null,
             "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_REPETITION",
+            "status": "unsupported"
+        },
+        "pest.self-test.invalid-expectation": {
+            "bridge": "pest",
+            "codemod": "trusted-import-map-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_INVALID_EXPECTATION_VALUE",
+            "status": "bridge-only"
+        },
+        "pest.self-test.phpunit-assertion-exception": {
+            "bridge": "pest",
+            "codemod": "trusted-import-map-v1",
+            "diagnostic": "DROVE_MIGRATION_BRIDGE_PHPUNIT_ASSERTION_EXCEPTION",
+            "status": "bridge-only"
+        },
+        "pest.self-test.runtime-import": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_SELF_TEST_RUNTIME_IMPORT",
+            "status": "unsupported"
+        },
+        "pest.self-test.runtime-call": {
+            "bridge": null,
+            "codemod": null,
+            "diagnostic": "DROVE_MIGRATION_UNSUPPORTED_SELF_TEST_RUNTIME_CALL",
             "status": "unsupported"
         },
         "pest.snapshot": {

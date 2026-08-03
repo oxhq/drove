@@ -1,0 +1,738 @@
+name: Compatibility Corpus
+run-name: Compatibility Corpus (full)
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+    tags: ['v0.*']
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: compatibility-corpus-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    if: github.event_name != 'schedule' || github.repository == 'oxhq/drove'
+    name: Full compatibility ladder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      RUN_FULL: 'true'
+      CORPUS_HOSTED_IMAGE: ubuntu-24.04
+
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact clean checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Cache corpus downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .corpus-cache/composer
+          key: corpus-composer-${{ hashFiles('benchmarks/corpus/locks/*.lock') }}
+          restore-keys: corpus-composer-
+
+      - name: Build pinned corpus image
+        run: |
+          set -euo pipefail
+          docker build --tag drove-phase-three-laravel \
+            --file experiments/phase-3-laravel/Dockerfile .
+          docker build --tag drove-corpus \
+            --build-arg "DROVE_REVISION=$EXPECTED_SHA" \
+            --file benchmarks/corpus/Dockerfile .
+          docker run --rm drove-corpus \
+            php /drove/benchmarks/corpus/self-test.php
+          docker run --rm drove-corpus \
+            php /drove/benchmarks/corpus/verify.php --manifest-only
+          docker run --rm drove-corpus \
+            composer test:native-phase-6-bridges:static
+
+      - name: Prove Phase 6 bridges and migration
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          docker run --rm \
+            --env "DROVE_EXPECTED_REVISION=$EXPECTED_SHA" \
+            drove-corpus \
+            php /drove/experiments/native-phase-6-bridges/proof.php \
+            | tee results/phase-6-bridges.json
+          php -r '$d = json_decode(file_get_contents("results/phase-6-bridges.json"), true, 512, JSON_THROW_ON_ERROR); if (($d["schema"] ?? null) !== 1 || ($d["revision"] ?? null) !== getenv("EXPECTED_SHA")) { throw new RuntimeException("Phase 6 proof metadata mismatch."); }'
+
+      - name: Clone pinned Pest and InvoiceShelf corpora
+        run: |
+          set -euo pipefail
+          mkdir -p corpora
+
+          clone_at() {
+            directory=$1
+            repository=$2
+            commit=$3
+            git init "corpora/$directory"
+            git -C "corpora/$directory" remote add origin "$repository"
+            git -C "corpora/$directory" fetch --depth=1 origin "$commit"
+            git -C "corpora/$directory" checkout --detach FETCH_HEAD
+            test "$(git -C "corpora/$directory" rev-parse HEAD)" = "$commit"
+            test -z "$(git -C "corpora/$directory" status --porcelain)"
+          }
+
+          clone_at pest https://github.com/pestphp/pest.git \
+            6b2cd358e8a9d6d1abb93804b70e1c659bbc411b
+
+          clone_at invoiceshelf https://github.com/InvoiceShelf/InvoiceShelf.git \
+            403a4d67225a153838ec126c484339abf60229d1
+
+      - name: Install locked pinned Pest discovery checkout
+        run: |
+          set -euo pipefail
+          mkdir -p .corpus-cache/composer
+          docker volume create drove-pest-vendor
+          docker run --rm \
+            --env COMPOSER_CACHE_DIR=/composer-cache \
+            --volume "$PWD/.corpus-cache/composer:/composer-cache" \
+            --volume "$PWD/corpora/pest:/app" \
+            --volume drove-pest-vendor:/app/vendor \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/prepare.sh pest'
+
+      - name: Classify pinned Pest full suite
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          docker run --rm \
+            --env CORPUS_HOSTED_IMAGE \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/pest:/app" \
+            --volume drove-pest-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove php /drove/benchmarks/corpus/classify.php \
+              pest /app /results/pest-full-suite-classification.json \
+              --cohort-root=/app'
+
+      - name: Run pinned Pest sources with baseline and Drove
+        run: |
+          set -euo pipefail
+          mkdir -p results
+
+          for cohort in nonserial serial
+          do
+            for runner in baseline drove
+            do
+              process_list=1
+              if [ "$runner" = drove ] && [ "$cohort" = nonserial ]; then
+                process_list="1 2 4 8 16 30"
+              fi
+
+              for processes in $process_list
+              do
+                docker run --rm \
+                  --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+                  --env CORPUS_COHORT="$cohort" \
+                  --env CORPUS_RUNNER="$runner" \
+                  --env CORPUS_PROCESSES="$processes" \
+                  --volume "$PWD/corpora/pest:/workspace/pest" \
+                  --volume drove-pest-vendor:/workspace/pest/vendor \
+                  --volume "$PWD/results:/results" \
+                  --workdir /workspace/pest \
+                  --entrypoint sh drove-corpus -lc '
+                    set -eu
+                    selection=$(mktemp)
+                    sh /drove/benchmarks/corpus/select.sh \
+                      "pest-$CORPUS_COHORT" /workspace/pest >"$selection"
+                    files=$(wc -l <"$selection" | tr -d "[:space:]")
+                    output="/results/pest-$CORPUS_RUNNER-$CORPUS_COHORT-$CORPUS_PROCESSES.json"
+
+                    if [ "$CORPUS_RUNNER" = baseline ]; then
+                      CORPUS_SOURCE_ROOT=/workspace/pest \
+                      CORPUS_SELECTION_FILE="$selection" \
+                      CORPUS_CONFIGURATION=/workspace/pest/phpunit.xml \
+                      CORPUS_CLASSIFICATION_FILE=/results/pest-full-suite-classification.json \
+                      DROVE_REVISION_FILE=/usr/local/share/drove-revision \
+                      DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                        pest baseline "$CORPUS_COHORT" 1 "$files" "$output" -- \
+                        php bin/pest --configuration=phpunit.xml \
+                          $(cat "$selection")
+                      test -z "$(git -C /workspace/pest status --porcelain -- \
+                        tests tests-external phpunit.xml)"
+                    else
+                      replay="/results/pest-drove-$CORPUS_COHORT-$CORPUS_PROCESSES-replay.json"
+                      rm -rf /drove/tests /drove/tests-external
+                      cp -a /workspace/pest/tests /drove/tests
+                      cp -a /workspace/pest/tests-external /drove/tests-external
+                      cp /workspace/pest/phpunit.xml /drove/phpunit.xml
+                      diff -qr /workspace/pest/tests /drove/tests
+                      diff -qr /workspace/pest/tests-external /drove/tests-external
+                      cd /drove
+                      test "$(git -C /workspace/pest rev-parse HEAD)" = \
+                        6b2cd358e8a9d6d1abb93804b70e1c659bbc411b
+                      test -z "$(git -C /workspace/pest status --porcelain -- \
+                        tests tests-external phpunit.xml)"
+                      cmp /workspace/pest/phpunit.xml /drove/phpunit.xml
+                      CORPUS_SOURCE_ROOT=/workspace/pest \
+                      CORPUS_SELECTION_FILE="$selection" \
+                      CORPUS_CONFIGURATION=/workspace/pest/phpunit.xml \
+                      CORPUS_CLASSIFICATION_FILE=/results/pest-full-suite-classification.json \
+                      DROVE_REVISION_FILE=/usr/local/share/drove-revision \
+                      DROVE_SOURCE=/drove sh benchmarks/corpus/record.sh \
+                        pest drove "$CORPUS_COHORT" "$CORPUS_PROCESSES" "$files" "$output" -- \
+                        php bin/drove --pest --configuration=phpunit.xml \
+                          --parallel --processes="$CORPUS_PROCESSES" \
+                          --replay="$replay" $(cat "$selection")
+                      diff -qr /workspace/pest/tests /drove/tests
+                      diff -qr /workspace/pest/tests-external /drove/tests-external
+                    fi
+                  '
+              done
+            done
+          done
+
+      - name: Install locked InvoiceShelf overlay
+        run: |
+          set -euo pipefail
+          mkdir -p .corpus-cache/composer
+          docker volume create drove-invoiceshelf-vendor
+          docker run --rm \
+            --env COMPOSER_CACHE_DIR=/composer-cache \
+            --volume "$PWD/.corpus-cache/composer:/composer-cache" \
+            --volume "$PWD/corpora/invoiceshelf:/app" \
+            --volume drove-invoiceshelf-vendor:/app/vendor \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/prepare.sh invoiceshelf'
+
+      - name: Classify pinned InvoiceShelf full suite
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --env CORPUS_HOSTED_IMAGE \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/invoiceshelf:/app" \
+            --volume drove-invoiceshelf-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove php /drove/benchmarks/corpus/classify.php \
+              invoiceshelf /app \
+              /results/invoiceshelf-full-suite-classification.json'
+
+      - name: Run InvoiceShelf smoke
+        run: |
+          set -euo pipefail
+
+          for runner in baseline drove
+          do
+            if [ "$runner" = baseline ]; then
+              process_list=1
+            else
+              process_list="1 2 4 8 16 30"
+            fi
+
+            for processes in $process_list
+            do
+              workspace="$PWD/work/invoiceshelf-$runner-$processes"
+              mkdir -p "$workspace/snapshots"
+              touch "$workspace/database.sqlite"
+
+              if [ "$runner" = baseline ]; then
+                command='php vendor/bin/pest --configuration=phpunit.drove.xml "$@"'
+              else
+                command="php vendor/bin/drove --pest --configuration=phpunit.drove.xml --parallel --processes=$processes --replay=/results/invoiceshelf-drove-$processes-replay.json \"\$@\""
+              fi
+
+              docker run --rm \
+                --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+                --volume "$PWD/corpora/invoiceshelf:/app" \
+                --volume drove-invoiceshelf-vendor:/app/vendor \
+                --volume "$PWD/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
+                --volume "$workspace:/drove-work" \
+                --volume "$PWD/results:/results" \
+                --workdir /app \
+                --entrypoint sh drove-corpus -lc "
+                  set -eu
+                  selection=\$(mktemp)
+                  sh /drove/benchmarks/corpus/select.sh invoiceshelf /app >\"\$selection\"
+                  set -- \$(cat \"\$selection\")
+                  files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
+                  CORPUS_SOURCE_ROOT=/app \
+                  CORPUS_SELECTION_FILE=\"\$selection\" \
+                  CORPUS_CONFIGURATION=/app/phpunit.drove.xml \
+                  CORPUS_CLASSIFICATION_FILE=/results/invoiceshelf-full-suite-classification.json \
+                  DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                    invoiceshelf $runner parallel $processes \"\$files\" \
+                    /results/invoiceshelf-$runner-$processes.json -- $command
+                "
+
+              test -z "$(find "$workspace/snapshots" -type f -print -quit)"
+              test "$(find "$workspace" -maxdepth 1 -type f -name '*.sqlite*' | wc -l)" -eq 1
+            done
+          done
+          printf '{"schema_version":1,"snapshots_after":0,"additional_sqlite_artifacts_after":0}\n' \
+            >results/invoiceshelf-state.json
+
+          docker run --rm --volume "$PWD/results:/results" drove-corpus \
+            php /drove/benchmarks/corpus/verify.php \
+              /results/pest-full-suite-classification.json \
+              /results/invoiceshelf-full-suite-classification.json \
+              /results/pest-baseline-nonserial-1.json \
+              /results/pest-drove-nonserial-1.json \
+              /results/pest-drove-nonserial-2.json \
+              /results/pest-drove-nonserial-4.json \
+              /results/pest-drove-nonserial-8.json \
+              /results/pest-drove-nonserial-16.json \
+              /results/pest-drove-nonserial-30.json \
+              /results/pest-baseline-serial-1.json \
+              /results/pest-drove-serial-1.json \
+              /results/invoiceshelf-baseline-1.json \
+              /results/invoiceshelf-drove-1.json \
+              /results/invoiceshelf-drove-2.json \
+              /results/invoiceshelf-drove-4.json \
+              /results/invoiceshelf-drove-8.json \
+              /results/invoiceshelf-drove-16.json \
+              /results/invoiceshelf-drove-30.json \
+            | tee results/smoke-verification.json
+
+          if [ "$RUN_FULL" != true ]; then
+            cp results/smoke-verification.json results/benchmark-report.json
+          fi
+
+      - name: Clone remaining pinned corpora
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+
+          clone_at() {
+            directory=$1
+            repository=$2
+            commit=$3
+            git init "corpora/$directory"
+            git -C "corpora/$directory" remote add origin "$repository"
+            git -C "corpora/$directory" fetch --depth=1 origin "$commit"
+            git -C "corpora/$directory" checkout --detach FETCH_HEAD
+            test "$(git -C "corpora/$directory" rev-parse HEAD)" = "$commit"
+            test -z "$(git -C "corpora/$directory" status --porcelain)"
+          }
+
+          clone_at livewire https://github.com/livewire/livewire.git 9c1450739d30c9b0b223ad6512be2a33f8f62f96
+          clone_at filament https://github.com/filamentphp/filament.git e9348b2e3792088ee877068116b6c1e1559a7df8
+
+      - name: Install locked Livewire overlay
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker volume create drove-livewire-vendor
+          docker run --rm \
+            --env COMPOSER_CACHE_DIR=/composer-cache \
+            --volume "$PWD/.corpus-cache/composer:/composer-cache" \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/prepare.sh livewire'
+
+      - name: Classify pinned Livewire full suite
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --env CORPUS_HOSTED_IMAGE \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove php /drove/benchmarks/corpus/classify.php \
+              livewire /app /results/livewire-full-suite-classification.json'
+
+      - name: Run Livewire explicit serial and parallel matrix
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc '
+              set -eu
+              selection=$(mktemp)
+              sh /drove/benchmarks/corpus/select.sh livewire /app >"$selection"
+              set -- $(cat "$selection")
+              files=$(wc -l <"$selection" | tr -d "[:space:]")
+              CORPUS_SOURCE_ROOT=/app \
+              CORPUS_SELECTION_FILE="$selection" \
+              CORPUS_CONFIGURATION=/app/phpunit.xml.dist \
+              CORPUS_CLASSIFICATION_FILE=/results/livewire-full-suite-classification.json \
+              DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                livewire baseline serial 1 "$files" \
+                /results/livewire-baseline-serial-1.json -- \
+                php vendor/bin/phpunit --configuration=phpunit.xml.dist \
+                  --do-not-cache-result "$@"
+            '
+
+          docker run --rm \
+            --env APP_ENV=testing \
+            --env DB_CONNECTION=testbench \
+            --env DB_DATABASE=:memory: \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --env DROVE_LARAVEL_RUNTIME=testbench \
+            --env DROVE_LARAVEL_STATE=sqlite-memory \
+            --env DROVE_LARAVEL_DB_CONNECTION=testbench \
+            --env DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc '
+              set -eu
+              selection=$(mktemp)
+              sh /drove/benchmarks/corpus/select.sh livewire /app >"$selection"
+              set -- $(cat "$selection")
+              files=$(wc -l <"$selection" | tr -d "[:space:]")
+              CORPUS_SOURCE_ROOT=/app \
+              CORPUS_SELECTION_FILE="$selection" \
+              CORPUS_CONFIGURATION=/app/phpunit.xml.dist \
+              CORPUS_CLASSIFICATION_FILE=/results/livewire-full-suite-classification.json \
+              DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                livewire drove serial 1 "$files" \
+                /results/livewire-drove-serial-1.json -- \
+                php vendor/bin/drove --pest --configuration=phpunit.xml.dist \
+                  --parallel --processes=1 \
+                  --replay=/results/livewire-drove-serial-1-replay.json "$@"
+            '
+          docker run --rm \
+            --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/livewire:/app" \
+            --volume drove-livewire-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc '
+              set -eu
+              selection=$(mktemp)
+              sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >"$selection"
+              set -- $(cat "$selection")
+              files=$(wc -l <"$selection" | tr -d "[:space:]")
+              CORPUS_SOURCE_ROOT=/app \
+              CORPUS_SELECTION_FILE="$selection" \
+              CORPUS_CONFIGURATION=/app/phpunit.xml.dist \
+              CORPUS_CLASSIFICATION_FILE=/results/livewire-full-suite-classification.json \
+              DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                livewire baseline parallel 1 "$files" \
+                /results/livewire-baseline-parallel-1.json -- \
+                php vendor/bin/phpunit --configuration=phpunit.xml.dist \
+                  --do-not-cache-result "$@"
+            '
+
+          for processes in 1 2 4 8 16 30
+          do
+            docker run --rm \
+              --env APP_ENV=testing \
+              --env DB_CONNECTION=testbench \
+              --env DB_DATABASE=:memory: \
+              --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+              --env DROVE_LARAVEL_RUNTIME=testbench \
+              --env DROVE_LARAVEL_STATE=sqlite-memory \
+              --env DROVE_LARAVEL_DB_CONNECTION=testbench \
+              --env DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+              --env DUSK_DRIVER_URL=http://127.0.0.1:9515 \
+              --volume "$PWD/corpora/livewire:/app" \
+              --volume drove-livewire-vendor:/app/vendor \
+              --volume "$PWD/results:/results" \
+              --workdir /app \
+              --entrypoint sh drove-corpus -lc "
+                set -eu
+                selection=\$(mktemp)
+                sh /drove/benchmarks/corpus/select.sh livewire-parallel /app >\"\$selection\"
+                set -- \$(cat \"\$selection\")
+                files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
+                CORPUS_SOURCE_ROOT=/app \
+                CORPUS_SELECTION_FILE=\"\$selection\" \
+                CORPUS_CONFIGURATION=/app/phpunit.xml.dist \
+                CORPUS_CLASSIFICATION_FILE=/results/livewire-full-suite-classification.json \
+                DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                  livewire drove parallel $processes \"\$files\" \
+                  /results/livewire-drove-parallel-$processes.json -- \
+                  php vendor/bin/drove --pest --configuration=phpunit.xml.dist \
+                    --parallel --processes=$processes \
+                    --replay=/results/livewire-drove-parallel-$processes-replay.json \
+                    \"\$@\"
+              "
+          done
+
+          docker run --rm --volume "$PWD/results:/results" drove-corpus \
+            php /drove/benchmarks/corpus/verify.php \
+              /results/pest-full-suite-classification.json \
+              /results/invoiceshelf-full-suite-classification.json \
+              /results/livewire-full-suite-classification.json \
+              /results/livewire-baseline-serial-1.json \
+              /results/livewire-drove-serial-1.json \
+              /results/livewire-baseline-parallel-1.json \
+              /results/livewire-drove-parallel-1.json \
+              /results/livewire-drove-parallel-2.json \
+              /results/livewire-drove-parallel-4.json \
+              /results/livewire-drove-parallel-8.json \
+              /results/livewire-drove-parallel-16.json \
+              /results/livewire-drove-parallel-30.json \
+            | tee results/livewire-verification.json
+
+      - name: Install locked Filament overlay
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker volume create drove-filament-vendor
+          docker run --rm \
+            --env COMPOSER_CACHE_DIR=/composer-cache \
+            --volume "$PWD/.corpus-cache/composer:/composer-cache" \
+            --volume "$PWD/corpora/filament:/app" \
+            --volume drove-filament-vendor:/app/vendor \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/prepare.sh filament'
+
+      - name: Classify pinned Filament full suite as final rung
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --env CORPUS_HOSTED_IMAGE \
+            --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+            --volume "$PWD/corpora/filament:/app" \
+            --volume drove-filament-vendor:/app/vendor \
+            --volume "$PWD/results:/results" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'DROVE_SOURCE=/drove php /drove/benchmarks/corpus/classify.php \
+              filament /app /results/filament-full-suite-classification.json'
+
+      - name: Run Filament final proof
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          app_key='base64:x5m/qWTRn07o2rXmBGZap8zkqzrPybJGqGbi2f8I7Pc==='
+          mkdir -p work/filament-master/snapshots
+          touch work/filament-master/database.sqlite
+
+          docker run --rm \
+            --env APP_ENV=testing \
+            --env APP_KEY="$app_key" \
+            --env DB_CONNECTION=sqlite \
+            --env DB_DATABASE=/drove-work/database.sqlite \
+            --volume "$PWD/corpora/filament:/app" \
+            --volume drove-filament-vendor:/app/vendor \
+            --volume "$PWD/work/filament-master:/drove-work" \
+            --workdir /app \
+            --entrypoint sh drove-corpus -lc \
+            'php vendor/bin/testbench migrate:fresh --no-interaction'
+
+          master_sha=$(sha256sum work/filament-master/database.sqlite | cut -d" " -f1)
+
+          fresh_workspace() {
+            name=$1
+            mkdir -p "work/$name/snapshots"
+            cp work/filament-master/database.sqlite "work/$name/database.sqlite"
+          }
+
+          check_workspace() {
+            name=$1
+            test "$(sha256sum "work/$name/database.sqlite" | cut -d" " -f1)" = "$master_sha"
+            test -z "$(find "work/$name/snapshots" -type f -print -quit)"
+            test "$(find "work/$name" -maxdepth 1 -type f -name '*.sqlite*' | wc -l)" -eq 1
+          }
+
+          run_filament() {
+            runner=$1
+            cohort=$2
+            processes=$3
+            workspace=$4
+            command=$5
+            fresh_workspace "$workspace"
+
+            docker run --rm \
+              --env APP_ENV=testing \
+              --env APP_KEY="$app_key" \
+              --env DROVE_EXPECTED_REVISION="$EXPECTED_SHA" \
+              --env DROVE_LARAVEL_RUNTIME=testbench \
+              --env DROVE_LARAVEL_SQLITE_PREPARED_SCHEMA=true \
+              --volume "$PWD/corpora/filament:/app" \
+              --volume drove-filament-vendor:/app/vendor \
+              --volume "$PWD/benchmarks/corpus/phpunit.laravel.xml:/app/phpunit.drove.xml:ro" \
+              --volume "$PWD/work/$workspace:/drove-work" \
+              --volume "$PWD/results:/results" \
+              --workdir /app \
+              --entrypoint sh drove-corpus -lc "
+                set -eu
+                selection=\$(mktemp)
+                sh /drove/benchmarks/corpus/select.sh filament /app >\"\$selection\"
+                set -- \$(cat \"\$selection\")
+                files=\$(wc -l <\"\$selection\" | tr -d '[:space:]')
+                CORPUS_SOURCE_ROOT=/app \
+                CORPUS_SELECTION_FILE=\"\$selection\" \
+                CORPUS_CONFIGURATION=/app/phpunit.drove.xml \
+                CORPUS_CLASSIFICATION_FILE=/results/filament-full-suite-classification.json \
+                DROVE_SOURCE=/drove sh /drove/benchmarks/corpus/record.sh \
+                  filament $runner $cohort $processes \"\$files\" \
+                  /results/filament-$runner-$cohort-$processes.json -- $command
+              "
+
+            check_workspace "$workspace"
+          }
+
+          run_filament baseline nonserial 1 filament-baseline-nonserial \
+            'php vendor/bin/pest --configuration=phpunit.drove.xml --exclude-group=serial "$@"'
+          run_filament baseline serial 1 filament-baseline-serial \
+            'php vendor/bin/pest --configuration=phpunit.drove.xml --group=serial "$@"'
+
+          for processes in 1 2 4 8 16 30
+          do
+            run_filament drove nonserial "$processes" "filament-drove-nonserial-$processes" \
+              "php vendor/bin/drove --pest --configuration=phpunit.drove.xml --parallel --processes=$processes --exclude-group=serial --replay=/results/filament-drove-nonserial-$processes-replay.json \"\$@\""
+          done
+
+          run_filament drove serial 1 filament-drove-serial-1 \
+            'php vendor/bin/drove --pest --configuration=phpunit.drove.xml --parallel --processes=1 --group=serial --replay=/results/filament-drove-serial-1-replay.json "$@"'
+
+          printf '{"schema_version":1,"database_sha256":"%s","snapshots_after":0,"additional_sqlite_artifacts_after":0}\n' \
+            "$master_sha" >results/filament-state.json
+
+          docker run --rm --volume "$PWD/results:/results" drove-corpus \
+            php /drove/benchmarks/corpus/verify.php \
+              /results/pest-full-suite-classification.json \
+              /results/invoiceshelf-full-suite-classification.json \
+              /results/livewire-full-suite-classification.json \
+              /results/filament-full-suite-classification.json \
+              /results/filament-baseline-nonserial-1.json \
+              /results/filament-drove-nonserial-1.json \
+              /results/filament-drove-nonserial-2.json \
+              /results/filament-drove-nonserial-4.json \
+              /results/filament-drove-nonserial-8.json \
+              /results/filament-drove-nonserial-16.json \
+              /results/filament-drove-nonserial-30.json \
+              /results/filament-baseline-serial-1.json \
+              /results/filament-drove-serial-1.json \
+            | tee results/filament-verification.json
+
+      - name: Store full benchmark comparison
+        if: env.RUN_FULL == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm --volume "$PWD/results:/results" drove-corpus \
+            php /drove/benchmarks/corpus/verify.php --complete \
+              /results/pest-full-suite-classification.json \
+              /results/invoiceshelf-full-suite-classification.json \
+              /results/livewire-full-suite-classification.json \
+              /results/filament-full-suite-classification.json \
+              /results/pest-baseline-nonserial-1.json \
+              /results/pest-drove-nonserial-1.json \
+              /results/pest-drove-nonserial-2.json \
+              /results/pest-drove-nonserial-4.json \
+              /results/pest-drove-nonserial-8.json \
+              /results/pest-drove-nonserial-16.json \
+              /results/pest-drove-nonserial-30.json \
+              /results/pest-baseline-serial-1.json \
+              /results/pest-drove-serial-1.json \
+              /results/invoiceshelf-baseline-1.json \
+              /results/invoiceshelf-drove-1.json \
+              /results/invoiceshelf-drove-2.json \
+              /results/invoiceshelf-drove-4.json \
+              /results/invoiceshelf-drove-8.json \
+              /results/invoiceshelf-drove-16.json \
+              /results/invoiceshelf-drove-30.json \
+              /results/livewire-baseline-serial-1.json \
+              /results/livewire-drove-serial-1.json \
+              /results/livewire-baseline-parallel-1.json \
+              /results/livewire-drove-parallel-1.json \
+              /results/livewire-drove-parallel-2.json \
+              /results/livewire-drove-parallel-4.json \
+              /results/livewire-drove-parallel-8.json \
+              /results/livewire-drove-parallel-16.json \
+              /results/livewire-drove-parallel-30.json \
+              /results/filament-baseline-nonserial-1.json \
+              /results/filament-drove-nonserial-1.json \
+              /results/filament-drove-nonserial-2.json \
+              /results/filament-drove-nonserial-4.json \
+              /results/filament-drove-nonserial-8.json \
+              /results/filament-drove-nonserial-16.json \
+              /results/filament-drove-nonserial-30.json \
+              /results/filament-baseline-serial-1.json \
+              /results/filament-drove-serial-1.json \
+            | tee results/benchmark-report.json
+
+      - name: Restore corpus evidence ownership
+        if: always()
+        run: |
+          if [ -d results ]; then
+            sudo chown -R "$(id -u):$(id -g)" results
+          fi
+
+      - name: Seal and render exact corpus evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          test -d results
+          tier=smoke
+
+          if [ "$RUN_FULL" = true ]; then
+            tier=full
+          fi
+
+          printf '{"schema_version":1,"drove_revision":"%s","hosted_image":"%s","tier":"%s","repository":"%s","run_id":%s,"run_attempt":%s}\n' \
+            "$EXPECTED_SHA" "$CORPUS_HOSTED_IMAGE" "$tier" \
+            "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            >results/evidence-metadata.json
+          (
+            cd results
+            find . -type f ! -name SHA256SUMS -print0 |
+              sort -z |
+              xargs -0 sha256sum >SHA256SUMS
+            test -s SHA256SUMS
+          )
+
+          if [ "$RUN_FULL" = true ]; then
+            summary="$RUNNER_TEMP/drove-corpus-benchmark-report.md"
+            docker run --rm \
+              --volume "$PWD/results:/results" \
+              drove-corpus \
+              php /drove/benchmarks/results/render-corpus.php \
+                /results "$EXPECTED_SHA" \
+              >"$summary"
+            mv "$summary" results/benchmark-report.md
+            (
+              cd results
+              find . -type f ! -name SHA256SUMS -print0 |
+                sort -z |
+                xargs -0 sha256sum >SHA256SUMS
+              test -s SHA256SUMS
+            )
+          fi
+
+      - name: Upload normalized corpus evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: corpus-${{ env.RUN_FULL == 'true' && 'full' || 'smoke' }}-${{ env.EXPECTED_SHA }}-attempt-${{ github.run_attempt }}
+          path: results/
+          if-no-files-found: error
+          retention-days: 90

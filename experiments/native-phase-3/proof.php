@@ -117,7 +117,7 @@ $proofStartedNs = hrtime(true);
 $surface = SupportedSurface::load();
 $surfaceHash = $surface->hash();
 $assert(
-    $surfaceHash === '32782524791372b99ee8ba27b0b5b66054a8e28759be48e50b5e78055f6bf96f',
+    $surfaceHash === 'bbb8084fc6c46dcc1ddba61cda62a0162a57254ac0597547aa2d22aaeea39cf2',
     'The native supported-surface manifest changed without updating its conformance proof.',
 );
 $manifest = $surface->manifest();
@@ -129,10 +129,164 @@ $assert(
         'expectation' => ['expect'],
         'hook' => ['afterAll', 'afterEach', 'beforeAll', 'beforeEach'],
     ]
-        && ($manifest['methods']['context'] ?? null) === ['app', 'assertWith', 'defer', 'extensionValue']
-        && ($manifest['methods']['declaration'] ?? null) === ['group', 'skip', 'timeout', 'todo', 'with']
-        && ($manifest['methods']['expectation'] ?? null) === ['toBe', 'toEqual'],
-    'The native supported-surface manifest claims an unproved declaration or expectation.',
+        && ($manifest['methods']['context'] ?? null) === [
+            'app',
+            'assertWith',
+            'defer',
+            'expectNotToPerformAssertions',
+            'extensionValue',
+            'fail',
+            'note',
+        ]
+        && ($manifest['methods']['declaration'] ?? null) === [
+            'assignee',
+            'covers',
+            'coversFunction',
+            'coversTrait',
+            'done',
+            'fails',
+            'group',
+            'issue',
+            'note',
+            'pr',
+            'references',
+            'see',
+            'skip',
+            'throws',
+            'throwsIf',
+            'throwsNoExceptions',
+            'throwsUnless',
+            'ticket',
+            'timeout',
+            'todo',
+            'wip',
+            'with',
+        ]
+        && ($manifest['methods']['expectation'] ?? null) === [
+            'and',
+            'any',
+            'each',
+            'json',
+            'not',
+            'property',
+            'sequence',
+            'toBe',
+            'toBeAlpha',
+            'toBeAlphaNumeric',
+            'toBeArray',
+            'toBeBase64',
+            'toBeBetween',
+            'toBeBool',
+            'toBeCallable',
+            'toBeCamelCase',
+            'toBeDigits',
+            'toBeDirectory',
+            'toBeDomain',
+            'toBeEmail',
+            'toBeEmpty',
+            'toBeFalse',
+            'toBeFalsy',
+            'toBeFile',
+            'toBeFloat',
+            'toBeGreaterThan',
+            'toBeGreaterThanOrEqual',
+            'toBeHexadecimal',
+            'toBeHostname',
+            'toBeIn',
+            'toBeInfinite',
+            'toBeInstanceOf',
+            'toBeInt',
+            'toBeIpAddress',
+            'toBeIterable',
+            'toBeJson',
+            'toBeKebabCase',
+            'toBeLessThan',
+            'toBeLessThanOrEqual',
+            'toBeList',
+            'toBeLowercase',
+            'toBeMacAddress',
+            'toBeNan',
+            'toBeNull',
+            'toBeNumeric',
+            'toBeObject',
+            'toBeReadableDirectory',
+            'toBeReadableFile',
+            'toBeResource',
+            'toBeScalar',
+            'toBeSlug',
+            'toBeSnakeCase',
+            'toBeString',
+            'toBeStudlyCase',
+            'toBeTrue',
+            'toBeTruthy',
+            'toBeUlid',
+            'toBeUppercase',
+            'toBeUrl',
+            'toBeUuid',
+            'toBeWritableDirectory',
+            'toBeWritableFile',
+            'toContain',
+            'toContainEqual',
+            'toContainOnlyInstancesOf',
+            'toEndWith',
+            'toEqual',
+            'toEqualCanonicalizing',
+            'toEqualWithDelta',
+            'toHaveCamelCaseKeys',
+            'toHaveCount',
+            'toHaveKebabCaseKeys',
+            'toHaveKey',
+            'toHaveKeys',
+            'toHaveLength',
+            'toHaveLineCountLessThan',
+            'toHaveMethodsDocumented',
+            'toHavePrivateMethods',
+            'toHavePrivateMethodsBesides',
+            'toHaveProperties',
+            'toHavePropertiesDocumented',
+            'toHaveProperty',
+            'toHaveProtectedMethods',
+            'toHaveProtectedMethodsBesides',
+            'toHavePublicMethods',
+            'toHavePublicMethodsBesides',
+            'toHaveSameSize',
+            'toHaveSnakeCaseKeys',
+            'toHaveStudlyCaseKeys',
+            'toMatch',
+            'toMatchArray',
+            'toMatchObject',
+            'toStartWith',
+            'toThrow',
+            'toUseStrictTypes',
+            'toUseTrait',
+        ]
+        && ($manifest['methods']['hook'] ?? null) === [
+            'assignee',
+            'covers',
+            'coversFunction',
+            'coversTrait',
+            'done',
+            'expect',
+            'fails',
+            'group',
+            'issue',
+            'note',
+            'pr',
+            'references',
+            'see',
+            'skip',
+            'throws',
+            'throwsIf',
+            'throwsNoExceptions',
+            'throwsUnless',
+            'ticket',
+            'timeout',
+            'toBe',
+            'toBeTrue',
+            'todo',
+            'wip',
+        ],
+    'The native supported-surface manifest claims an unproved declaration, expectation, context, or hook.',
 );
 /**
  * @param  list<string>  $command
@@ -196,6 +350,32 @@ $assert(
 $assert(
     $surface->scanFile(__DIR__.'/suite.php') === [],
     'The supported native fixture produced scanner diagnostics.',
+);
+$nativeHookSource = <<<'PHP'
+<?php
+
+use function Drove\Native\beforeEach;
+
+beforeEach()->expect(true)->toBeTrue();
+beforeEach()->skip();
+PHP;
+$assert(
+    $surface->scan($nativeHookSource, 'native-hook.php') === [],
+    'Supported native hook modifiers produced scanner diagnostics.',
+);
+$unsupportedHookSource = <<<'PHP'
+<?php
+
+use function Drove\Native\beforeEach;
+
+beforeEach()->with([1]);
+PHP;
+$unsupportedHookDiagnostics = $surface->scan($unsupportedHookSource, 'unsupported-hook.php');
+$assert(
+    count($unsupportedHookDiagnostics) === 1
+        && $unsupportedHookDiagnostics[0]['code'] === 'DROVE_NATIVE_UNSUPPORTED_HOOK_MODIFIER'
+        && $unsupportedHookDiagnostics[0]['construct'] === 'with',
+    'An unsupported native hook modifier did not produce its stable diagnostic.',
 );
 $diagnostics = $surface->scanFile(__DIR__.'/unsupported.php');
 $assert(

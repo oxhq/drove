@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Drove\Migration;
 
-use Drove\Bridge\CompatibilityRegistry;
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Registry;
+use Drove\Compatibility\Status;
+use Drove\Native\Surface\SupportedSurface;
 use ParseError;
 use PhpToken;
 use RuntimeException;
@@ -32,25 +33,36 @@ final readonly class Scanner
         'tomatchsnapshot' => 'pest.snapshot',
     ];
 
-    /** @var list<string> */
-    private const array PORTABLE_DECLARATION_METHODS = [
-        'group',
-        'skip',
-        'timeout',
-        'todo',
-        'with',
+    /** @var array<string, true> */
+    private const array PEST_RUNTIME_FUNCTIONS = [
+        'fixture' => true,
+        'pest' => true,
+        'testdirectory' => true,
     ];
 
+    /** @var array<string, true> */
+    private array $declarationMethods;
+
+    /** @var array<string, true> */
+    private array $expectationMethods;
+
+    /** @var array<string, true> */
+    private array $hookMethods;
+
     public function __construct(
-        private CompatibilityRegistry $registry,
+        private Registry $registry,
+        ?SupportedSurface $surface = null,
     ) {
-        //
+        $surface ??= SupportedSurface::load();
+        $this->declarationMethods = $surface->methodSet('declaration');
+        $this->expectationMethods = $surface->methodSet('expectation');
+        $this->hookMethods = $surface->methodSet('hook');
     }
 
     /**
      * @return list<Finding>
      */
-    public function scanFile(string $path): array
+    public function scanFile(string $path, ?CodemodOptions $options = null): array
     {
         $source = is_file($path) && is_readable($path)
             ? file_get_contents($path)
@@ -60,14 +72,17 @@ final readonly class Scanner
             throw new RuntimeException('Drove could not read source for migration scanning.');
         }
 
-        return $this->scan($source, $path);
+        return $this->scan($source, $path, $options);
     }
 
     /**
      * @return list<Finding>
      */
-    public function scan(string $source, string $path = '<memory>'): array
-    {
+    public function scan(
+        string $source,
+        string $path = '<memory>',
+        ?CodemodOptions $options = null,
+    ): array {
         if ($path === '' || preg_match('//u', $path) !== 1) {
             throw new RuntimeException('Drove migration scans require a valid UTF-8 source path.');
         }
@@ -84,6 +99,8 @@ final readonly class Scanner
             )];
         }
 
+        $options ??= new CodemodOptions;
+
         $pestImports = $this->pestFunctionImports($tokens);
         $ambiguous = $this->ambiguousFunctionNames($tokens);
 
@@ -92,7 +109,7 @@ final readonly class Scanner
         }
 
         $namespaced = $this->hasNamespace($tokens);
-        $findings = [];
+        $findings = $this->importFindings($tokens, $path, $source, $options);
 
         foreach ($tokens as $index => $token) {
             $call = $this->call($tokens, $index, $namespaced);
@@ -102,6 +119,7 @@ final readonly class Scanner
             }
 
             [$name, $open, $frontend] = $call;
+            $sourceName = $name;
             $importedName = $frontend === 'pest'
                 && ! str_contains($token->text, '\\')
                 ? ($pestImports[$name] ?? null)
@@ -109,6 +127,34 @@ final readonly class Scanner
 
             if (is_string($importedName)) {
                 $name = $importedName;
+            }
+
+            if ($frontend === 'pest' && $name === 'register_shutdown_function') {
+                $findings[] = $this->finding(
+                    'php.shutdown-callback',
+                    $token->text.'()',
+                    $path,
+                    $source,
+                    $token,
+                );
+
+                continue;
+            }
+
+            if ($frontend === 'pest'
+                && (isset(self::PEST_RUNTIME_FUNCTIONS[$name])
+                    || str_starts_with(strtolower($token->text), 'pest\\')
+                        && ! isset(self::PORTABLE[$name])
+                        && ! in_array($name, ['arch', 'uses'], true))) {
+                $findings[] = $this->finding(
+                    'pest.self-test.runtime-call',
+                    $token->text.'()',
+                    $path,
+                    $source,
+                    $token,
+                );
+
+                continue;
             }
 
             if ($frontend === 'ambiguous'
@@ -119,6 +165,7 @@ final readonly class Scanner
 
             if ($frontend === 'ambiguous'
                 || ($frontend === 'pest'
+                    && ! $options->trustsFunction($path, $sourceName)
                     && (isset($ambiguous[$name])
                         || $this->namespacedPestCallIsAmbiguous(
                             $token,
@@ -137,6 +184,19 @@ final readonly class Scanner
             }
 
             $close = $this->closingParenthesis($tokens, $open);
+
+            if (in_array($name, ['afterall', 'aftereach', 'beforeall', 'beforeeach'], true)
+                && $this->hookProxy($tokens, $open, $close, $name)) {
+                $findings[] = $this->finding(
+                    'pest.hook-proxy',
+                    $token->text.'()',
+                    $path,
+                    $source,
+                    $token,
+                );
+
+                continue;
+            }
 
             if ($this->isFirstClassCallable($tokens, $open, $close)) {
                 $findings[] = $this->finding(
@@ -205,16 +265,14 @@ final readonly class Scanner
                         $source,
                     ),
                 ];
+            } elseif (in_array($name, ['afterall', 'aftereach', 'beforeall', 'beforeeach'], true)) {
+                // Hook modifier chains have already been validated by hookProxy().
             } elseif (isset(self::PORTABLE[$name])) {
                 foreach ($this->chain($tokens, $close) as $method) {
                     if (! $method['called']
                         || $method['nullsafe']
                         || ! isset(self::UNSUPPORTED_METHODS[$method['name']])
-                        && ! in_array(
-                            $method['name'],
-                            self::PORTABLE_DECLARATION_METHODS,
-                            true,
-                        )) {
+                        && ! isset($this->declarationMethods[$method['name']])) {
                         $findings[] = $this->finding(
                             'pest.unknown-modifier',
                             '->'.$method['member']->text,
@@ -254,6 +312,189 @@ final readonly class Scanner
         ]);
 
         return $findings;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     * @return list<Finding>
+     */
+    private function importFindings(
+        array $tokens,
+        string $path,
+        string $source,
+        CodemodOptions $options,
+    ): array {
+        $findings = [];
+
+        foreach ($this->classImportStatements($tokens) as $import) {
+            $class = strtolower(ltrim($import['class'], '\\'));
+
+            if ($options->allowsSubject($path, $class)) {
+                continue;
+            }
+
+            if ($options->import($path, $class) !== null) {
+                continue;
+            }
+
+            $surface = match ($class) {
+                'phpunit\\framework\\expectationfailedexception' => 'pest.self-test.phpunit-assertion-exception',
+                'pest\\exceptions\\invalidexpectationvalue' => 'pest.self-test.invalid-expectation',
+                'pest\\support\\datasetinfo', 'pest\\support\\exceptiontrace' => 'pest.self-test.runtime-import',
+                default => null,
+            };
+
+            if ($surface === null
+                && (str_starts_with($class, 'phpunit\\')
+                    || str_starts_with($class, 'pest\\')
+                        && ! str_starts_with($class, 'pest\\support\\'))) {
+                $surface = 'pest.self-test.runtime-import';
+            }
+
+            if ($surface === null) {
+                continue;
+            }
+
+            $findings[] = $this->finding(
+                $surface,
+                $import['class'],
+                $path,
+                $source,
+                $import['token'],
+            );
+        }
+
+        return $findings;
+    }
+
+    /**
+     * Only simple top-level class imports are migration candidates. Grouped,
+     * mixed, function, and trait imports remain outside this codemod.
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{class: string, alias: string, token: PhpToken, use: PhpToken, end: PhpToken}>
+     */
+    private function classImportStatements(array $tokens): array
+    {
+        $imports = [];
+        $depth = 0;
+        $importDepth = 0;
+
+        foreach ($tokens as $index => $token) {
+            if ($token->is(T_NAMESPACE)) {
+                for ($cursor = $index + 1, $count = count($tokens); $cursor < $count; $cursor++) {
+                    if ($tokens[$cursor]->text === '{') {
+                        $importDepth = $depth + 1;
+
+                        break;
+                    }
+
+                    if ($tokens[$cursor]->text === ';') {
+                        $importDepth = $depth;
+
+                        break;
+                    }
+                }
+            }
+
+            if ($token->is(T_USE) && $depth === $importDepth) {
+                $first = $this->next($tokens, $index);
+
+                if ($first !== null
+                    && $tokens[$first]->text !== '('
+                    && ! $tokens[$first]->is([T_FUNCTION, T_CONST])) {
+                    $statement = '';
+                    $end = null;
+
+                    for ($cursor = $first, $count = count($tokens); $cursor < $count; $cursor++) {
+                        if ($tokens[$cursor]->text === ';') {
+                            $end = $tokens[$cursor];
+
+                            break;
+                        }
+
+                        if ($tokens[$cursor]->is(T_AS)) {
+                            $statement .= ' as ';
+                        } elseif (! $tokens[$cursor]->isIgnorable()) {
+                            $statement .= $tokens[$cursor]->text;
+                        }
+                    }
+
+                    if ($end instanceof PhpToken
+                        && preg_match(
+                            '/^(\\\\?[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*(?:\\\\[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)*)(?:\s+as\s+([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*))?$/iD',
+                            $statement,
+                            $match,
+                        ) === 1) {
+                        $class = ltrim($match[1], '\\');
+                        $parts = explode('\\', $class);
+                        $imports[] = [
+                            'class' => $class,
+                            'alias' => $match[2] ?? $parts[array_key_last($parts)],
+                            'token' => $tokens[$first],
+                            'use' => $token,
+                            'end' => $end,
+                        ];
+                    }
+                }
+            }
+
+            if ($token->text === '{') {
+                $depth++;
+            } elseif ($token->text === '}') {
+                $depth--;
+            }
+        }
+
+        return $imports;
+    }
+
+    /** @param list<PhpToken> $tokens */
+    private function hookProxy(array $tokens, int $open, int $close, string $name): bool
+    {
+        $argument = $this->next($tokens, $open);
+        $chain = $this->chain($tokens, $close);
+
+        if ($argument !== null && $argument !== $close && $chain === []) {
+            return false;
+        }
+
+        if (! in_array($name, ['beforeeach', 'aftereach'], true)) {
+            return true;
+        }
+
+        if ($chain === []) {
+            return true;
+        }
+
+        $expectation = false;
+
+        foreach ($chain as $method) {
+            if (! $method['called'] || $method['nullsafe']) {
+                return true;
+            }
+
+            if (! $expectation && $method['name'] === 'expect') {
+                $expectation = true;
+
+                continue;
+            }
+
+            if ($expectation) {
+                if (! isset($this->hookMethods[$method['name']])) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (! isset($this->declarationMethods[$method['name']])
+                || $method['name'] === 'with') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -337,22 +578,10 @@ final readonly class Scanner
         $findings = [];
 
         foreach ($this->chain($tokens, $close) as $method) {
-            if (! $method['called'] || $method['nullsafe']) {
+            if ($method['nullsafe']) {
                 $findings[] = $this->finding(
                     'pest.higher-order',
-                    'higher-order expectation',
-                    $path,
-                    $source,
-                    $method['member'],
-                );
-
-                continue;
-            }
-
-            if ($method['name'] === 'extend') {
-                $findings[] = $this->finding(
-                    'pest.custom-expectation.definition',
-                    'expect()->extend()',
+                    'nullsafe higher-order expectation',
                     $path,
                     $source,
                     $method['member'],
@@ -373,10 +602,22 @@ final readonly class Scanner
                 continue;
             }
 
-            if (! in_array($method['name'], ['tobe', 'toequal'], true)) {
+            if ($method['name'] === 'extend') {
+                $findings[] = $this->finding(
+                    'pest.custom-expectation.definition',
+                    'expect()->extend()',
+                    $path,
+                    $source,
+                    $method['member'],
+                );
+
+                continue;
+            }
+
+            if (! isset($this->expectationMethods[$method['name']])) {
                 $findings[] = $this->finding(
                     'pest.custom-expectation.call',
-                    '->'.$method['member']->text.'()',
+                    '->'.$method['member']->text.($method['called'] ? '()' : ''),
                     $path,
                     $source,
                     $method['member'],
@@ -435,11 +676,13 @@ final readonly class Scanner
                 'nullsafe' => $tokens[$operator]->is(T_NULLSAFE_OBJECT_OPERATOR),
             ];
 
-            if (! $called) {
+            if (! $called && strtolower($tokens[$member]->text) !== 'not') {
                 break;
             }
 
-            $cursor = $this->closingParenthesis($tokens, $open);
+            $cursor = $called
+                ? $this->closingParenthesis($tokens, $open)
+                : $member;
         }
 
         return $chain;
@@ -680,7 +923,7 @@ final readonly class Scanner
 
         return new Finding(
             $surface,
-            CompatibilityStatus::from($definition['status']),
+            Status::from($definition['status']),
             $construct,
             $path,
             max(1, $token->line),

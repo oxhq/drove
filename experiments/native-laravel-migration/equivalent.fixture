@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+use function Pest\Laravel\getJson;
+
+test('native Laravel migration equivalent', function (): void {
+    getJson('/customers')->assertOk();
+    $this->assertDatabaseHas('customers', ['id' => 7]);
+    $this->application()->mark('ready');
+});

@@ -1,0 +1,8 @@
+.git
+.temp
+**/vendor
+work
+results
+outputs
+native/drover/target/
+experiments/phase-3-laravel/native-package/tmp/

@@ -10,11 +10,12 @@ releases.
 1. The release commit is merged into `develop`, and `origin/develop` points to
    the same commit.
 2. Static Analysis, Tests, Drove Phase Gates, Release Gates, Native DSL,
-   Native Extensions, Native Laravel, Native Topology, and Bridge Coverage
-   complete successfully for that commit.
-3. Dispatch the External Corpus workflow with `tier=full` against that exact
-   `develop` commit and record its successful run ID. Both release runs refuse
-   to promote or publish without its unexpired `corpus-full-<SHA>` artifact.
+   Native Extensions, Native Laravel, Native Topology, Bridge Coverage, and
+   the bridge-free Native Corpus Ladder complete successfully for that commit.
+3. Dispatch the Compatibility Corpus workflow against that exact `develop`
+   commit and record its successful full-ladder run ID. It has no smoke tier.
+   Both release runs refuse to promote or publish without its unexpired
+   `corpus-full-<SHA>-attempt-<N>` artifact.
 4. Dispatch the native distribution workflow from that exact `develop` commit
    with the intended version and exact split Laravel commit. Its branch run must
    build and attest all four targets, rerun the release policy and exact-SHA
@@ -143,7 +144,9 @@ gates, release policy, and tag-ref attestations.
 9. Record both native-release run IDs (branch promotion and tag publication),
    the exact tags, root and split commits, and published-package workflow
    runs, Packagist versions, and normalized consumer artifacts in the release
-   notes.
+   notes. A technical evaluation release must also link directly to the
+   design-partner guide and submission form, including the native-library step
+   required before its evaluator runs.
 
 Packagist publication and GitHub artifacts are separate gates. A green source
 workflow does not prove either one. The temporary webhook pause prevents a

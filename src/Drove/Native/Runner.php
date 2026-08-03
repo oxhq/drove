@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drove\Native;
 
+use Closure;
 use Drove\Environment\EnvironmentRuntime;
 use Drove\Extension\RunSummary;
 use Drove\Kernel\LifecycleExecutor;
@@ -14,6 +15,7 @@ final readonly class Runner
 {
     public function __construct(
         private Scheduler $scheduler,
+        private ?Closure $runtimeAudit = null,
     ) {
         //
     }
@@ -38,7 +40,7 @@ final readonly class Runner
         [$synthetic, $order] = $this->executionPlan($plan);
         $run = new LifecycleExecutor(
             $this->scheduler,
-            fn (string $id): \Closure => $declarations->resolveHook($id),
+            fn (string $id): Closure => $declarations->resolveHook($id),
             function (
                 string $id,
                 ScopeContext $scope = new ScopeContext,
@@ -54,6 +56,7 @@ final readonly class Runner
             enterDescendant: $environment instanceof EnvironmentRuntime ? $environment->enterDescendant(...) : null,
             leaveDescendant: $environment instanceof EnvironmentRuntime ? $environment->leaveDescendant(...) : null,
             afterDispatch: $environment instanceof EnvironmentRuntime ? $environment->afterDispatch(...) : null,
+            runtimeAudit: $this->runtimeAudit,
         )->run($plan, $environment?->scopeContext());
         unset($plan);
 
@@ -99,6 +102,14 @@ final readonly class Runner
             $test['stdout'] = $metrics['output'];
             $test['assertions'] = $metrics['assertions'] ?? ($test['assertions'] ?? null);
             $test['cleanups'] = $metrics['cleanups'] ?? ($test['cleanups'] ?? null);
+
+            if ($metrics['notes'] !== []) {
+                $test['notes'] = $metrics['notes'];
+            }
+
+            if ($metrics['allows_no_assertions']) {
+                $test['allows_no_assertions'] = true;
+            }
         }
 
         unset($test);

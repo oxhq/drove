@@ -90,6 +90,33 @@ Native projects must disable Composer package discovery explicitly:
 }
 ```
 
+Native tests use Drove's typed Laravel context; they do not inherit a Laravel,
+PHPUnit, or Testbench `TestCase`:
+
+```php
+use function Drove\Laravel\getJson;
+use function Drove\Laravel\laravelContext;
+use function Drove\Native\test;
+
+test('customer profile', function (): void {
+    getJson('/api/customer/profile')->assertOk();
+
+    laravelContext()->assertDatabaseHas('customers', [
+        'email' => 'customer@example.com',
+    ]);
+});
+```
+
+`laravelContext()` is local to the current executor PID, so request headers and
+redirect settings cannot leak into another isolated case. The native HTTP
+front door provides `get`, `getJson`, `postJson`, `putJson`, `patchJson`, and
+`deleteJson`; its response assertions cover the helper surface currently
+selected for the InvoiceShelf migration without loading Laravel's
+PHPUnit-backed `TestResponse`. Full corpus parity remains a separate gate. Database assertions,
+authentication identity, `withoutVite()`, and direct typed application access
+live on the same context. Project-specific assertions remain normal Drove
+matchers instead of gaining hidden access through a base test class.
+
 Cached configuration is rejected, including a custom `APP_CONFIG_CACHE` path.
 For Laravel's normal declarative bootstrap, package and service manifests from
 fixed paths, process environment, or `.env` are not consumed. Drove gives

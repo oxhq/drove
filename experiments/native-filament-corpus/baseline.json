@@ -1,0 +1,18 @@
+{
+    "schema": 1,
+    "corpus": "filamentphp/filament",
+    "commit": "e9348b2e3792088ee877068116b6c1e1559a7df8",
+    "runner": "Pest compatibility corpus artifact at the pinned commit",
+    "files": 39,
+    "snapshots": 170,
+    "nonserial": {
+        "cases": 677,
+        "assertions": 1016,
+        "pest_case_ids_sha256": "fcd63a2c6a2028c3b6c46bae3d11ee66f8216b21d53d8631b091ecf7f1d96aa3"
+    },
+    "serial": {
+        "cases": 28,
+        "assertions": 34,
+        "pest_case_ids_sha256": "ce521a8b6ce9e55f43fb27adf9024f06e9bc489bc92849c84a36a03153739df0"
+    }
+}

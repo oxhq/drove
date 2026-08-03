@@ -2,11 +2,12 @@
 
 declare(strict_types=1);
 
-use Drove\Bridge\CompatibilityRegistry;
-use Drove\Bridge\CompatibilityStatus;
 use Drove\Bridge\Loader;
 use Drove\Bridge\Pest\Bridge as PestBridge;
 use Drove\Bridge\PhpUnit\Bridge as PhpUnitBridge;
+use Drove\Compatibility\Registry;
+use Drove\Compatibility\Status;
+use Drove\CompatibilityRegistry;
 use Drove\Laravel\TestbenchBridge;
 use Drove\Migration\CodemodOptions;
 use Drove\Migration\Finding;
@@ -42,9 +43,9 @@ final class PhaseSixPhpUnitCase extends TestCase
     }
 }
 
-$registry = CompatibilityRegistry::load();
+$registry = Registry::load();
 $manifest = $registry->manifest();
-$publicRegistry = Drove\CompatibilityRegistry::read();
+$publicRegistry = CompatibilityRegistry::read();
 $assert(
     ($publicRegistry['surface_registry'] ?? null) === $manifest,
     'The public compatibility output did not embed the versioned surface registry.',
@@ -57,7 +58,7 @@ foreach ($manifest['surfaces'] as $id => $surface) {
 }
 
 $assert(
-    array_diff(array_unique($statuses), array_column(CompatibilityStatus::cases(), 'value')) === [],
+    array_diff(array_unique($statuses), array_column(Status::cases(), 'value')) === [],
     'The public bridge registry exposes a status outside the declared three-state model.',
 );
 $assert(
@@ -216,7 +217,7 @@ $options = new CodemodOptions(
         ],
     ],
     matchers: [
-        'toBeUuid' => ['owner' => 'acme.uuid', 'matcher' => 'uuid'],
+        'toBeUuid' => ['owner' => 'acme/uuid', 'matcher' => 'uuid'],
     ],
 );
 $first = $migrator->migrate($source, $path, $options);
@@ -252,7 +253,7 @@ $assert(
 $assert(
     str_contains(
         $first->source,
-        "\$this->assertWith('acme.uuid', 'uuid', \$this->value, 'v4');",
+        "\$this->assertWith('acme/uuid', 'uuid', \$this->value, 'v4');",
     ),
     'The explicit custom matcher mapping was not applied.',
 );
@@ -261,6 +262,84 @@ $assert(
         && str_contains($first->source, '\\Drove\\Native\\expect($this->value)->toBe(1)')
         && str_contains($first->source, "\\Drove\\Native\\it('qualified'"),
     'Portable Pest-like calls were not qualified to the native frontend.',
+);
+
+$nativeExpectationSource = <<<'PHP'
+<?php
+
+test('native expectation surface', function (): void {
+    expect(null)->toBeNull()
+        ->and(true)->toBeTrue()
+        ->and(false)->toBeFalse()
+        ->and(new stdClass())->toBeInstanceOf(stdClass::class)
+        ->and('drove')->toContain('rove')
+        ->and([1, 2])->toHaveCount(2)->toHaveKey(0)->toHaveKeys([0, 1])
+        ->not->toBe([])
+        ->not()->toEqual([]);
+
+    expect(fn () => throw new RuntimeException('expected'))->toThrow(RuntimeException::class);
+})->throws(RuntimeException::class);
+PHP;
+$nativeExpectationSurfaces = array_count_values(array_map(
+    static fn (Finding $finding): string => $finding->surface,
+    $scanner->scan($nativeExpectationSource, 'tests/NativeExpectationSurface.php'),
+));
+ksort($nativeExpectationSurfaces, SORT_STRING);
+$assert(
+    $nativeExpectationSurfaces === [
+        'pest.portable.expect' => 2,
+        'pest.portable.test' => 1,
+    ],
+    'The scanner did not classify the native expectation and throws surfaces exactly.',
+);
+$nativeExpectationResult = $migrator->migrate(
+    $nativeExpectationSource,
+    'tests/NativeExpectationSurface.php',
+);
+$nativeExpectationSecond = $migrator->migrate(
+    $nativeExpectationResult->source,
+    'tests/NativeExpectationSurface.php',
+);
+$assert(
+    str_contains(
+        $nativeExpectationResult->source,
+        "\\Drove\\Native\\test('native expectation surface'",
+    )
+        && substr_count($nativeExpectationResult->source, '\\Drove\\Native\\expect(') === 2
+        && str_contains($nativeExpectationResult->source, '->not()->toBe([])')
+        && str_contains($nativeExpectationResult->source, '->throws(RuntimeException::class)'),
+    'The codemod did not preserve the native expectation and throws surfaces.',
+);
+$assert(
+    $nativeExpectationResult->blockers === [],
+    'The scanner still blocks a native expectation or throws surface.',
+);
+$assert(
+    ! $nativeExpectationSecond->changed() && $nativeExpectationSecond->applied === [],
+    'The expanded native expectation codemod is not idempotent.',
+);
+
+$higherOrderProperty = $migrator->migrate(
+    "<?php\nexpect(collect())->each->toBeTrue();\n",
+    'tests/HigherOrderProperty.php',
+);
+$higherOrderPropertySecond = $migrator->migrate(
+    $higherOrderProperty->source,
+    'tests/HigherOrderProperty.php',
+);
+$assert(
+    $higherOrderProperty->changed()
+        && $higherOrderProperty->blockers === []
+        && str_contains(
+            $higherOrderProperty->source,
+            '->each(static function (\Drove\Native\Expectation $expectation): void { $expectation->toBeTrue(); })',
+        ),
+    'The codemod did not lower a portable higher-order each expectation explicitly.',
+);
+$assert(
+    ! $higherOrderPropertySecond->changed()
+        && $higherOrderPropertySecond->applied === [],
+    'The higher-order each lowering is not idempotent.',
 );
 
 $blockerDiagnostics = array_values(array_unique(array_map(
@@ -625,6 +704,11 @@ $summary = [
         'applied' => $first->applied,
         'blockers' => $blockerDiagnostics,
         'idempotent_hash' => $second->resultHash,
+        'native_expectation' => [
+            'scanner_surfaces' => $nativeExpectationSurfaces,
+            'applied' => $nativeExpectationResult->applied,
+            'idempotent_hash' => $nativeExpectationSecond->resultHash,
+        ],
     ],
 ];
 

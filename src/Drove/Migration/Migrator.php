@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Drove\Migration;
 
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Status;
+use Drove\Native\Surface\SupportedSurface;
 use ParseError;
 use PhpToken;
 
@@ -23,19 +24,23 @@ final readonly class Migrator
         'test' => 'test',
     ];
 
-    /** @var list<string> */
-    private const array PORTABLE_DECLARATION_METHODS = [
-        'group',
-        'skip',
-        'timeout',
-        'todo',
-        'with',
-    ];
+    /** @var array<string, true> */
+    private array $declarationMethods;
+
+    /** @var array<string, true> */
+    private array $expectationMethods;
+
+    /** @var array<string, true> */
+    private array $hookMethods;
 
     public function __construct(
         private Scanner $scanner,
+        ?SupportedSurface $surface = null,
     ) {
-        //
+        $surface ??= SupportedSurface::load();
+        $this->declarationMethods = $surface->methodSet('declaration');
+        $this->expectationMethods = $surface->methodSet('expectation');
+        $this->hookMethods = $surface->methodSet('hook');
     }
 
     public function migrate(
@@ -45,7 +50,7 @@ final readonly class Migrator
     ): MigrationResult {
         $originalHash = hash('sha256', $source);
         $options ??= new CodemodOptions;
-        $before = $this->scanner->scan($source, $path);
+        $before = $this->scanner->scan($source, $path, $options);
 
         if (array_any(
             $before,
@@ -83,7 +88,9 @@ final readonly class Migrator
         }
 
         $namespaced = $this->hasNamespace($tokens);
-        $edits = [];
+        $edits = $this->trustedImportEdits($tokens, $path, $options);
+        array_push($edits, ...$this->higherOrderExpectationEdits($source, $tokens, $options));
+        array_push($edits, ...$this->assertionCountEdits($tokens));
         $environmentCandidates = [];
 
         foreach ($tokens as $index => $token) {
@@ -103,6 +110,7 @@ final readonly class Migrator
             }
 
             $ambiguousPestCall = $frontend === 'pest'
+                && ! $options->trustsFunction($path, $sourceName)
                 && (isset($ambiguous[$sourceName])
                     || $this->namespacedPestCallIsAmbiguous(
                         $token,
@@ -145,6 +153,28 @@ final readonly class Migrator
                     $ambiguous,
                     $namespaced,
                     $pestImports,
+                    $path,
+                );
+
+                if ($edit !== null) {
+                    $edits[] = $edit;
+                }
+            }
+
+            if ($frontend === 'pest'
+                && ! $ambiguousPestCall
+                && $name === 'test') {
+                $edit = $this->testContextFailEdit(
+                    $source,
+                    $tokens,
+                    $index,
+                    $open,
+                    $close,
+                    $options,
+                    $ambiguous,
+                    $namespaced,
+                    $pestImports,
+                    $path,
                 );
 
                 if ($edit !== null) {
@@ -175,14 +205,13 @@ final readonly class Migrator
             if ($frontend !== 'pest') {
                 continue;
             }
-            if (isset($ambiguous[$sourceName])) {
-                continue;
-            }
-            if ($this->namespacedPestCallIsAmbiguous(
-                $token,
-                $namespaced,
-                $pestImports,
-            )) {
+            if (! $options->trustsFunction($path, $sourceName)
+                && (isset($ambiguous[$sourceName])
+                    || $this->namespacedPestCallIsAmbiguous(
+                        $token,
+                        $namespaced,
+                        $pestImports,
+                    ))) {
                 continue;
             }
             if (! isset(self::PORTABLE[$name])) {
@@ -194,6 +223,10 @@ final readonly class Migrator
 
             $close = $this->closingParenthesis($tokens, $open);
             if ($this->isFirstClassCallable($tokens, $open, $close)) {
+                continue;
+            }
+            if (in_array($name, ['afterall', 'aftereach', 'beforeall', 'beforeeach'], true)
+                && $this->hookProxy($tokens, $open, $close, $name)) {
                 continue;
             }
             if (! $this->portableChain($tokens, $name, $close)) {
@@ -232,10 +265,10 @@ final readonly class Migrator
         }
 
         ksort($applied, SORT_STRING);
-        $after = $this->scanner->scan($result, $path);
+        $after = $this->scanner->scan($result, $path, $options);
         $blockers = array_values(array_filter(
             $after,
-            static fn (Finding $finding): bool => $finding->status !== CompatibilityStatus::Supported,
+            static fn (Finding $finding): bool => $finding->status !== Status::Supported,
         ));
 
         return new MigrationResult(
@@ -321,6 +354,7 @@ final readonly class Migrator
         array $ambiguous,
         bool $namespaced,
         array $pestImports,
+        string $path,
     ): ?array {
         if (! $this->hasBoundTestContext(
             $tokens,
@@ -328,6 +362,8 @@ final readonly class Migrator
             $ambiguous,
             $namespaced,
             $pestImports,
+            $options,
+            $path,
         )) {
             return null;
         }
@@ -335,6 +371,28 @@ final readonly class Migrator
         $operator = $this->next($tokens, $close);
         $member = $operator === null ? null : $this->next($tokens, $operator);
         $methodOpen = $member === null ? null : $this->next($tokens, $member);
+        $negated = false;
+
+        if ($member !== null
+            && $tokens[$member]->is(T_STRING)
+            && strtolower($tokens[$member]->text) === 'not') {
+            $negated = true;
+            $cursor = $member;
+
+            if ($methodOpen !== null && $tokens[$methodOpen]->text === '(') {
+                $notClose = $this->closingParenthesis($tokens, $methodOpen);
+
+                if ($this->next($tokens, $methodOpen) !== $notClose) {
+                    return null;
+                }
+
+                $cursor = $notClose;
+            }
+
+            $operator = $this->next($tokens, $cursor);
+            $member = $operator === null ? null : $this->next($tokens, $operator);
+            $methodOpen = $member === null ? null : $this->next($tokens, $member);
+        }
 
         if ($operator === null
             || ! $tokens[$operator]->is(T_OBJECT_OPERATOR)
@@ -347,7 +405,7 @@ final readonly class Migrator
 
         $mapping = $options->matcher($tokens[$member]->text);
 
-        if ($mapping === null) {
+        if ($mapping === null || $negated && $mapping['negated_matcher'] === null) {
             return null;
         }
 
@@ -376,7 +434,7 @@ final readonly class Migrator
         $replacement = sprintf(
             '$this->assertWith(%s, %s, %s%s)',
             var_export($mapping['owner'], true),
-            var_export($mapping['matcher'], true),
+            var_export($negated ? $mapping['negated_matcher'] : $mapping['matcher'], true),
             $actual,
             $arguments === '' ? '' : ', '.$arguments,
         );
@@ -386,6 +444,72 @@ final readonly class Migrator
             'length' => $end - $start,
             'replacement' => $replacement,
             'codemod' => 'typed-matcher-map-v1',
+        ];
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     * @param  array<string, true>  $ambiguous
+     * @param  array<string, string>  $pestImports
+     * @return array{start: int, length: int, replacement: string, codemod: string}|null
+     */
+    private function testContextFailEdit(
+        string $source,
+        array $tokens,
+        int $call,
+        int $open,
+        int $close,
+        CodemodOptions $options,
+        array $ambiguous,
+        bool $namespaced,
+        array $pestImports,
+        string $path,
+    ): ?array {
+        if (trim($this->between($source, $tokens[$open], $tokens[$close])) !== ''
+            || ! $this->hasBoundTestContext(
+                $tokens,
+                $call,
+                $ambiguous,
+                $namespaced,
+                $pestImports,
+                $options,
+                $path,
+            )) {
+            return null;
+        }
+
+        $operator = $this->next($tokens, $close);
+        $member = $operator === null ? null : $this->next($tokens, $operator);
+        $methodOpen = $member === null ? null : $this->next($tokens, $member);
+
+        if ($operator === null
+            || ! $tokens[$operator]->is(T_OBJECT_OPERATOR)
+            || $member === null
+            || ! $tokens[$member]->is(T_STRING)
+            || strtolower($tokens[$member]->text) !== 'fail'
+            || $methodOpen === null
+            || $tokens[$methodOpen]->text !== '(') {
+            return null;
+        }
+
+        $methodClose = $this->closingParenthesis($tokens, $methodOpen);
+        if ($this->containsTopLevelComma($tokens, $methodOpen, $methodClose)) {
+            return null;
+        }
+
+        $arguments = trim($this->between(
+            $source,
+            $tokens[$methodOpen],
+            $tokens[$methodClose],
+        ));
+        $start = $tokens[$call]->pos;
+        $end = $tokens[$methodClose]->pos + strlen($tokens[$methodClose]->text);
+
+        return [
+            'start' => $start,
+            'length' => $end - $start,
+            'replacement' => '\\Drove\\Native\\TestContext::fail('.$arguments.')',
+            'codemod' => 'native-test-context-fail-v1',
         ];
     }
 
@@ -403,6 +527,8 @@ final readonly class Migrator
         array $ambiguous,
         bool $namespaced,
         array $pestImports,
+        CodemodOptions $options,
+        string $path,
     ): bool {
         $closure = $this->innermostClosureContaining($tokens, $call);
 
@@ -445,6 +571,7 @@ final readonly class Migrator
                 continue;
             }
             if ($frontend === 'pest'
+                && ! $options->trustsFunction($path, $sourceName)
                 && (isset($ambiguous[$sourceName])
                     || $this->namespacedPestCallIsAmbiguous(
                         $token,
@@ -471,6 +598,189 @@ final readonly class Migrator
         }
 
         return $candidate !== null;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{start: int, length: int, replacement: string, codemod: string}>
+     */
+    private function trustedImportEdits(
+        array $tokens,
+        string $path,
+        CodemodOptions $options,
+    ): array {
+        $edits = [];
+        $depth = 0;
+        $importDepth = 0;
+
+        foreach ($tokens as $index => $token) {
+            if ($token->is(T_NAMESPACE)) {
+                for ($cursor = $index + 1, $count = count($tokens); $cursor < $count; $cursor++) {
+                    if ($tokens[$cursor]->text === '{') {
+                        $importDepth = $depth + 1;
+
+                        break;
+                    }
+
+                    if ($tokens[$cursor]->text === ';') {
+                        $importDepth = $depth;
+
+                        break;
+                    }
+                }
+            }
+
+            if ($token->is(T_USE) && $depth === $importDepth) {
+                $first = $this->next($tokens, $index);
+
+                $functionImport = $first !== null && $tokens[$first]->is(T_FUNCTION);
+                $symbol = $functionImport ? $this->next($tokens, $first) : $first;
+
+                if ($symbol !== null
+                    && $tokens[$symbol]->text !== '('
+                    && ($first === null || ! $tokens[$first]->is(T_CONST))) {
+                    $statement = '';
+                    $end = null;
+
+                    for ($cursor = $symbol, $count = count($tokens); $cursor < $count; $cursor++) {
+                        if ($tokens[$cursor]->text === ';') {
+                            $end = $tokens[$cursor];
+
+                            break;
+                        }
+
+                        if ($tokens[$cursor]->is(T_AS)) {
+                            $statement .= ' as ';
+                        } elseif (! $tokens[$cursor]->isIgnorable()) {
+                            $statement .= $tokens[$cursor]->text;
+                        }
+                    }
+
+                    if ($end instanceof PhpToken
+                        && preg_match(
+                            '/^(\\\\?[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*(?:\\\\[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)*)(?:\s+as\s+([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*))?$/iD',
+                            $statement,
+                            $match,
+                        ) === 1) {
+                        $source = ltrim($match[1], '\\');
+                        $target = $options->import($path, $source);
+
+                        if ($target !== null) {
+                            $parts = explode('\\', $source);
+                            $alias = $match[2] ?? $parts[array_key_last($parts)];
+                            $edits[] = [
+                                'start' => $token->pos,
+                                'length' => $end->pos + strlen($end->text) - $token->pos,
+                                'replacement' => sprintf(
+                                    $functionImport ? 'use function \\%s as %s;' : 'use \\%s as %s;',
+                                    $target,
+                                    $alias,
+                                ),
+                                'codemod' => $functionImport
+                                    ? 'trusted-function-import-map-v1'
+                                    : 'trusted-import-map-v1',
+                            ];
+                        }
+                    }
+                }
+            }
+
+            if ($token->text === '{') {
+                $depth++;
+            } elseif ($token->text === '}') {
+                $depth--;
+            }
+        }
+
+        return $edits;
+    }
+
+    /** @param list<PhpToken> $tokens */
+    private function hookProxy(array $tokens, int $open, int $close, string $name): bool
+    {
+        $argument = $this->next($tokens, $open);
+        $chain = $this->chain($tokens, $close);
+
+        if ($argument !== null && $argument !== $close && $chain === []) {
+            return false;
+        }
+
+        if (! in_array($name, ['beforeeach', 'aftereach'], true)
+            || $chain === []) {
+            return true;
+        }
+
+        $expectation = false;
+
+        foreach ($chain as $method) {
+            if (! $method['called'] || $method['nullsafe']) {
+                return true;
+            }
+
+            if (! $expectation && $method['name'] === 'expect') {
+                $expectation = true;
+
+                continue;
+            }
+
+            if ($expectation) {
+                if (! isset($this->hookMethods[$method['name']])) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (! isset($this->declarationMethods[$method['name']])
+                || $method['name'] === 'with') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{name: string, called: bool, nullsafe: bool}>
+     */
+    private function chain(array $tokens, int $close): array
+    {
+        $chain = [];
+        $cursor = $close;
+
+        while (true) {
+            $operator = $this->next($tokens, $cursor);
+
+            if ($operator === null
+                || ! $tokens[$operator]->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])) {
+                break;
+            }
+
+            $member = $this->next($tokens, $operator);
+
+            if ($member === null || ! $tokens[$member]->is(T_STRING)) {
+                break;
+            }
+
+            $open = $this->next($tokens, $member);
+            $called = $open !== null && $tokens[$open]->text === '(';
+            $chain[] = [
+                'name' => strtolower($tokens[$member]->text),
+                'called' => $called,
+                'nullsafe' => $tokens[$operator]->is(T_NULLSAFE_OBJECT_OPERATOR),
+            ];
+
+            if (! $called && strtolower($tokens[$member]->text) !== 'not') {
+                break;
+            }
+
+            $cursor = $called
+                ? $this->closingParenthesis($tokens, $open)
+                : $member;
+        }
+
+        return $chain;
     }
 
     /**
@@ -619,6 +929,37 @@ final readonly class Migrator
      */
     private function portableChain(array $tokens, string $name, int $close): bool
     {
+        if (in_array($name, ['afterall', 'aftereach', 'beforeall', 'beforeeach'], true)) {
+            $expectation = false;
+
+            foreach ($this->chain($tokens, $close) as $method) {
+                if (! $method['called'] || $method['nullsafe']) {
+                    return false;
+                }
+
+                if (! $expectation && $method['name'] === 'expect') {
+                    $expectation = true;
+
+                    continue;
+                }
+
+                if ($expectation) {
+                    if (! isset($this->hookMethods[$method['name']])) {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (! isset($this->declarationMethods[$method['name']])
+                    || $method['name'] === 'with') {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         $cursor = $close;
 
         while (true) {
@@ -637,23 +978,281 @@ final readonly class Migrator
             $open = $member === null ? null : $this->next($tokens, $member);
 
             if ($member === null
-                || ! $tokens[$member]->is(T_STRING)
-                || $open === null
-                || $tokens[$open]->text !== '(') {
+                || ! $tokens[$member]->is(T_STRING)) {
                 return false;
             }
 
             $method = strtolower($tokens[$member]->text);
+            $called = $open !== null && $tokens[$open]->text === '(';
             $portable = $name === 'expect'
-                ? in_array($method, ['tobe', 'toequal'], true)
-                : in_array($method, self::PORTABLE_DECLARATION_METHODS, true);
+                ? $called
+                    ? isset($this->expectationMethods[$method])
+                    : true
+                : isset($this->declarationMethods[$method]);
 
-            if (! $portable) {
+            if (! $portable || ($name !== 'expect' && ! $called)) {
                 return false;
             }
 
-            $cursor = $this->closingParenthesis($tokens, $open);
+            $cursor = $called
+                ? $this->closingParenthesis($tokens, $open)
+                : $member;
         }
+    }
+
+    /**
+     * Pest's property-style expectation syntax is migration input, not a
+     * native runtime protocol. Broadcast chains lower to an explicit callback,
+     * zero-argument matcher properties lower to calls, and JSON properties
+     * lower to property().
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{start: int, length: int, replacement: string, codemod: string}>
+     */
+    private function higherOrderExpectationEdits(
+        string $source,
+        array $tokens,
+        CodemodOptions $options,
+    ): array {
+        $edits = [];
+        $broadcastRanges = [];
+
+        foreach ($tokens as $index => $token) {
+            if (! $token->is(T_OBJECT_OPERATOR)) {
+                continue;
+            }
+
+            $member = $this->next($tokens, $index);
+            if ($member === null) {
+                continue;
+            }
+            if (! $tokens[$member]->is(T_STRING)) {
+                continue;
+            }
+            if (strtolower($tokens[$member]->text) !== 'each') {
+                continue;
+            }
+
+            $afterMember = $this->next($tokens, $member);
+            $segmentCursor = $afterMember;
+
+            if ($afterMember !== null && $tokens[$afterMember]->text === '(') {
+                $eachClose = $this->closingParenthesis($tokens, $afterMember);
+                $argument = $this->next($tokens, $afterMember);
+
+                if ($argument !== $eachClose) {
+                    continue;
+                }
+
+                $segmentCursor = $this->next($tokens, $eachClose);
+            }
+
+            $chain = '';
+            $last = null;
+
+            while ($segmentCursor !== null && $tokens[$segmentCursor]->is(T_OBJECT_OPERATOR)) {
+                $chainMember = $this->next($tokens, $segmentCursor);
+
+                if ($chainMember === null || ! $tokens[$chainMember]->is(T_STRING)) {
+                    break;
+                }
+
+                $method = strtolower($tokens[$chainMember]->text);
+
+                if (in_array($method, ['and', 'each'], true)) {
+                    break;
+                }
+
+                $open = $this->next($tokens, $chainMember);
+
+                if ($open !== null && $tokens[$open]->text === '(') {
+                    $methodClose = $this->closingParenthesis($tokens, $open);
+                    $arguments = substr(
+                        $source,
+                        $tokens[$open]->pos,
+                        $tokens[$methodClose]->pos + strlen($tokens[$methodClose]->text) - $tokens[$open]->pos,
+                    );
+                    $chain .= '->'.$tokens[$chainMember]->text.$arguments;
+                    $last = $methodClose;
+                    $segmentCursor = $this->next($tokens, $methodClose);
+
+                    continue;
+                }
+
+                $chain .= '->'.$tokens[$chainMember]->text.'()';
+                $last = $chainMember;
+                $segmentCursor = $this->next($tokens, $chainMember);
+            }
+            if ($chain === '') {
+                continue;
+            }
+            if ($last === null) {
+                continue;
+            }
+
+            $start = $token->pos;
+            $end = $tokens[$last]->pos + strlen($tokens[$last]->text);
+            $edits[] = [
+                'start' => $start,
+                'length' => $end - $start,
+                'replacement' => '->each(static function (\\Drove\\Native\\Expectation $expectation): void { $expectation'.$chain.'; })',
+                'codemod' => 'native-higher-order-each-v1',
+            ];
+            $broadcastRanges[] = [$start, $end];
+        }
+
+        foreach ($tokens as $index => $token) {
+            if (! $token->is(T_OBJECT_OPERATOR)) {
+                continue;
+            }
+            if (array_any(
+                $broadcastRanges,
+                static fn (array $range): bool => $token->pos >= $range[0] && $token->pos < $range[1],
+            )) {
+                continue;
+            }
+            $member = $this->next($tokens, $index);
+            $afterMember = $member === null ? null : $this->next($tokens, $member);
+            if ($member === null) {
+                continue;
+            }
+            if (! $tokens[$member]->is(T_STRING)) {
+                continue;
+            }
+            if ($afterMember !== null && $tokens[$afterMember]->text === '(') {
+                continue;
+            }
+
+            $method = strtolower($tokens[$member]->text);
+
+            if ($method === 'not') {
+                $nextOperator = $this->next($tokens, $member);
+                $nextMember = $nextOperator === null ? null : $this->next($tokens, $nextOperator);
+                $nextOpen = $nextMember === null ? null : $this->next($tokens, $nextMember);
+
+                if ($nextOperator !== null
+                    && $tokens[$nextOperator]->is(T_OBJECT_OPERATOR)
+                    && $nextMember !== null
+                    && $tokens[$nextMember]->is(T_STRING)
+                    && $nextOpen !== null
+                    && $tokens[$nextOpen]->text === '('
+                    && $options->matcher($tokens[$nextMember]->text) !== null) {
+                    continue;
+                }
+            }
+
+            if ($method === 'not'
+                || isset($this->expectationMethods[$method])) {
+                $edits[] = [
+                    'start' => $tokens[$member]->pos,
+                    'length' => strlen($tokens[$member]->text),
+                    'replacement' => $tokens[$member]->text.'()',
+                    'codemod' => 'native-higher-order-call-v1',
+                ];
+
+                continue;
+            }
+
+            $previous = $this->previous($tokens, $index);
+            if ($previous === null) {
+                continue;
+            }
+            if ($tokens[$previous]->text !== ')') {
+                continue;
+            }
+
+            $open = $this->openingParenthesis($tokens, $previous);
+            $json = $open === null ? null : $this->previous($tokens, $open);
+            if ($json === null) {
+                continue;
+            }
+            if (! $tokens[$json]->is(T_STRING)) {
+                continue;
+            }
+            if (strtolower($tokens[$json]->text) !== 'json') {
+                continue;
+            }
+
+            $edits[] = [
+                'start' => $tokens[$member]->pos,
+                'length' => strlen($tokens[$member]->text),
+                'replacement' => "property('".str_replace("'", "\\'", $tokens[$member]->text)."')",
+                'codemod' => 'native-higher-order-property-v1',
+            ];
+        }
+
+        return $edits;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{start: int, length: int, replacement: string, codemod: string}>
+     */
+    private function assertionCountEdits(array $tokens): array
+    {
+        $edits = [];
+
+        foreach ($tokens as $index => $token) {
+            if (! $token->is(T_STATIC)) {
+                continue;
+            }
+
+            $operator = $this->next($tokens, $index);
+            $member = $operator === null ? null : $this->next($tokens, $operator);
+            $open = $member === null ? null : $this->next($tokens, $member);
+            if ($operator === null) {
+                continue;
+            }
+            if (! $tokens[$operator]->is(T_DOUBLE_COLON)) {
+                continue;
+            }
+            if ($member === null) {
+                continue;
+            }
+            if (! $tokens[$member]->is(T_STRING)) {
+                continue;
+            }
+            if (strtolower($tokens[$member]->text) !== 'getcount') {
+                continue;
+            }
+            if ($open === null) {
+                continue;
+            }
+            if ($tokens[$open]->text !== '(') {
+                continue;
+            }
+
+            $close = $this->closingParenthesis($tokens, $open);
+
+            if ($this->next($tokens, $open) !== $close) {
+                continue;
+            }
+
+            $edits[] = [
+                'start' => $token->pos,
+                'length' => $tokens[$close]->pos + strlen($tokens[$close]->text) - $token->pos,
+                'replacement' => '$this->assertionCount()',
+                'codemod' => 'native-assertion-count-v1',
+            ];
+        }
+
+        return $edits;
+    }
+
+    /** @param list<PhpToken> $tokens */
+    private function openingParenthesis(array $tokens, int $close): ?int
+    {
+        $depth = 0;
+
+        for ($index = $close; $index >= 0; $index--) {
+            if ($tokens[$index]->text === ')') {
+                $depth++;
+            } elseif ($tokens[$index]->text === '(' && --$depth === 0) {
+                return $index;
+            }
+        }
+
+        return null;
     }
 
     /**

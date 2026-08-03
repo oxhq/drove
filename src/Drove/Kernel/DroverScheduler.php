@@ -112,6 +112,8 @@ final class DroverScheduler implements Scheduler
 
     private bool $cancellationRequested = false;
 
+    private string $emergencyReserve;
+
     /**
      * @var array{
      *     schema: int,
@@ -191,6 +193,8 @@ final class DroverScheduler implements Scheduler
         }
 
         $this->protocol = new ChildProtocol($runId);
+        // Children inherit this reserve without allocating it on every fork.
+        $this->emergencyReserve = str_repeat(' ', 262_144);
         $this->topologyTelemetry = $this->emptyTopologyTelemetry();
     }
 
@@ -580,7 +584,7 @@ final class DroverScheduler implements Scheduler
             public bool $finished = false;
         };
         $reporterPid = getmypid();
-        $emergencyReserve = str_repeat(' ', 262_144);
+        $emergencyReserve = &$this->emergencyReserve;
         register_shutdown_function(function () use (
             &$emergencyReserve,
             $report,
@@ -588,7 +592,7 @@ final class DroverScheduler implements Scheduler
             $socket,
             $task,
         ): void {
-            $emergencyReserve = null;
+            $emergencyReserve = '';
 
             if (getmypid() !== $reporterPid || $report->finished) {
                 return;

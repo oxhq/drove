@@ -87,7 +87,7 @@ records:
   an exact PHP `8.4.x`, and the evaluated Drove package version and revision;
 - runner, frontend, PHP/Laravel/Testbench runtime identity, a non-secret
   `command_argv`, zero exit code, process count, observed Drove lanes, wall
-  milliseconds, peak memory bytes, and its RSS/PSS/cgroup source; and
+  milliseconds, peak memory bytes, and its lowercase `rss` source; and
 - identical outcomes and assertion counts for that supported selection across
   the baseline and Drove runs.
 
@@ -129,6 +129,13 @@ schema-1 evaluator is superseded rather than treated as qualifying evidence.
 `php scripts/verify-design-partners-self-test.php` exercises valid and
 adversarial fixtures without network access. Release verification uses the real
 immutable raw files and GitHub Actions API instead.
+
+During intake, `php scripts/verify-design-partners.php --partial <ledger.json>
+<release-tag> <release-revision>` validates every entry currently present but
+does not enforce the 3-evaluation/2-migration minimum. It reports
+`release_gate_satisfied: false` and can never stand in for the strict command
+used by release workflows. Both modes reject unknown ledger and artifact
+fields; the published schema remains the artifact contract.
 
 ## Evaluation protocol for `v0.4.0-alpha.3`
 
@@ -199,12 +206,16 @@ relative and execute directly without a shell:
 ```
 
 Commit the Composer changes and config so **E** is a clean strict descendant of
-**R**, then run the two-step flow:
+**R**, install the tagged native library, then run the two-step flow. The
+explicit absolute `DROVER_LIBRARY` keeps the immutable `alpha.3` collector's
+detached evaluation worktree on the verified package-local library:
 
 ```bash
 git add composer.json composer.lock .drove/evaluation-config.json
 git commit -m "test: configure Drove evaluation"
-vendor/bin/drove-evaluate collect
+vendor/bin/drove-install-native
+DROVER_LIBRARY="$(php -r 'require "vendor/autoload.php"; echo Drove\Kernel\NativeLibrary::bundledPath(Drove\Kernel\NativeLibrary::target());')" \
+  vendor/bin/drove-evaluate collect
 git add .drove/evaluation.json
 git commit -m "test: record Drove evaluation"
 vendor/bin/drove-evaluate seal > /tmp/drove-ledger-entry.json
@@ -221,6 +232,8 @@ followed by the collector-owned `--parallel`, matching `--processes=N`, and
 deterministic `--replay` suffix. The hosted gate revalidates that exact contract
 and rejects instrumentation on the baseline command. The collector removes both
 worktrees after success or failure.
+
+`DROVER_LIBRARY` is a non-secret local path and is not written to evidence.
 
 The artifact records **R**, **E**, both lockfile hashes, the baseline runner
 package identity, exact case IDs, outcomes, assertions, wall milliseconds,

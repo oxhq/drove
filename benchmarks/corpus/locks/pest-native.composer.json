@@ -1,0 +1,16 @@
+{
+    "name": "drove/native-pest-corpus-dependencies",
+    "description": "Locked production-subject dependencies for the bridge-free native Pest corpus.",
+    "license": "MIT",
+    "type": "project",
+    "require": {
+        "php": "^8.4.1",
+        "ext-mbstring": "*",
+        "symfony/process": "8.1.0"
+    },
+    "config": {
+        "allow-plugins": false,
+        "preferred-install": "dist",
+        "sort-packages": true
+    }
+}

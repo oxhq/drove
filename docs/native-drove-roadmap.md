@@ -1,5 +1,9 @@
 # Native Drove roadmap
 
+The bridge-free execution follow-up is defined in
+[`native-corpus-migration-plan.md`](native-corpus-migration-plan.md). Its N1-N5
+gates must pass before bridge-era C1 timings can drive another execution mode.
+
 This roadmap defines the work required to make Drove a native prepared-state
 testing runtime with a Pest-like frontend.
 

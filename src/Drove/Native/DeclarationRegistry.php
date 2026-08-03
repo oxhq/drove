@@ -19,7 +19,9 @@ final class DeclarationRegistry
     /**
      * @var array<string, array{
      *     id: string,
+     *     identity: string,
      *     type: 'file'|'describe',
+     *     parent: string|null,
      *     name?: string,
      *     path?: string,
      *     hooks: array{
@@ -28,6 +30,7 @@ final class DeclarationRegistry
      *         after_each: list<string>,
      *         after_all: list<string>
      *     },
+     *     future_modifiers: list<array{name: string, apply: Closure(TestDefinition): void}>,
      *     tests: list<string>,
      *     children: list<string>
      * }>
@@ -57,6 +60,9 @@ final class DeclarationRegistry
 
     /** @var array<string, string> */
     private array $hookPhases = [];
+
+    /** @var array<string, list<Closure(): mixed>> */
+    private array $hookActions = [];
 
     /** @var array<string, iterable<mixed, mixed>|Closure> */
     private array $datasets = [];
@@ -102,6 +108,7 @@ final class DeclarationRegistry
         Closure $body,
         string $sourcePath,
         int $sourceLine,
+        ?string $identityPath = null,
     ): TestDefinition {
         $this->assertHealthy();
         $this->assertMutable();
@@ -109,13 +116,21 @@ final class DeclarationRegistry
         $sourcePath = $this->canonicalPath($sourcePath);
         $this->assertSourceLine($sourceLine);
         $scopeId = $this->activeScope($sourcePath);
-        $id = 'test:'.$scopeId.'::'.rawurlencode($description);
+        $identity = $identityPath === null
+            ? $this->nodes[$scopeId]['identity']
+            : $this->canonicalPath($identityPath);
+        $id = 'test:'.$identity.'::'.rawurlencode($description);
 
         if (isset($this->definitions[$id])) {
             throw new LogicException(sprintf('Duplicate native test ID %s.', $id));
         }
 
         $definition = new TestDefinition($body);
+
+        foreach ($this->futureModifiers($scopeId) as $modifier) {
+            ($modifier['apply'])($definition);
+        }
+
         $this->definitions[$id] = $definition;
         $this->nodes[$scopeId]['tests'][] = $id;
         $this->testMetadata[$id] = [
@@ -174,20 +189,24 @@ final class DeclarationRegistry
         Closure $declarations,
         string $sourcePath,
         int $sourceLine,
-    ): void {
+    ): ScopeDefinition {
         $this->assertHealthy();
         $this->assertMutable();
         $this->assertDescription($description, 'describe');
         $this->assertNoParameters($declarations, 'describe');
         $this->assertSourceLine($sourceLine);
         $parentId = $this->activeScope($this->canonicalPath($sourcePath));
-        $id = $parentId.'::describe:'.rawurlencode($description);
+        $baseId = $parentId.'::describe:'.rawurlencode($description);
+        $identity = $this->nodes[$parentId]['identity'].'::describe:'.rawurlencode($description);
+        $id = $baseId;
+        $ordinal = 1;
 
-        if (isset($this->nodes[$id])) {
-            throw new LogicException(sprintf('Duplicate native describe scope ID %s.', $id));
+        while (isset($this->nodes[$id])) {
+            $id = $baseId.'::ordinal:'.$ordinal;
+            $ordinal++;
         }
 
-        $this->nodes[$id] = $this->node($id, 'describe', $description);
+        $this->nodes[$id] = $this->node($id, $identity, 'describe', $description, $parentId);
         $this->nodes[$parentId]['children'][] = $id;
         $this->scopeStack[] = $id;
 
@@ -204,6 +223,8 @@ final class DeclarationRegistry
                 throw new LogicException('Native declaration scope stack became unbalanced.');
             }
         }
+
+        return new ScopeDefinition($this, $id);
     }
 
     public function declareHook(
@@ -211,7 +232,7 @@ final class DeclarationRegistry
         Closure $hook,
         string $sourcePath,
         int $sourceLine,
-    ): void {
+    ): HookDefinition {
         $this->assertHealthy();
         $this->assertMutable();
 
@@ -232,7 +253,49 @@ final class DeclarationRegistry
 
         $this->hooks[$id] = $hook;
         $this->hookPhases[$id] = $phase;
+        $this->hookActions[$id] = [];
         $this->nodes[$scopeId]['hooks'][$phase][] = $id;
+
+        return new HookDefinition($this, $scopeId, $id);
+    }
+
+    /** @param Closure(TestDefinition): void $modifier */
+    public function addFutureModifier(string $scopeId, string $name, Closure $modifier): void
+    {
+        $this->assertHealthy();
+        $this->assertMutable();
+
+        if (! isset($this->nodes[$scopeId])) {
+            throw new OutOfBoundsException(sprintf('No native scope was captured for %s.', $scopeId));
+        }
+
+        $this->nodes[$scopeId]['future_modifiers'][] = [
+            'name' => $name,
+            'apply' => $modifier,
+        ];
+    }
+
+    /** @param Closure(TestDefinition): void $modifier */
+    public function applyScopeModifier(string $scopeId, string $name, Closure $modifier): void
+    {
+        $this->addFutureModifier($scopeId, $name, $modifier);
+
+        foreach ($this->scopeTestIds($scopeId) as $testId) {
+            $modifier($this->definitions[$testId]);
+        }
+    }
+
+    /** @param Closure(): mixed $action */
+    public function addHookAction(string $hookId, Closure $action): void
+    {
+        $this->assertHealthy();
+        $this->assertMutable();
+
+        if (! isset($this->hooks[$hookId])) {
+            throw new OutOfBoundsException(sprintf('No native hook was captured for %s.', $hookId));
+        }
+
+        $this->hookActions[$hookId][] = $action;
     }
 
     /**
@@ -341,7 +404,7 @@ final class DeclarationRegistry
         $phase = $this->hookPhases[$hookId] ?? null;
 
         return in_array($phase, ['before_each', 'after_each'], true)
-            ? TestContext::wrapHook($hook, $phase)
+            ? TestContext::wrapHooks([$hook, ...($this->hookActions[$hookId] ?? [])], $phase)
             : $hook;
     }
 
@@ -358,7 +421,7 @@ final class DeclarationRegistry
         $id = 'file:'.$sourcePath;
         $this->files[$sourcePath] = $id;
         $this->fileOrder[] = $id;
-        $this->nodes[$id] = $this->node($id, 'file', $sourcePath);
+        $this->nodes[$id] = $this->node($id, $id, 'file', $sourcePath, null);
 
         return $id;
     }
@@ -366,7 +429,9 @@ final class DeclarationRegistry
     /**
      * @return array{
      *     id: string,
+     *     identity: string,
      *     type: 'file'|'describe',
+     *     parent: string|null,
      *     name?: string,
      *     path?: string,
      *     hooks: array{
@@ -375,16 +440,25 @@ final class DeclarationRegistry
      *         after_each: list<string>,
      *         after_all: list<string>
      *     },
+     *     future_modifiers: list<array{name: string, apply: Closure(TestDefinition): void}>,
      *     tests: list<string>,
      *     children: list<string>
      * }
      */
-    private function node(string $id, string $type, string $name): array
-    {
+    private function node(
+        string $id,
+        string $identity,
+        string $type,
+        string $name,
+        ?string $parent,
+    ): array {
         $node = [
             'id' => $id,
+            'identity' => $identity,
             'type' => $type,
+            'parent' => $parent,
             'hooks' => $this->emptyHooks(),
+            'future_modifiers' => [],
             'tests' => [],
             'children' => [],
         ];
@@ -392,7 +466,9 @@ final class DeclarationRegistry
 
         /** @var array{
          *     id: string,
+         *     identity: string,
          *     type: 'file'|'describe',
+         *     parent: string|null,
          *     name?: string,
          *     path?: string,
          *     hooks: array{
@@ -401,11 +477,57 @@ final class DeclarationRegistry
          *         after_each: list<string>,
          *         after_all: list<string>
          *     },
+         *     future_modifiers: list<array{name: string, apply: Closure(TestDefinition): void}>,
          *     tests: list<string>,
          *     children: list<string>
          * } $node
          */
         return $node;
+    }
+
+    /** @return list<array{name: string, apply: Closure(TestDefinition): void}> */
+    private function futureModifiers(string $scopeId): array
+    {
+        $scopeIds = [];
+        $current = $scopeId;
+
+        while (isset($this->nodes[$current])) {
+            $scopeIds[] = $current;
+            $parent = $this->nodes[$current]['parent'];
+
+            if (! is_string($parent)) {
+                break;
+            }
+
+            $current = $parent;
+        }
+
+        $modifiers = [];
+
+        foreach (array_reverse($scopeIds) as $id) {
+            array_push($modifiers, ...$this->nodes[$id]['future_modifiers']);
+        }
+
+        return $modifiers;
+    }
+
+    /** @return list<string> */
+    private function scopeTestIds(string $scopeId): array
+    {
+        if (! isset($this->nodes[$scopeId])) {
+            throw new OutOfBoundsException(sprintf('No native scope was captured for %s.', $scopeId));
+        }
+
+        $testIds = [];
+        $pending = [$scopeId];
+
+        while ($pending !== []) {
+            $id = array_pop($pending);
+            array_push($testIds, ...$this->nodes[$id]['tests']);
+            array_push($pending, ...array_reverse($this->nodes[$id]['children']));
+        }
+
+        return $testIds;
     }
 
     /**
@@ -470,7 +592,8 @@ final class DeclarationRegistry
      *     groups: list<string>,
      *     timeout_ms: int,
      *     disposition: string,
-     *     disposition_reason: string
+     *     disposition_reason: string,
+     *     metadata: array<string, mixed>
      * }>
      */
     private function compileDefinition(string $baseId): array
@@ -491,6 +614,7 @@ final class DeclarationRegistry
                 [],
                 $definition->disposition(),
                 $definition->reason(),
+                $definition->expectedException(),
             );
 
             return [[
@@ -502,6 +626,7 @@ final class DeclarationRegistry
                 'timeout_ms' => $definition->timeoutMs(),
                 'disposition' => $definition->disposition(),
                 'disposition_reason' => $definition->reason(),
+                'metadata' => $definition->metadata(),
             ]];
         }
 
@@ -526,6 +651,7 @@ final class DeclarationRegistry
                 $arguments,
                 $definition->disposition(),
                 $definition->reason(),
+                $definition->expectedException(),
             );
             $tests[] = [
                 'id' => $caseId,
@@ -536,6 +662,7 @@ final class DeclarationRegistry
                 'timeout_ms' => $definition->timeoutMs(),
                 'disposition' => $definition->disposition(),
                 'disposition_reason' => $definition->reason(),
+                'metadata' => $definition->metadata(),
             ];
         }
 

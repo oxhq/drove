@@ -12,7 +12,7 @@ RUN cargo build --release --locked
 FROM php:8.4-cli@sha256:3a70cc45c4b03b691f04ea3c032030613a5ff6ee61053127aadb8a93b39cc7c3
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libffi-dev libsqlite3-dev libzip-dev unzip \
+    && apt-get install -y --no-install-recommends git libffi-dev libsqlite3-dev libzip-dev unzip \
     && rm -rf /var/lib/apt/lists/* \
     && docker-php-ext-install bcmath exif ffi ftp pcntl pdo_mysql pdo_sqlite zip
 

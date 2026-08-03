@@ -11,6 +11,8 @@ coverage.xml
 /.php-cs-fixer.php
 .php-cs-fixer.cache
 .temp/coverage.php
+/work/
+/experiments/phase-3-laravel/native-package/tmp/
 *.swp
 *.swo
 .vscode/

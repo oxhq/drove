@@ -36,12 +36,13 @@ function environment(string $name, Closure $factory): void
     Declarations::current()->declareEnvironment($name, $factory);
 }
 
-function describe(string $description, Closure $declarations): void
+function describe(string $description, Closure $declarations): ScopeDefinition
 {
     $location = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0] ?? [];
     $path = $location['file'] ?? throw new LogicException('Drove could not locate the native describe source path.');
     $line = $location['line'] ?? throw new LogicException('Drove could not locate the native describe source line.');
-    Declarations::current()->declareDescribe($description, $declarations, $path, $line);
+
+    return Declarations::current()->declareDescribe($description, $declarations, $path, $line);
 }
 
 function beforeAll(Closure $hook): void
@@ -52,20 +53,32 @@ function beforeAll(Closure $hook): void
     Declarations::current()->declareHook('before_all', $hook, $path, $line);
 }
 
-function beforeEach(Closure $hook): void
+function beforeEach(?Closure $hook = null): HookDefinition
 {
     $location = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0] ?? [];
     $path = $location['file'] ?? throw new LogicException('Drove could not locate the native hook source path.');
     $line = $location['line'] ?? throw new LogicException('Drove could not locate the native hook source line.');
-    Declarations::current()->declareHook('before_each', $hook, $path, $line);
+
+    return Declarations::current()->declareHook(
+        'before_each',
+        $hook ?? static fn (): null => null,
+        $path,
+        $line,
+    );
 }
 
-function afterEach(Closure $hook): void
+function afterEach(?Closure $hook = null): HookDefinition
 {
     $location = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 1)[0] ?? [];
     $path = $location['file'] ?? throw new LogicException('Drove could not locate the native hook source path.');
     $line = $location['line'] ?? throw new LogicException('Drove could not locate the native hook source line.');
-    Declarations::current()->declareHook('after_each', $hook, $path, $line);
+
+    return Declarations::current()->declareHook(
+        'after_each',
+        $hook ?? static fn (): null => null,
+        $path,
+        $line,
+    );
 }
 
 function afterAll(Closure $hook): void
@@ -76,7 +89,7 @@ function afterAll(Closure $hook): void
     Declarations::current()->declareHook('after_all', $hook, $path, $line);
 }
 
-function expect(mixed $value): Expectation
+function expect(mixed $value = null): Expectation
 {
     return new Expectation($value);
 }

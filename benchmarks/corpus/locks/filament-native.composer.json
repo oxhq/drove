@@ -1,0 +1,99 @@
+{
+    "name": "drove/native-filament-corpus-runtime",
+    "description": "Locked bridge-free application runtime for the pinned Filament support corpus.",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "name": "drove-laravel",
+            "type": "path",
+            "url": "/drove/packages/drove-laravel",
+            "options": {
+                "symlink": false,
+                "reference": "none",
+                "versions": {
+                    "oxhq/drove-laravel": "0.4.0-alpha.1"
+                }
+            }
+        },
+        {
+            "name": "drove",
+            "type": "path",
+            "url": "/drove",
+            "options": {
+                "symlink": false,
+                "reference": "none",
+                "versions": {
+                    "oxhq/drove": "0.4.0-alpha.1"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "packages/*",
+            "options": {
+                "symlink": false,
+                "reference": "none",
+                "versions": {
+                    "filament/actions": "4.x-dev",
+                    "filament/filament": "4.x-dev",
+                    "filament/forms": "4.x-dev",
+                    "filament/infolists": "4.x-dev",
+                    "filament/notifications": "4.x-dev",
+                    "filament/query-builder": "4.x-dev",
+                    "filament/schemas": "4.x-dev",
+                    "filament/spatie-laravel-settings-plugin": "4.x-dev",
+                    "filament/support": "4.x-dev",
+                    "filament/tables": "4.x-dev",
+                    "filament/widgets": "4.x-dev"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4.1",
+        "ext-intl": "*",
+        "ext-pdo": "*",
+        "ext-pdo_sqlite": "*",
+        "fakerphp/faker": "v1.24.1",
+        "filament/filament": "4.x-dev",
+        "filament/spatie-laravel-settings-plugin": "4.x-dev",
+        "guzzlehttp/guzzle": "7.11.1",
+        "guzzlehttp/promises": "2.5.0",
+        "guzzlehttp/psr7": "2.11.0",
+        "laravel/framework": "13.15.0",
+        "livewire/livewire": "3.8.1",
+        "mockery/mockery": "1.6.12",
+        "oxhq/drove": "0.4.0-alpha.1",
+        "oxhq/drove-laravel": "0.4.0-alpha.1",
+        "staudenmeir/belongs-to-through": "v2.18"
+    },
+    "autoload": {
+        "psr-4": {
+            "Filament\\Tests\\": "tests/src/",
+            "Filament\\Tests\\Database\\Factories\\": "tests/database/factories/"
+        }
+    },
+    "replace": {
+        "nunomaduro/termwind": "2.4.1"
+    },
+    "config": {
+        "allow-plugins": false,
+        "policy": {
+            "advisories": {
+                "block": false
+            }
+        },
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": [
+                "*"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

@@ -180,12 +180,14 @@ final readonly class ExtensionSet
 
     /**
      * @param  list<mixed>  $arguments
+     * @param  array<string, mixed>  $case
      */
     public function match(
         string $owner,
         string $key,
         mixed $actual,
         array $arguments = [],
+        array $case = [],
     ): MatchResult {
         $matcher = $this->contribution(
             $owner,
@@ -198,7 +200,7 @@ final readonly class ExtensionSet
             $owner,
             ContributionKind::Matcher,
             $key,
-            static fn () => $matcher->match(new MatchInput($actual, $arguments)),
+            static fn () => $matcher->match(new MatchInput($actual, $arguments, $case)),
         );
     }
 

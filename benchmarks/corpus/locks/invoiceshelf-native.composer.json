@@ -1,0 +1,148 @@
+{
+    "name": "invoiceshelf/invoiceshelf",
+    "description": "Free & Open Source Invoice App for Individuals & Small Businesses. https://invoiceshelf.com",
+    "keywords": [
+        "framework",
+        "laravel"
+    ],
+    "license": "MIT",
+    "type": "project",
+    "require": {
+        "php": "^8.4",
+        "barryvdh/laravel-dompdf": "^v3.0",
+        "dragonmantank/cron-expression": "^v3.4",
+        "fakerphp/faker": "1.24.1",
+        "gotenberg/gotenberg-php": "^2.8",
+        "guzzlehttp/guzzle": "^7.9",
+        "hashids/hashids": "^5.0",
+        "invoiceshelf/modules": "^3.0.3",
+        "laravel/framework": "^13.0",
+        "laravel/helpers": "^1.7",
+        "laravel/sanctum": "^4.0",
+        "laravel/tinker": "^3.0",
+        "laravel/ui": "^4.6",
+        "lavary/laravel-menu": "^1.8",
+        "league/flysystem-aws-s3-v3": "^3.29",
+        "mockery/mockery": "1.6.12",
+        "oxhq/drove": "0.4.0-alpha.1",
+        "oxhq/drove-laravel": "0.4.0-alpha.1",
+        "predis/predis": "^2.3",
+        "silber/bouncer": "^1.0.4",
+        "spatie/flysystem-dropbox": "^3.0",
+        "spatie/laravel-backup": "^10.0",
+        "spatie/laravel-medialibrary": "^11.11",
+        "symfony/http-client": "^7.3",
+        "symfony/intl": "^7.3",
+        "symfony/mailer": "^7.3",
+        "symfony/mailgun-mailer": "^7.3",
+        "symfony/postmark-mailer": "^7.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        },
+        "files": [
+            "app/Support/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": "pint --test",
+        "lint:fix": "pint",
+        "ai-docs": "@php bin/ai-docs.php",
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi",
+            "@php bin/ai-docs.php"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi",
+            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
+            "@php artisan migrate --graceful --ansi"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"pnpm dev\" --names=server,queue,logs,vite"
+        ],
+	"ide-helper": [
+            "@php artisan ide-helper:generate",
+            "@php artisan ide-helper:meta"
+	]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        },
+        "merge-plugin": {
+            "include": [
+                "Modules/*/composer.json"
+            ],
+            "recurse": true,
+            "replace": false,
+            "ignore-duplicates": false,
+            "merge-dev": true,
+            "merge-extra": false,
+            "merge-extra-deep": false,
+            "merge-scripts": false
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "policy": {
+            "advisories": {
+                "block": false
+            }
+        },
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true,
+            "wikimedia/composer-merge-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "name": "drove-laravel",
+            "type": "path",
+            "url": "/drove/packages/drove-laravel",
+            "options": {
+                "symlink": false,
+                "reference": "none",
+                "versions": {
+                    "oxhq/drove-laravel": "0.4.0-alpha.1"
+                }
+            }
+        },
+        {
+            "name": "drove",
+            "type": "path",
+            "url": "/drove",
+            "options": {
+                "symlink": false,
+                "reference": "none",
+                "versions": {
+                    "oxhq/drove": "0.4.0-alpha.1"
+                }
+            }
+        },
+        {
+            "name": "invoiceshelf-modules",
+            "type": "vcs",
+            "url": "https://github.com/InvoiceShelf/modules.git"
+        }
+    ]
+}

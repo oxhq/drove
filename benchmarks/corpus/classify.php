@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use Drove\Bridge\CompatibilityRegistry;
-use Drove\Bridge\CompatibilityStatus;
+use Drove\Compatibility\Registry;
+use Drove\Compatibility\Status;
 use Drove\Migration\Finding;
 use Drove\Migration\Migrator;
 use Drove\Migration\Scanner;
@@ -302,7 +302,7 @@ foreach (array_keys($discovered['source_files']) as $path) {
 
 ksort($sourcePaths, SORT_STRING);
 
-$registry = CompatibilityRegistry::load(
+$registry = Registry::load(
     "$droveSource/resources/drove-bridge-compatibility.json",
 );
 $scanner = new Scanner($registry);
@@ -396,7 +396,7 @@ foreach (array_keys($sourcePaths) as $path) {
     $dynamicIncludeFindings = array_map(
         static fn (array $include): Finding => new Finding(
             'corpus.dynamic-include',
-            CompatibilityStatus::Unsupported,
+            Status::Unsupported,
             'dynamic include expression',
             $path,
             $include['line'],
@@ -1309,7 +1309,7 @@ function discoverExtensions(
     string $checkout,
     string $configuration,
     ?array $map,
-    CompatibilityRegistry $registry,
+    Registry $registry,
 ): array {
     if (! is_array($map)) {
         fail('manifest extension_surface_map must be an object');

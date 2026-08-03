@@ -1,0 +1,2083 @@
+{
+    "schema": 2,
+    "repository": "livewire/livewire",
+    "commit": "9c1450739d30c9b0b223ad6512be2a33f8f62f96",
+    "staging_source_mtime_epoch": 1784995076,
+    "migration_profile_sha256": "af0ad68fd7d607fa046d93ad7112fa1a7526139022c2efe947ce3e90ce2c7081",
+    "files": {
+        "src/Compiler/UnitTest.php": "6b6e9de3a02cafc639efc7b2f0c6163c8eb93abb",
+        "src/Concerns/Tests/ComponentCanBeFilledUnitTest.php": "74f1637fe2f3143d4fe834c4d929650ac4f32efe",
+        "src/Concerns/Tests/ComponentCanReturnPublicPropertiesUnitTest.php": "e69cc1b579b7d836ce520b3d4fe3c43defb77e76",
+        "src/Concerns/Tests/ResetPropertiesUnitTest.php": "b72ca71549c9f0e6b414dfd6de680ead0f9b3cb7",
+        "src/Drawer/Tests/ImplicitRouteBindingUnitTest.php": "b3dc081306517080d2fbf5280a15aa05f65214d8",
+        "src/Drawer/UnitTest.php": "e438bd1276945e0f7481f821c72b4d43249a0112",
+        "src/Factory/UnitTest.php": "d0b4341a6d6253fa4f4f138b2bfd5733a33b04b4",
+        "src/Features/SupportAttributes/UnitTest.php": "0457f54cb84af339e81b7868d96b75a223c52278",
+        "src/Features/SupportAuthorization/UnitTest.php": "9a644a996f0684c504284ab5e73e5305f0cdd4b6",
+        "src/Features/SupportAutoInjectedAssets/UnitTest.php": "48125b84bc6f0c918064b7317deb35aaf1ffe015",
+        "src/Features/SupportBladeAttributes/UnitTest.php": "a187ddc0648968f72954bf44648ef55d48f3ef07",
+        "src/Features/SupportCompiledWireKeys/UnitTest.php": "f42cf7440d165c95015491a1b150390e0f9f8a9e",
+        "src/Features/SupportComputed/UnitTest.php": "f8e4ed31821a0065a37d5a69a09468541ac515bb",
+        "src/Features/SupportConsoleCommands/Tests/AttributeCommandUnitTest.php": "45af8c5dd4fbfaa347018a6e2d71fd9aa8ba0ef0",
+        "src/Features/SupportConsoleCommands/Tests/FormCommandUnitTest.php": "b883cd496aba2da3380fcbb59b712daccad68d49",
+        "src/Features/SupportConsoleCommands/Tests/LayoutCommandUnitTest.php": "6d11b3c9db1073ffafb694a19622fe0b646623de",
+        "src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php": "cf8866f98af5b95bbecff8bac89e5290e2f101de",
+        "src/Features/SupportConsoleCommands/Tests/StubCommandUnitTest.php": "f44e087e9f5d82b4d0de01f5ac80b91f1f69f3c6",
+        "src/Features/SupportDisablingBackButtonCache/UnitTest.php": "f6402c43f52bed85b16aeff22aa1ea8cf175e04f",
+        "src/Features/SupportEntangle/UnitTest.php": "ae53e36ea7fc1c83d64dc3bb2336de7a03d5c30b"
+    },
+    "production_helpers": {
+        "src/Features/SupportTesting/MakesAssertions.php": "8d9e62e4acd9f03f7f99c0ca9f0eca329cd66069",
+        "src/Features/SupportTesting/RequestBroker.php": "bee4594d3cee1175c645d82d7819306b88a4a6d0"
+    },
+    "support_files": {
+        "src/Compiler/Fixtures/mfc-component-with-imports/mfc-component-with-imports.blade.php": "0231c159bde4df0926958604662d6d40e445d66f",
+        "src/Compiler/Fixtures/mfc-component-with-imports/mfc-component-with-imports.js": "eace95328e885bb2c934d2c8babc6e271e5edc16",
+        "src/Compiler/Fixtures/mfc-component-with-imports/mfc-component-with-imports.php": "758543ed53ed7fe2b196cea0818fae9aba1526c2",
+        "src/Compiler/Fixtures/mfc-component/mfc-component.blade.php": "0231c159bde4df0926958604662d6d40e445d66f",
+        "src/Compiler/Fixtures/mfc-component/mfc-component.js": "708039b1ae0c42f79a5ba731dbfbd8b70f8531f8",
+        "src/Compiler/Fixtures/mfc-component/mfc-component.php": "e0a720d5e4cf2a1a84d3f1e166478bca82efe5ef",
+        "src/Compiler/Fixtures/sfc-component-with-assets-and-script-directives.blade.php": "302396ab136000d915baf21ac656a8e39f8928eb",
+        "src/Compiler/Fixtures/sfc-component-with-blade-script.blade.php": "7aa54bc20a3dcc8e2b7bfb1f7cdfa1e3bdbc16a0",
+        "src/Compiler/Fixtures/sfc-component-with-imports.blade.php": "1dae76999de384160fcd603a2a3cd0333314fe02",
+        "src/Compiler/Fixtures/sfc-component-with-nested-script.blade.php": "50264c886c1cda79b4fe929fb070d8f0f019ce19",
+        "src/Compiler/Fixtures/sfc-component-with-only-nested-script.blade.php": "c0b640bec544a9aa0a07f883012616a68806662c",
+        "src/Compiler/Fixtures/sfc-component-with-only-nested-style.blade.php": "623ceb97ae33b32731d5d654eb34a9c1cca6a836",
+        "src/Compiler/Fixtures/sfc-component-with-placeholder-in-island.blade.php": "72571ee481d4c99eaf843a5aef8598250b90546a",
+        "src/Compiler/Fixtures/sfc-component-with-placeholder.blade.php": "fcd5c69b7af2550d8322ea13c2bf522d1863b145",
+        "src/Compiler/Fixtures/sfc-component-with-style-in-verbatim.blade.php": "3e0066fb49fd214b0564ef8d8c61dbd85a249584",
+        "src/Compiler/Fixtures/sfc-component-without-trailing-semicolon.blade.php": "17093a2ca8c682de0c0699229ce86481cbc338f4",
+        "src/Compiler/Fixtures/sfc-component.blade.php": "057a47e11170e3137788d69b14b879a5929dcf8d",
+        "src/Compiler/Fixtures/test.php": "a1ce6d81095c19750b3d54482e7ba5bdbd708be3",
+        "src/Factory/Fixtures/SimpleComponent.php": "969a845199c38b71335a26bbf8db3c73fcc7b321",
+        "src/Factory/Fixtures/simple-multi-file-component/simple-multi-file-component.blade.php": "94cdaa7610c369d6c1b3f95eb47e68a1de20b48d",
+        "src/Factory/Fixtures/simple-multi-file-component/simple-multi-file-component.php": "eaf2141184eb7e93d194b3778ce863ebba651d95",
+        "src/Factory/Fixtures/simple-single-file-component.blade.php": "1086968518adb4c6dd6ca488f12180db3c6c8aad",
+        "tests/TestComponent.php": "b085c89890765885a4e7d890f0759f938872e57c",
+        "tests/views/components/basic-component.blade.php": "560850d108c21d2d8808a39a4f19750da707e44c",
+        "tests/views/components/input.blade.php": "b888b10b66d2781a68c6681bbb166b51a84c293d",
+        "tests/views/layouts/app.blade.php": "6824c83ac8a529dfd7c17d1d46a6a8cd57a17c79",
+        "tests/views/show-name-with-this.blade.php": "2089d00c9946c0821788aac043da875c7b44b1c1",
+        "tests/views/show-name.blade.php": "07f8c0c1b03ef7c1b9ff76aabc4309bf8cedb2e7",
+        "tests/views/uses-component.blade.php": "3451fd0215356fe64d3acce4122f948f46045677"
+    },
+    "expected_assertions": 1034,
+    "cases": [
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:0",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:1",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:2",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:3",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:4",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:5",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:index:6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:name:docblock%20comment%20with%20new",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:name:multi%20line%20comment%20with%20new",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:name:single%20line%20comment%20with%20new",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_anonymous_class_has_return_statement_added_if_required::dataset:name:todo%20comment%20with%20new%20keyword",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_compile_mfc_component",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_compile_sfc_component",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_hook_into_mfc_compilation",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_hook_into_sfc_compilation",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_parse_mfc_component",
+            "status": "passed",
+            "assertions": 12,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_parse_placeholder_directive",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_parse_sfc_component",
+            "status": "passed",
+            "assertions": 12,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_can_re_compile_simple_sfc_component",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_clear_compiled_files_deletes_cache_directory",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_commented_use_statements_are_not_injected_into_view_contents::dataset:name:docblock%20%2F%2A%2A%20%2A%2F%20comment%20with%20use%20statement",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_commented_use_statements_are_not_injected_into_view_contents::dataset:name:multi-line%20%2F%2A%20%2A%2F%20comment%20with%20use%20statement",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_commented_use_statements_are_not_injected_into_view_contents::dataset:name:multi-line%20block%20comment%20spanning%20multiple%20use%20statements",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_commented_use_statements_are_not_injected_into_view_contents::dataset:name:single-line%20%2F%2F%20comment%20with%20use%20statement",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_compiler_will_recompile_if_source_file_is_older_than_compiled_file",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_directories_are_lazily_recreated_after_clearing",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_generated_blade_view_does_not_render_stale_contents_after_being_rewritten_within_same_second",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_gitignore_is_created_when_cache_directory_is_lazily_recreated",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_ignores_placeholders_in_islands",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_mfc_script_hoists_imports_and_wraps_in_export_function",
+            "status": "passed",
+            "assertions": 7,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_mfc_script_wraps_in_export_function_even_without_imports",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_parser_adds_trailing_semicolon_to_class_contents",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_script_hoists_imports_and_wraps_in_export_function",
+            "status": "passed",
+            "assertions": 7,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_script_wraps_in_export_function_even_without_imports",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_extract_nested_only_style",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_extract_style_inside_verbatim",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_parse_blade_script",
+            "status": "passed",
+            "assertions": 10,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_parse_nested_script",
+            "status": "passed",
+            "assertions": 9,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_parse_nested_script_when_no_root_level_script_exists",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Compiler/UnitTest.php::test_wont_parse_scripts_inside_assets_or_script_directives",
+            "status": "passed",
+            "assertions": 13,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ComponentCanBeFilledUnitTest.php::test_can_fill_from_an_array",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ComponentCanBeFilledUnitTest.php::test_can_fill_from_an_eloquent_model",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ComponentCanBeFilledUnitTest.php::test_can_fill_from_an_object",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ComponentCanBeFilledUnitTest.php::test_can_fill_using_dot_notation",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ComponentCanReturnPublicPropertiesUnitTest.php::test_a_livewire_component_can_return_an_associative_array_of_public_properties",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_pull_all_properties",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_pull_nested_array_property",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_pull_some_properties",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_and_return_property_with_pull_method",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_array_properties",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_dynamically_added_nested_array_key",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_nested_array_properties",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_nested_array_property_with_null_default",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_null_properties",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_properties",
+            "status": "passed",
+            "assertions": 36,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Concerns/Tests/ResetPropertiesUnitTest.php::test_can_reset_unset_properties",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_dependent_props_are_set_via_implicit_binding",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_dependent_props_are_set_via_mount",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_mount_param_and_prop_resolve_the_same_scoped_model",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_mount_param_honors_scope_binding",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_and_mount_work_together",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_implicit_binding",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_implicit_binding_after_404",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_implicit_binding_when_with_trashed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_mount",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_scope_binding",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_props_are_set_via_scope_binding_when_props_declared_in_reverse_order",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_scope_binding_is_honored_when_parent_and_child_are_both_mount_params",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/Tests/ImplicitRouteBindingUnitTest.php::test_scope_binding_is_honored_when_parent_is_mount_param_and_child_is_prop",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_component_data_stored_in_html_is_escaped",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_if_element_is_a_comment_and_contains_html_it_is_skipped_and_id_and_data_inserted_on_next_elemenet",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_if_element_is_a_comment_it_is_skipped_and_id_and_data_inserted_on_next_elemenet",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_on_subsequent_renders_root_element_has_id_but_not_component_id",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_root_element_exists",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Drawer/UnitTest.php::test_root_element_has_id_and_component_data",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_and_render_single_file_component",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_component_from_class_instance",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_component_from_class_name",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_multi_file_component",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_simple_class_based_component",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_create_simple_class_based_component_with_custom_id",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_determine_if_component_exists",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_resolve_component_class",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_resolve_component_name",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_can_resolve_missing_component",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Factory/UnitTest.php::test_resolved_missing_component_is_cached_in_finder",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAttributes/UnitTest.php::test_can_set_nested_property_hook_manually",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAttributes/UnitTest.php::test_can_set_property_hook_manually",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAttributes/UnitTest.php::test_non_livewire_attribute_are_ignored",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAttributes/UnitTest.php::test_property_attribute_has_access_to_lifecycle_hooks",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_authorize_allows_authorized_event_listeners",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_authorize_allows_authorized_event_listeners_with_named_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_authorize_is_enforced_on_event_listeners",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_base_authorize_attribute_blocks_unauthorized_user_via_event",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_defined_basic_gates",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_defined_gates_with_array_as_argument",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_defined_gates_with_model_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_defined_gates_without_arguments",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_multiple_policies",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_array_of_class_and_model",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_array_of_models",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_class",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_dependency_injection_and_named_model_id_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_dependency_injection_and_positional_model_id_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_model_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_model_id_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_policy_with_positional_model_id_argument",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_using_defined_gate_with_only_class_name_as_argument",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_using_policy_resource_ability_mapping_with_only_class_name",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_authorize_using_policy_with_only_class_name_and_no_arguments",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_can_trigger_base_authorize_attribute_using_event",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_it_does_not_perform_any_action_when_denied",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAuthorization/UnitTest.php::test_prioritizes_arguments_over_properties",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_can_disable_auto_injection_using_config",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_can_disable_auto_injection_using_global_method",
+            "status": "incomplete",
+            "assertions": 0,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_can_force_injection_over_config",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_it_injects_livewire_assets_before_closing_tags",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_it_injects_livewire_assets_html_only",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_it_injects_livewire_assets_html_with_header",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_it_injects_livewire_assets_weirdly_formatted_html",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_only_auto_injects_when_a_livewire_component_was_rendered_on_the_page",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_only_auto_injects_when_persist_was_rendered_on_the_page",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_only_inject_when_dev_doesnt_use_livewire_scripts_or_livewire_styles",
+            "status": "incomplete",
+            "assertions": 0,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_only_injects_on_full_page_loads",
+            "status": "incomplete",
+            "assertions": 0,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportAutoInjectedAssets/UnitTest.php::test_response_maintains_original_view_after_asset_injection",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportBladeAttributes/UnitTest.php::test_entangle_directive_adds_dot_defer_if_defer_modifier_is_present",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportBladeAttributes/UnitTest.php::test_it_adds_wire_macro_to_component_attribute_bag",
+            "status": "passed",
+            "assertions": 8,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_a_second_inner_loop_is_added_when_the_first_inner_loop_is_closed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_a_second_outer_loop_is_added_when_the_first_one_is_closed_and_all_inner_loops_are_removed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_an_inner_loop_is_removed_when_the_outer_loop_is_closed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_break_in_loop_does_not_corrupt_key_generation",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_break_in_nested_loop_does_not_corrupt_outer_loop_keys",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_are_correctly_generated",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_are_correctly_generated_when_the_parent_data_is_appended",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_are_correctly_generated_when_the_parent_data_is_inserted",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_are_correctly_generated_when_the_parent_data_is_prepended",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_are_correctly_generated_with_array_access_wire_key",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_nested_loop_are_correctly_generated",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_nested_loop_are_correctly_generated_when_the_parent_data_is_appended",
+            "status": "passed",
+            "assertions": 14,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_nested_loop_are_correctly_generated_when_the_parent_data_is_inserted",
+            "status": "passed",
+            "assertions": 14,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_nested_loop_are_correctly_generated_when_the_parent_data_is_prepended",
+            "status": "passed",
+            "assertions": 14,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_sibling_loop_are_correctly_generated",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_sibling_loop_are_correctly_generated_when_the_parent_data_is_appended",
+            "status": "passed",
+            "assertions": 11,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_sibling_loop_are_correctly_generated_when_the_parent_data_is_inserted",
+            "status": "passed",
+            "assertions": 11,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_a_sibling_loop_are_correctly_generated_when_the_parent_data_is_prepended",
+            "status": "passed",
+            "assertions": 11,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_sibling_and_nested_loops_are_correctly_generated",
+            "status": "passed",
+            "assertions": 17,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_sibling_and_nested_loops_are_correctly_generated_when_the_parent_data_is_appended",
+            "status": "passed",
+            "assertions": 53,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_sibling_and_nested_loops_are_correctly_generated_when_the_parent_data_is_inserted",
+            "status": "passed",
+            "assertions": 53,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_child_keys_in_sibling_and_nested_loops_are_correctly_generated_when_the_parent_data_is_prepended",
+            "status": "passed",
+            "assertions": 53,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_continue_in_loop_does_not_corrupt_key_generation",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_continue_in_nested_loop_does_not_corrupt_outer_loop_keys",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_deprecated_process_element_key_shim_still_sets_current_loop_key",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_keys_are_not_compiled_when_smart_wire_keys_are_disabled",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_loop_stack_defaults_are_correctly_set",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_nested_loop_iterations_generate_unique_keys",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_close_a_loop",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_close_a_second_loop_after_the_first_one_is_closed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_close_an_inner_loop_while_the_first_one_is_open",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:0",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:1",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:2",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:3",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:4",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:5",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_blade_components_only_but_not_elements_or_livewire_components::dataset:index:7",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:0",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:1",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:2",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:3",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:4",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:5",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:6",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_correctly_find_wire_keys_on_elements_only_but_not_blade_or_livewire_components::dataset:index:7",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_open_a_loop",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_open_a_second_loop_after_the_first_one_is_closed",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_we_can_open_an_inner_loop_while_the_first_one_is_open",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_when_using_a_for_else_statement_and_empty_is_shown_child_keys_are_correctly_generated",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportCompiledWireKeys/UnitTest.php::test_when_using_a_for_else_statement_child_keys_are_correctly_generated",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_cached_computed_property_is_memoized_within_a_single_request",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_access_computed_properties_inside_views",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_bust_cached_computed_cache_using_unset",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_bust_computed_cache_using_unset",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_bust_persisted_computed_cache_using_unset",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_make_method_a_computed",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_tag_cached_computed_property",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_tag_persisted_computed_with_custom_key_property",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_tag_persisten_computed_property",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_can_use_multiple_computed_properties_for_different_properties",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_cant_call_a_computed_directly",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_attribute_takes_priority_over_legacy_get_property_syntax",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_properties_only_get_accessed_once_per_request",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_property_is_accessable_within_blade_view",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_property_is_accessible_using_snake_case",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_property_is_accessible_when_using_snake_case_or_camel_case_in_the_method_name_in_the_class",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_computed_property_is_memoized_after_its_accessed",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_injected_computed_property_is_accessable_within_blade_view",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_isset_is_false_on_non_existing_computed_property",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_isset_is_false_on_null_computed_property",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_isset_is_true_on_existing_computed_property",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_it_supports_legacy_computed_properties",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_it_supports_unsetting_legacy_computed_properties",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_it_supports_unsetting_legacy_computed_properties_for_events",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_parses_computed_properties",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportComputed/UnitTest.php::test_persisted_computed_property_is_memoized_within_a_single_request",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/AttributeCommandUnitTest.php::test_attribute_is_created_by_attribute_command",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/AttributeCommandUnitTest.php::test_attribute_is_created_in_subdirectory_by_attribute_command",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/FormCommandUnitTest.php::test_form_object_is_created_by_form_command",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/FormCommandUnitTest.php::test_form_object_is_created_in_subdirectory_by_form_command",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/LayoutCommandUnitTest.php::test_layout_is_created_by_layout_command",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_backslash_nested_component_is_created_correctly",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_already_exists_shows_error",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_content_structure",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_is_created_with_class_flag",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_uses_class_namespace_from_config",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_view_in_livewire_folder_is_not_mistaken_for_sfc",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_view_name_reference_matches_configured_view_path",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_with_test_flag_creates_test_file",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_with_test_when_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_component_with_views_as_root_path_has_correct_view_name",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_based_nested_component_with_views_as_root_path_has_correct_view_name",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_class_component_is_created_in_namespace",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_component_is_created_in_layouts_namespace",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_component_type_can_be_specified_with_type_option",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_mfc_to_sfc_without_test_file_works",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_mfc_with_both_css_files_to_sfc_creates_both_style_tags",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_mfc_with_css_file_to_sfc_creates_style_tag",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_mfc_with_global_css_file_to_sfc_creates_global_style_tag",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_multi_file_to_single_file_preserves_test_file",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_sfc_to_mfc_with_test_flag_creates_test_when_none_exists",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_sfc_to_mfc_without_test_flag_preserves_existing_test",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_sfc_with_both_style_tags_to_mfc_creates_both_css_files",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_sfc_with_global_style_tag_to_mfc_creates_global_css_file",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_sfc_with_style_tag_to_mfc_creates_css_file",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_converting_single_file_to_multi_file_preserves_test_file",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_custom_namespace_from_config_works",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_default_component_type_can_be_configured",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_dot_nested_component_is_created_correctly",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_emoji_flag_false_overrides_config_emoji_enabled",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_emoji_flag_true_overrides_config_emoji_disabled",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_forward_slash_nested_component_is_created_correctly",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_already_exists_shows_error",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_content_structure",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_is_created_in_pages_namespace",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_is_created_with_mfc_flag",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_all_options_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_both_test_and_js_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_css_when_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_css_when_css_flag_provided",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_javascript_when_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_javascript_when_js_flag_provided",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_with_test_when_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multi_file_component_without_css_by_default",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_multiword_component_is_created_with_kebab_case",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_namespace_with_deeply_nested_components",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_namespace_works_without_emoji",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_nested_single_file_component_is_created_in_pages_namespace",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_nested_single_file_component_with_test_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_nested_single_file_component_with_test_flag",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_pascal_case_component_is_automatically_converted",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_round_trip_conversion_preserves_styles",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_content_structure",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_is_created_by_default",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_is_created_in_pages_namespace",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_with_sfc_flag",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_with_test_configured_without_emoji",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_with_test_flag_creates_test_file",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_with_test_flag_without_emoji",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_with_test_when_configured_in_make_command_with",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_single_file_component_without_emoji_when_disabled_in_config",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_creates_test_for_existing_class_based_component",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_creates_test_for_existing_multi_file_component",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_creates_test_for_existing_single_file_component",
+            "status": "passed",
+            "assertions": 6,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_for_existing_component_errors_when_test_already_exists",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_for_nested_existing_class_based_component",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_test_flag_for_nested_existing_component",
+            "status": "passed",
+            "assertions": 5,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_unregistered_namespace_shows_error_for_mfc",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_unregistered_namespace_shows_error_for_nested_component",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_unregistered_namespace_shows_error_for_sfc",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/MakeCommandUnitTest.php::test_view_only_namespace_shows_error_for_class_based_component",
+            "status": "passed",
+            "assertions": 3,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/StubCommandUnitTest.php::test_attribute_is_created_with_class_custom_default_stubs",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/StubCommandUnitTest.php::test_component_is_created_with_view_and_class_custom_default_stubs",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/StubCommandUnitTest.php::test_default_view_stub_is_created",
+            "status": "passed",
+            "assertions": 14,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportConsoleCommands/Tests/StubCommandUnitTest.php::test_form_is_created_with_class_custom_default_stubs",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportDisablingBackButtonCache/UnitTest.php::test_ensure_browser_cache_middleware_is_applied_to_a_route_that_contains_a_component_with_disable_set_to_true",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportDisablingBackButtonCache/UnitTest.php::test_ensure_disable_browser_cache_middleware_is_disabled_after_a_livewire_request_so_no_following_non_livewire_requests_have_it_enabled",
+            "status": "passed",
+            "assertions": 4,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportDisablingBackButtonCache/UnitTest.php::test_ensure_disable_browser_cache_middleware_is_not_applied_to_a_route_that_does_not_contain_a_component",
+            "status": "passed",
+            "assertions": 2,
+            "stdout": "",
+            "stderr": ""
+        },
+        {
+            "id": "test:src/Features/SupportEntangle/UnitTest.php::test_can_",
+            "status": "passed",
+            "assertions": 1,
+            "stdout": "",
+            "stderr": ""
+        }
+    ]
+}

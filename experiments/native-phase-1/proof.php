@@ -6,6 +6,8 @@ use Drove\Kernel\FailureKind;
 use Drove\Kernel\LifecycleExecutor;
 use Drove\Kernel\PcntlScheduler;
 use Drove\Kernel\Scheduler;
+use Drove\Kernel\ScopeContext;
+use Drove\Kernel\TestOutcome;
 use Drove\Native\DeclarationRegistry;
 use Drove\Native\Declarations;
 use Drove\Native\Runner;
@@ -130,7 +132,7 @@ $assert(($plan['schema'] ?? null) === 1, 'Native declarations did not emit Scope
 $assert(($plan['root']['type'] ?? null) === 'suite', 'Native declarations did not emit a suite root.');
 $assert(count($plan['root']['children'] ?? []) === 1, 'The native file scope was not compiled.');
 $fileScope = $plan['root']['children'][0];
-$assert(count($fileScope['tests'] ?? []) === 5, 'The root native tests were not compiled.');
+$assert(count($fileScope['tests'] ?? []) === 11, 'The root native tests were not compiled.');
 $assert(count($fileScope['children'] ?? []) === 1, 'The nested native scope was not compiled.');
 $nestedScope = $fileScope['children'][0];
 $assert(count($nestedScope['tests'] ?? []) === 2, 'The nested native tests were not compiled.');
@@ -298,6 +300,47 @@ foreach ($run['tests'] as $test) {
 
 $assert(($byName['accepts loose equality']['status'] ?? null) === 'passed', 'The root native test failed.');
 $assert(($byName['it passes strict identity']['status'] ?? null) === 'passed', 'The nested native test failed.');
+$hookAssertionCount = getenv('DROVE_NATIVE_SCHEDULER') === 'pcntl' ? 6 : 4;
+$assert(
+    ($byName['accepts loose equality']['assertions'] ?? null) === 26 + $hookAssertionCount,
+    'The native expectation catalog assertion count diverged.',
+);
+
+$assert(
+    ($byName['accepts expected exception']['status'] ?? null) === 'passed'
+        && ($byName['accepts expected exception']['assertions'] ?? null) === 3 + $hookAssertionCount,
+    sprintf(
+        'Native class/message/code expected-exception metrics diverged: expected %d, got %s.',
+        3 + $hookAssertionCount,
+        var_export($byName['accepts expected exception']['assertions'] ?? null, true),
+    ),
+);
+
+foreach ([
+    'accepts expected exception dataset [first]',
+    'accepts expected exception dataset [second]',
+] as $name) {
+    $assert(
+        ($byName[$name]['status'] ?? null) === 'passed'
+            && ($byName[$name]['assertions'] ?? null) === 1 + $hookAssertionCount,
+        sprintf('Native expected-exception semantics diverged for %s.', $name),
+    );
+}
+
+foreach ([
+    'rejects expected exception class mismatch' => 'Expected exception LogicException, got RuntimeException.',
+    'rejects expected exception message mismatch' => "Expected exception message to contain 'different message', got 'native expected exception'.",
+    'rejects expected exception code mismatch' => 'Expected exception code 2, got 1.',
+] as $name => $message) {
+    $test = $byName[$name] ?? null;
+    $assert(
+        is_array($test)
+            && ($test['status'] ?? null) === 'failed'
+            && ($test['failure']['kind'] ?? null) === FailureKind::AssertionFailure->value
+            && ($test['failure']['message'] ?? null) === $message,
+        sprintf('Native expected-exception mismatch semantics diverged for %s.', $name),
+    );
+}
 
 foreach (range(1, 4) as $case) {
     $assert(
@@ -430,6 +473,337 @@ if ($scheduler instanceof PcntlScheduler) {
     );
 }
 
+$statCacheBoundary = [
+    'checked' => false,
+    'inherited_cache_cleared' => false,
+    'post_cleanup_cache_cleared' => false,
+];
+
+if (
+    DIRECTORY_SEPARATOR === '/'
+    && function_exists('pcntl_fork')
+    && function_exists('pcntl_waitpid')
+    && function_exists('stream_socket_pair')
+) {
+    $statCacheFile = tempnam(sys_get_temp_dir(), 'drove-native-stat-cache-');
+
+    if (! is_string($statCacheFile)) {
+        throw new RuntimeException('Could not create the native stat-cache fixture.');
+    }
+
+    $statCacheSockets = stream_socket_pair(
+        STREAM_PF_UNIX,
+        STREAM_SOCK_STREAM,
+        STREAM_IPPROTO_IP,
+    );
+
+    if ($statCacheSockets === false) {
+        throw new RuntimeException('Could not create the native stat-cache control socket.');
+    }
+
+    [$statCacheParentSocket, $statCacheChildSocket] = $statCacheSockets;
+    $statCacheSiblingPid = pcntl_fork();
+
+    if ($statCacheSiblingPid === -1) {
+        fclose($statCacheParentSocket);
+        fclose($statCacheChildSocket);
+
+        throw new RuntimeException('Could not fork the native stat-cache sibling process.');
+    }
+
+    if ($statCacheSiblingPid === 0) {
+        fclose($statCacheParentSocket);
+
+        while (($command = fgets($statCacheChildSocket)) !== false) {
+            $command = trim($command);
+
+            if ($command === 'quit') {
+                break;
+            }
+
+            $modifiedAt = filter_var($command, FILTER_VALIDATE_INT);
+            $result = is_int($modifiedAt) && touch($statCacheFile, $modifiedAt)
+                ? "ok\n"
+                : "error\n";
+            fwrite($statCacheChildSocket, $result);
+        }
+
+        fclose($statCacheChildSocket);
+        exit(0);
+    }
+
+    fclose($statCacheChildSocket);
+    $touchFromSibling = static function (int $modifiedAt) use ($assert, $statCacheParentSocket): void {
+        $assert(
+            fwrite($statCacheParentSocket, $modifiedAt."\n") !== false
+                && fgets($statCacheParentSocket) === "ok\n",
+            'The native stat-cache sibling process failed.',
+        );
+    };
+    $initialMtime = time() - 300;
+    $bodyMtime = $initialMtime + 30;
+    $afterMtime = $bodyMtime + 30;
+    $statCacheStartMtime = null;
+    $statCachePostTestMtime = null;
+    $statCacheAfterAll = null;
+    $statCacheRun = null;
+    $directStatCacheStartMtime = null;
+    $directStatCacheStaleMtime = null;
+    $directStatCachePostTestMtime = null;
+    $directStatCacheResult = null;
+
+    try {
+        $statCacheRegistry = Declarations::capture(
+            static function () use (
+                $afterMtime,
+                $bodyMtime,
+                $statCacheFile,
+                &$statCacheAfterAll,
+                &$statCacheStartMtime,
+                $touchFromSibling,
+            ): void {
+                \Drove\Native\afterAll(static function () use (
+                    $afterMtime,
+                    $statCacheFile,
+                    &$statCacheAfterAll,
+                ): void {
+                    $statCacheAfterAll = filemtime($statCacheFile);
+                    \Drove\Native\expect($statCacheAfterAll)->toBe($afterMtime);
+                });
+                \Drove\Native\test('clears inherited stat cache at test start', static function () use (
+                    $bodyMtime,
+                    $statCacheFile,
+                    &$statCacheStartMtime,
+                ): void {
+                    $statCacheStartMtime = filemtime($statCacheFile);
+                    \Drove\Native\expect($statCacheStartMtime)->toBe($bodyMtime);
+                });
+                \Drove\Native\test('clears completed lifecycle stat cache', static function () use (
+                    $afterMtime,
+                    $bodyMtime,
+                    $statCacheFile,
+                    $touchFromSibling,
+                ): void {
+                    \Drove\Native\expect(true)->toBeTrue();
+                    $touchFromSibling($bodyMtime);
+                    clearstatcache(true, $statCacheFile);
+                    $observedBodyMtime = filemtime($statCacheFile);
+                    $touchFromSibling($afterMtime);
+                    $observedStaleMtime = filemtime($statCacheFile);
+
+                    if ([$observedBodyMtime, $observedStaleMtime] !== [$bodyMtime, $bodyMtime]) {
+                        throw new RuntimeException('The completed lifecycle did not retain its primed stat entry.');
+                    }
+                });
+            },
+            $rootPath,
+            'Drove native stat-cache lifecycle proof',
+        );
+        $statCacheScheduler = new class($assert, $bodyMtime, $initialMtime, $statCacheFile, $touchFromSibling, static function (int $modifiedAt) use (&$statCachePostTestMtime): void {
+            $statCachePostTestMtime = $modifiedAt;
+        },
+        ) implements Scheduler
+        {
+            public function __construct(
+                private readonly Closure $assert,
+                private readonly int $bodyMtime,
+                private readonly int $initialMtime,
+                private readonly string $statCacheFile,
+                private readonly Closure $touchFromSibling,
+                private readonly Closure $recordPostTestMtime,
+            ) {}
+
+            public function runId(): string
+            {
+                return 'native-stat-cache-inline';
+            }
+
+            public function map(array $tasks, Closure $execute): array
+            {
+                $results = [];
+                $completionOrder = [];
+
+                foreach ($tasks as $ordinal => $task) {
+                    $startedNs = hrtime(true);
+
+                    if (
+                        $task['kind'] === 'test'
+                        && str_contains($task['id'], 'clears%20inherited%20stat%20cache')
+                    ) {
+                        ($this->touchFromSibling)($this->initialMtime);
+                        clearstatcache(true, $this->statCacheFile);
+                        ($this->assert)(
+                            filemtime($this->statCacheFile) === $this->initialMtime,
+                            'Could not prime the inherited native stat-cache entry.',
+                        );
+                        ($this->touchFromSibling)($this->bodyMtime);
+                        ($this->assert)(
+                            filemtime($this->statCacheFile) === $this->initialMtime,
+                            'The inherited native stat-cache entry was not stale before test execution.',
+                        );
+                    } elseif ($task['kind'] === 'test') {
+                        ($this->touchFromSibling)($this->bodyMtime);
+                        clearstatcache(true, $this->statCacheFile);
+                    }
+
+                    $value = $execute($task);
+
+                    if (
+                        $task['kind'] === 'test'
+                        && str_contains($task['id'], 'clears%20completed%20lifecycle')
+                    ) {
+                        ($this->recordPostTestMtime)(filemtime($this->statCacheFile));
+                    }
+
+                    $finishedNs = hrtime(true);
+                    $results[] = [
+                        'id' => $task['id'],
+                        'kind' => $task['kind'],
+                        'scope_id' => $task['scope_id'],
+                        'ordinal' => $ordinal,
+                        'status' => 'passed',
+                        'failure' => null,
+                        'value' => $value,
+                        'stdout' => '',
+                        'stderr' => '',
+                        'events' => [],
+                        'telemetry' => [
+                            'pid' => getmypid(),
+                            'pgid' => getmypid(),
+                            'started_ns' => $startedNs,
+                            'finished_ns' => $finishedNs,
+                            'duration_ms' => ($finishedNs - $startedNs) / 1_000_000,
+                            'exit_code' => 0,
+                            'signal' => null,
+                        ],
+                    ];
+                    $completionOrder[] = $task['id'];
+                }
+
+                return ['results' => $results, 'completion_order' => $completionOrder];
+            }
+
+            public function withPermit(array $scopes, Closure $work): mixed
+            {
+                return $work();
+            }
+        };
+        $statCacheRun = new Runner($statCacheScheduler)->run($statCacheRegistry);
+        $directOutcome = TestOutcome::passed();
+        $directBody = static function () use (
+            &$directStatCacheStartMtime,
+            $directOutcome,
+            $statCacheFile,
+        ): TestOutcome {
+            $directStatCacheStartMtime = filemtime($statCacheFile);
+
+            return $directOutcome;
+        };
+        $directCleanup = static function () use (
+            $afterMtime,
+            $bodyMtime,
+            &$directStatCacheStaleMtime,
+            $statCacheFile,
+            $touchFromSibling,
+        ): void {
+            clearstatcache(true, $statCacheFile);
+            $cachedMtime = filemtime($statCacheFile);
+            $touchFromSibling($afterMtime);
+            $directStatCacheStaleMtime = filemtime($statCacheFile);
+
+            if ([$cachedMtime, $directStatCacheStaleMtime] !== [$bodyMtime, $bodyMtime]) {
+                throw new RuntimeException('The direct lifecycle cleanup did not retain its primed stat entry.');
+            }
+        };
+        $directExecutor = new LifecycleExecutor(
+            $statCacheScheduler,
+            static fn (string $id): Closure => $id === 'hook:stat-cache-cleanup'
+                ? $directCleanup
+                : throw new RuntimeException('Unexpected hook '.$id),
+            static fn (string $id, ScopeContext $context = new ScopeContext): Closure => $directBody,
+        );
+        $directRunTest = new ReflectionMethod(LifecycleExecutor::class, 'runTest');
+        $touchFromSibling($initialMtime);
+        clearstatcache(true, $statCacheFile);
+        $assert(
+            filemtime($statCacheFile) === $initialMtime,
+            'Could not prime the direct inherited native stat-cache entry.',
+        );
+        $touchFromSibling($bodyMtime);
+        $assert(
+            filemtime($statCacheFile) === $initialMtime,
+            'The direct inherited native stat-cache entry was not stale before test execution.',
+        );
+        $directStatCacheResult = $directRunTest->invoke(
+            $directExecutor,
+            [
+                'id' => 'test:stat-cache-direct',
+                'name' => 'direct stat-cache boundary',
+                'source' => null,
+                'dataset' => null,
+                'groups' => [],
+            ],
+            [[
+                'id' => 'scope:stat-cache-direct',
+                'before_each' => [],
+                'after_each' => ['hook:stat-cache-cleanup'],
+            ]],
+            new ScopeContext,
+        );
+        $directStatCachePostTestMtime = filemtime($statCacheFile);
+    } finally {
+        fwrite($statCacheParentSocket, "quit\n");
+        fclose($statCacheParentSocket);
+        $statCacheSiblingStatus = 0;
+        $waitedStatCacheSiblingPid = pcntl_waitpid($statCacheSiblingPid, $statCacheSiblingStatus);
+        $assert(
+            $waitedStatCacheSiblingPid === $statCacheSiblingPid
+                && pcntl_wifexited($statCacheSiblingStatus)
+                && pcntl_wexitstatus($statCacheSiblingStatus) === 0,
+            'The native stat-cache sibling process did not exit cleanly.',
+        );
+        clearstatcache(true, $statCacheFile);
+
+        if (is_file($statCacheFile)) {
+            unlink($statCacheFile);
+        }
+    }
+
+    $assert(
+        ($statCacheRun['status'] ?? null) === 'passed'
+            && ($statCacheRun['exit_code'] ?? null) === 0
+            && $statCacheStartMtime === $bodyMtime
+            && $statCachePostTestMtime === $afterMtime
+            && $statCacheAfterAll === $afterMtime
+            && ($directStatCacheResult['status'] ?? null) === 'passed'
+            && $directStatCacheStartMtime === $bodyMtime
+            && $directStatCacheStaleMtime === $bodyMtime
+            && $directStatCachePostTestMtime === $afterMtime,
+        sprintf(
+            'Native lifecycle stat-cache parity failed: %s.',
+            json_encode(
+                [
+                    'run' => $statCacheRun,
+                    'start_mtime' => $statCacheStartMtime,
+                    'post_test_mtime' => $statCachePostTestMtime,
+                    'after_all_mtime' => $statCacheAfterAll,
+                    'direct_result' => $directStatCacheResult,
+                    'direct_start_mtime' => $directStatCacheStartMtime,
+                    'direct_stale_mtime' => $directStatCacheStaleMtime,
+                    'direct_post_test_mtime' => $directStatCachePostTestMtime,
+                    'expected_after_all_mtime' => $afterMtime,
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+        ),
+    );
+    $statCacheBoundary = [
+        'checked' => true,
+        'inherited_cache_cleared' => true,
+        'post_cleanup_cache_cleared' => true,
+    ];
+}
+
 $projection = LifecycleExecutor::semanticProjection($run);
 $summary = [
     'schema' => 1,
@@ -447,6 +821,7 @@ $summary = [
         'nested_trace' => $strictHookTrace,
         'failed_trace' => $failedHookTrace,
         'scope_hook_counts' => $scopeHookCounts,
+        'stat_cache_boundary' => $statCacheBoundary,
     ],
     'test_count' => count($run['tests']),
     'plan_hash' => hash('sha256', json_encode($plan, JSON_THROW_ON_ERROR)),

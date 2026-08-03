@@ -315,6 +315,19 @@ function designPartnerInteger(
 }
 
 /**
+ * @param  array<string, mixed>  $record
+ * @param  list<string>  $allowed
+ */
+function designPartnerRejectUnknownFields(array $record, array $allowed, string $label): void
+{
+    foreach (array_keys($record) as $field) {
+        if (! in_array($field, $allowed, true)) {
+            designPartnerFail("{$label} contains unknown field {$field}.");
+        }
+    }
+}
+
+/**
  * @param  array<string, mixed>  $run
  * @return array<string, int>
  */
@@ -721,8 +734,19 @@ function designPartnerVerifyPlatform(
         'macos-aarch64' => ['Darwin', 'arm64'],
     ];
 
-    if (! is_array($platform)
-        || ! isset($targets[$platform['native_target'] ?? null])
+    if (! is_array($platform)) {
+        designPartnerFail(
+            "{$label}.platform must bind a supported native target, PHP 8.4, package version, and package revision.",
+        );
+    }
+
+    designPartnerRejectUnknownFields(
+        $platform,
+        ['os_family', 'architecture', 'native_target', 'php_version', 'package_version', 'package_revision'],
+        "{$label}.platform",
+    );
+
+    if (! isset($targets[$platform['native_target'] ?? null])
         || [$platform['os_family'] ?? null, $platform['architecture'] ?? null]
             !== $targets[$platform['native_target']]
         || ! is_string($platform['php_version'] ?? null)
@@ -1085,7 +1109,7 @@ function designPartnerVerifyCommand(
  * @param  callable(string, string, string): array<string, mixed>  $runLoader
  * @param  callable(string, string, string): array<string, mixed>  $jobLoader
  * @param  callable(string, string, string, string): array<string, mixed>  $comparisonLoader
- * @return array<string, int|string>
+ * @return array<string, bool|int|string>
  */
 function verifyDesignPartnerLedger(
     array $ledger,
@@ -1097,6 +1121,7 @@ function verifyDesignPartnerLedger(
     callable $jobLoader,
     callable $comparisonLoader,
     ?DateTimeImmutable $now = null,
+    bool $partial = false,
 ): array {
     if (preg_match('/\Av0\.\d+\.\d+-alpha\.\d+\z/', $releaseTag) !== 1) {
         designPartnerFail('release tag must match v0.x.y-alpha.n.', 2);
@@ -1123,9 +1148,11 @@ function verifyDesignPartnerLedger(
         designPartnerFail('ledger must use schema 2 with an evaluations list.');
     }
 
+    designPartnerRejectUnknownFields($ledger, ['schema', 'evaluations'], 'ledger');
+
     $evaluations = $ledger['evaluations'];
 
-    if (count($evaluations) < DROVE_MINIMUM_EVALUATIONS) {
+    if (! $partial && count($evaluations) < DROVE_MINIMUM_EVALUATIONS) {
         designPartnerFail(sprintf(
             'requires at least %d completed external evaluations; found %d.',
             DROVE_MINIMUM_EVALUATIONS,
@@ -1146,6 +1173,22 @@ function verifyDesignPartnerLedger(
         if (! is_array($evaluation)) {
             designPartnerFail("evaluations[{$index}] must be an object.");
         }
+
+        designPartnerRejectUnknownFields(
+            $evaluation,
+            [
+                'id',
+                'team',
+                'repository',
+                'drove',
+                'project_revision',
+                'evaluation_revision',
+                'evidence_revision',
+                'evidence',
+                'migration',
+            ],
+            "evaluations[{$index}]",
+        );
 
         $id = $evaluation['id'] ?? null;
         $team = $evaluation['team'] ?? null;
@@ -1195,6 +1238,10 @@ function verifyDesignPartnerLedger(
 
         $evaluatedTag = is_array($drove) ? ($drove['tag'] ?? null) : null;
         $evaluatedRevision = is_array($drove) ? ($drove['revision'] ?? null) : null;
+
+        if (is_array($drove)) {
+            designPartnerRejectUnknownFields($drove, ['tag', 'revision'], "{$id}.drove");
+        }
 
         if (! is_string($evaluatedTag)
             || preg_match('/\Av0\.\d+\.\d+-alpha\.\d+\z/', $evaluatedTag) !== 1
@@ -1277,6 +1324,14 @@ function verifyDesignPartnerLedger(
         $evidenceUrl = is_array($evidenceDescriptor) ? ($evidenceDescriptor['url'] ?? null) : null;
         $evidenceHash = is_array($evidenceDescriptor) ? ($evidenceDescriptor['sha256'] ?? null) : null;
 
+        if (is_array($evidenceDescriptor)) {
+            designPartnerRejectUnknownFields(
+                $evidenceDescriptor,
+                ['url', 'sha256'],
+                "{$id}.evidence",
+            );
+        }
+
         if (! is_string($evidenceUrl)) {
             designPartnerFail("{$id}.evidence.url must be a string.");
         }
@@ -1335,12 +1390,43 @@ function verifyDesignPartnerLedger(
             );
         }
 
+        designPartnerRejectUnknownFields(
+            $evidence,
+            [
+                'schema',
+                'evaluation_id',
+                'team',
+                'repository',
+                'drove',
+                'project_revision',
+                'evaluation_revision',
+                'dependency_state',
+                'scanner',
+                'benchmark',
+            ],
+            "{$id}.evidence",
+        );
+
+        if (is_array($evidence['drove'] ?? null)) {
+            designPartnerRejectUnknownFields(
+                $evidence['drove'],
+                ['tag', 'revision'],
+                "{$id}.evidence.drove",
+            );
+        }
+
         designPartnerEvidenceIdentity($evaluation, $evidence, $id);
         $scanner = $evidence['scanner'] ?? null;
 
         if (! is_array($scanner) || ($scanner['completed'] ?? null) !== true) {
             designPartnerFail("{$id}.evidence.scanner.completed must be true.");
         }
+
+        designPartnerRejectUnknownFields(
+            $scanner,
+            ['completed', 'discovered', 'supported', 'bridge_only', 'rejected'],
+            "{$id}.evidence.scanner",
+        );
 
         $discovered = designPartnerInteger($scanner, 'discovered', "{$id}.evidence.scanner", 1);
         $supported = designPartnerInteger($scanner, 'supported', "{$id}.evidence.scanner", 2);
@@ -1363,6 +1449,12 @@ function verifyDesignPartnerLedger(
             || count($runs) < 3) {
             designPartnerFail("{$id}.evidence.benchmark must contain at least three completed runs.");
         }
+
+        designPartnerRejectUnknownFields(
+            $benchmark,
+            ['completed', 'selected', 'case_ids', 'selection_sha256', 'platform', 'runs'],
+            "{$id}.evidence.benchmark",
+        );
 
         $selected = designPartnerInteger($benchmark, 'selected', "{$id}.evidence.benchmark", 2);
         $selectionHash = $benchmark['selection_sha256'] ?? null;
@@ -1440,10 +1532,35 @@ function verifyDesignPartnerLedger(
             if (! in_array($runner, ['pest', 'phpunit', 'drove'], true)
                 || ! in_array($frontend, ['pest', 'phpunit'], true)
                 || ! in_array($runtime, ['php', 'laravel', 'testbench'], true)
-                || ! in_array($memorySource, ['rss', 'pss', 'cgroup'], true)
+                || $memorySource !== 'rss'
                 || $processes > 30) {
                 designPartnerFail("{$label} has an unsupported runner, frontend, runtime, memory source, or process count.");
             }
+
+            designPartnerRejectUnknownFields(
+                $run,
+                [
+                    'runner',
+                    'frontend',
+                    'runtime',
+                    'command_argv',
+                    'processes',
+                    'exit_code',
+                    ...($runner === 'drove' ? ['observed_lanes'] : []),
+                    'selected',
+                    'passed',
+                    'failed',
+                    'skipped',
+                    'incomplete',
+                    'risky',
+                    'rejected',
+                    'assertions',
+                    'wall_ms',
+                    'peak_memory_bytes',
+                    'memory_source',
+                ],
+                $label,
+            );
 
             if ($exitCode !== 0) {
                 designPartnerFail("{$label}.exit_code must be zero.");
@@ -1533,6 +1650,21 @@ function verifyDesignPartnerLedger(
         if (! is_array($migration) || ($migration['meaningful'] ?? null) !== true) {
             designPartnerFail("{$id}.migration.meaningful must be true when migration evidence is present.");
         }
+
+        designPartnerRejectUnknownFields(
+            $migration,
+            [
+                'meaningful',
+                'drove_step_name',
+                'ci_started_at',
+                'ci_verified_at',
+                'ci_started_revision',
+                'ci_verified_revision',
+                'ci_started_run_url',
+                'ci_verified_run_url',
+            ],
+            "{$id}.migration",
+        );
 
         $startedAtValue = $migration['ci_started_at'] ?? null;
         $verifiedAtValue = $migration['ci_verified_at'] ?? null;
@@ -1704,7 +1836,7 @@ function verifyDesignPartnerLedger(
         $migrations++;
     }
 
-    if ($migrations < DROVE_MINIMUM_MIGRATIONS) {
+    if (! $partial && $migrations < DROVE_MINIMUM_MIGRATIONS) {
         designPartnerFail(sprintf(
             'requires at least %d meaningful migrations retained in CI for 14 days; found %d.',
             DROVE_MINIMUM_MIGRATIONS,
@@ -1713,8 +1845,9 @@ function verifyDesignPartnerLedger(
     }
 
     return [
-        'gate' => 'design-partner-evidence',
-        'status' => 'passed',
+        'gate' => $partial ? 'design-partner-evidence-partial' : 'design-partner-evidence',
+        'status' => $partial ? 'validated' : 'passed',
+        'release_gate_satisfied' => ! $partial,
         'release_tag' => $releaseTag,
         'release_revision' => $releaseRevision,
         'external_evaluations' => count($evaluations),
@@ -1729,9 +1862,15 @@ function verifyDesignPartnerLedger(
  */
 function designPartnerMain(array $arguments): int
 {
+    $partial = ($arguments[1] ?? null) === '--partial';
+
+    if ($partial) {
+        array_splice($arguments, 1, 1);
+    }
+
     if (count($arguments) !== 4) {
         designPartnerFail(
-            'usage: verify-design-partners.php <ledger.json> <release-tag> <release-revision>.',
+            'usage: verify-design-partners.php [--partial] <ledger.json> <release-tag> <release-revision>.',
             2,
         );
     }
@@ -1784,6 +1923,7 @@ function designPartnerMain(array $arguments): int
         designPartnerFetchGitHubRun(...),
         designPartnerFetchGitHubJobs(...),
         designPartnerFetchGitHubComparison(...),
+        partial: $partial,
     );
     echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL;
 

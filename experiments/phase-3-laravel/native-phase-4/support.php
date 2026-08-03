@@ -8,6 +8,7 @@ use Drove\Kernel\DroverScheduler;
 use Drove\Kernel\NativeLibrary;
 use Drove\Kernel\ScopeContext;
 use Drove\Laravel\Contracts\DatabaseStateProvider;
+use Illuminate\Database\Events\ConnectionEstablished;
 use Illuminate\Foundation\Application;
 
 final class NativePhaseFourStateProvider implements DatabaseStateProvider
@@ -39,6 +40,10 @@ final class NativePhaseFourStateProvider implements DatabaseStateProvider
     /** @param array<string, mixed> $task */
     public function enterDescendant(ScopeContext $scope, array $task): void
     {
+        if ($this->fault === 'enter' && $this->inner->name() === 'transaction') {
+            $this->injectTransactionReconnectFault($scope, 'enter');
+        }
+
         if ($this->fault === 'enter' && $this->inner->name() === 'sqlite-memory') {
             $scope->app()->make('db')->disconnect('sqlite');
             $this->record('enter');
@@ -101,6 +106,12 @@ final class NativePhaseFourStateProvider implements DatabaseStateProvider
     public function afterDispatch(ScopeContext $scope, array $tasks): void
     {
         if ($this->fault === 'cleanup'
+            && $this->inner->name() === 'transaction'
+            && getmypid() === $this->rootPid) {
+            $this->injectTransactionReconnectFault($scope, 'cleanup');
+        }
+
+        if ($this->fault === 'cleanup'
             && $this->inner->name() === 'sqlite-memory'
             && getmypid() === $this->rootPid) {
             $scope->app()->make('db')->disconnect('sqlite');
@@ -157,6 +168,41 @@ final class NativePhaseFourStateProvider implements DatabaseStateProvider
         }
 
         return $this->copyWorkspace;
+    }
+
+    private function transactionTable(): string
+    {
+        $table = getenv('DROVE_LARAVEL_FAULT_TABLE');
+
+        if (! is_string($table)
+            || preg_match('/\A[a-z][a-z0-9_]{0,62}\z/D', $table) !== 1) {
+            throw new RuntimeException('The transaction fault table is invalid.');
+        }
+
+        return $table;
+    }
+
+    private function injectTransactionReconnectFault(
+        ScopeContext $scope,
+        string $phase,
+    ): void {
+        $armed = true;
+        $scope->app()->make('events')->listen(
+            ConnectionEstablished::class,
+            function (ConnectionEstablished $event) use (&$armed, $phase): void {
+                if (! $armed || $event->connection->getName() !== 'mysql') {
+                    return;
+                }
+
+                $armed = false;
+                $event->connection->beginTransaction();
+                $event->connection->table($this->transactionTable())->insert([
+                    'id' => 2,
+                    'value' => $phase.'-private',
+                ]);
+                $this->record($phase);
+            },
+        );
     }
 }
 

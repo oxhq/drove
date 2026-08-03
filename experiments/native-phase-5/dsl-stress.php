@@ -58,6 +58,7 @@ try {
             && count($root['children'][0]['tests']) === 10_000,
         'The native Phase 5 stress plan must be one flat, unsharded file scope.',
     );
+    unset($plan, $planJson, $root);
     $planningMs = round((hrtime(true) - $planningStartedNs) / 1_000_000, 3);
     nativePhaseFivePhase('environment_prepare');
     $environmentStartedNs = hrtime(true);

@@ -2,14 +2,15 @@
 
 declare(strict_types=1);
 
-namespace Drove\Bridge;
+namespace Drove\Compatibility;
 
+use Drove\Bridge\BridgeEntrypoint;
 use JsonException;
 use JsonSerializable;
 use RuntimeException;
 use UnexpectedValueException;
 
-final readonly class CompatibilityRegistry implements JsonSerializable
+final readonly class Registry implements JsonSerializable
 {
     /**
      * @param  array<string, mixed>  $manifest
@@ -157,7 +158,7 @@ final readonly class CompatibilityRegistry implements JsonSerializable
                     $bridge['entrypoint'],
                 ) !== 1
                 || ! in_array($bridge['role'] ?? null, ['environment', 'frontend'], true)
-                || ($bridge['status'] ?? null) !== CompatibilityStatus::BridgeOnly->value) {
+                || ($bridge['status'] ?? null) !== Status::BridgeOnly->value) {
                 $this->invalid('bridge '.$id);
             }
         }
@@ -175,13 +176,13 @@ final readonly class CompatibilityRegistry implements JsonSerializable
                 'surface '.$id,
             );
             $status = is_string($surface['status'] ?? null)
-                ? CompatibilityStatus::tryFrom($surface['status'])
+                ? Status::tryFrom($surface['status'])
                 : null;
             $bridge = $surface['bridge'] ?? null;
             $codemod = $surface['codemod'] ?? null;
             $diagnostic = $surface['diagnostic'] ?? null;
 
-            if (! $status instanceof CompatibilityStatus
+            if (! $status instanceof Status
                 || (! is_null($bridge) && ! is_string($bridge))
                 || (! is_null($codemod) && (! is_string($codemod) || $codemod === ''))
                 || ! is_string($diagnostic)
@@ -189,7 +190,7 @@ final readonly class CompatibilityRegistry implements JsonSerializable
                 $this->invalid('surface '.$id);
             }
 
-            if ($status === CompatibilityStatus::BridgeOnly) {
+            if ($status === Status::BridgeOnly) {
                 if (! is_string($bridge) || ! array_key_exists($bridge, $bridges)) {
                     $this->invalid('surface '.$id.' bridge');
                 }

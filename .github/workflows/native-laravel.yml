@@ -34,6 +34,19 @@ jobs:
         test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
         test -z "$(git status --porcelain)"
 
+    - name: Setup PHP
+      uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      with:
+        php-version: '8.4'
+        tools: composer:v2
+        coverage: none
+        extensions: ffi, pcntl, posix
+
+    - name: Install gate tooling
+      env:
+        COMPOSER_ROOT_VERSION: 0.4.x-dev
+      run: composer install --no-interaction --no-progress --ansi
+
     - name: Build pinned Laravel proof image
       env:
         IMAGE: drove-native-laravel
@@ -58,8 +71,11 @@ jobs:
           do
             php -l "$file"
           done
+          find native-package -name "*.php" -type f -exec php -l {} \;
+          php -l proof-native-context.php
           composer validate --strict
           composer check-platform-reqs
+          composer --working-dir=native-package validate --strict
         '
 
     - name: Native Laravel state matrix
@@ -76,6 +92,13 @@ jobs:
           "$IMAGE" bash -lc '
             set -euo pipefail
             matrix_args=""
+
+            php -d ffi.enable=true -d memory_limit=512M \
+              proof-native-context.php \
+              > /artifacts/drove-native-laravel-context.json
+
+            sh native-package/run.sh \
+              > /artifacts/drove-native-livewire-package.json
 
             for provider in sqlite-memory sqlite-copy
             do
@@ -102,6 +125,29 @@ jobs:
               /artifacts/drove-native-laravel-preflight.json \
               /artifacts/drove-native-laravel-comparison.json
           '
+        test -z "$(git status --porcelain)"
+
+    - name: Bridge-free pinned Livewire gate
+      env:
+        DROVE_EXPECTED_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        IMAGE: drove-native-laravel
+        LIVEWIRE_COMMIT: 9c1450739d30c9b0b223ad6512be2a33f8f62f96
+      run: |
+        set -euo pipefail
+        artifact_dir="${RUNNER_TEMP}/native-laravel"
+        livewire_checkout="${RUNNER_TEMP}/livewire-native"
+        git clone --filter=blob:none --no-checkout \
+          https://github.com/livewire/livewire.git \
+          "$livewire_checkout"
+        git -C "$livewire_checkout" config core.autocrlf false
+        git -C "$livewire_checkout" checkout --detach "$LIVEWIRE_COMMIT"
+        test "$(git -C "$livewire_checkout" rev-parse HEAD)" = "$LIVEWIRE_COMMIT"
+        test -z "$(git -C "$livewire_checkout" status --porcelain=v1 --untracked-files=all)"
+        DROVE_NATIVE_LIVEWIRE_IMAGE="$IMAGE" \
+          DROVE_NATIVE_LIVEWIRE_CHECKOUT="$livewire_checkout" \
+          DROVE_NATIVE_LIVEWIRE_ARTIFACT_DIR="$artifact_dir" \
+          composer test:native-livewire-package
+        test -z "$(git -C "$livewire_checkout" status --porcelain=v1 --untracked-files=all)"
         test -z "$(git status --porcelain)"
 
     - name: Upload native Laravel evidence
