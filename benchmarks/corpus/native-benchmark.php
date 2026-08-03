@@ -7,6 +7,7 @@ use Random\Randomizer;
 
 const DROVE_NATIVE_BENCHMARK_PROCESSES = [1, 2, 4, 8, 16, 30];
 const DROVE_NATIVE_BENCHMARK_CORPORA = ['pest', 'invoiceshelf', 'livewire', 'filament'];
+const DROVE_NATIVE_BENCHMARK_CELLS_PER_REPETITION = 32;
 
 if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
     nativeBenchmarkMain($_SERVER['argv'] ?? []);
@@ -63,6 +64,7 @@ function nativeBenchmarkBuildPlan(string $configPath, int $seed): array
     nativeBenchmarkRequire(($config['schema_version'] ?? null) === 1, 'Native benchmark config schema must be 1.');
     $repetitions = $config['repetitions'] ?? null;
     nativeBenchmarkRequire(is_int($repetitions) && $repetitions >= 5, 'Native benchmarks require at least five repetitions.');
+    $jobTimeoutSeconds = nativeBenchmarkPositiveInt($config['job_timeout_seconds'] ?? null, 'job timeout seconds');
     $quotas = nativeBenchmarkQuotas($config['quotas'] ?? null);
     $prerequisite = nativeBenchmarkFileIdentity($config['n1_n5_evidence'] ?? null, dirname($configPath));
     $prerequisiteEvidence = nativeBenchmarkReadJson($prerequisite['path']);
@@ -160,6 +162,7 @@ function nativeBenchmarkBuildPlan(string $configPath, int $seed): array
                             'runner' => $runner,
                             'requested_processes' => $processCount,
                             'repetition' => $repetition,
+                            'job_timeout_seconds' => $jobTimeoutSeconds,
                             'source_revision' => $revision,
                             'drove_revision' => $droveRevision,
                             'lock_sha256' => $runners[$runner]['lock']['sha256'],
@@ -201,8 +204,16 @@ function nativeBenchmarkBuildPlan(string $configPath, int $seed): array
         ], $corpus['cohorts']),
     ], $normalizedCorpora);
     nativeBenchmarkRequire(
+        $configuredOutcomes === nativeBenchmarkCorpusContract(),
+        'Native benchmark config diverges from the exact pinned corpus revisions and six-cohort contract.',
+    );
+    nativeBenchmarkRequire(
         ($prerequisiteEvidence['outcomes'] ?? null) === $configuredOutcomes,
         'Native benchmark config outcomes diverge from the exact N1-N5 evidence.',
+    );
+    nativeBenchmarkRequire(
+        count($schedule) === DROVE_NATIVE_BENCHMARK_CELLS_PER_REPETITION * $repetitions,
+        'Native benchmark schedule must contain exactly 32 cells per repetition.',
     );
 
     return [
@@ -217,6 +228,7 @@ function nativeBenchmarkBuildPlan(string $configPath, int $seed): array
             'seed' => $seed,
         ],
         'repetitions' => $repetitions,
+        'job_timeout_seconds' => $jobTimeoutSeconds,
         'parallel_processes' => DROVE_NATIVE_BENCHMARK_PROCESSES,
         'quotas' => $quotas,
         'config' => [
@@ -247,6 +259,7 @@ function nativeBenchmarkRun(array $plan, string $artifactDirectory): void
     }
 
     $artifactDirectory = $resolvedArtifactDirectory;
+    $jobTimeoutSeconds = nativeBenchmarkPositiveInt($plan['job_timeout_seconds'] ?? null, 'job timeout seconds');
 
     foreach ($plan['schedule'] as $index => $job) {
         nativeBenchmarkRequire(is_array($job), 'Native benchmark schedule contains an invalid job.');
@@ -256,6 +269,12 @@ function nativeBenchmarkRun(array $plan, string $artifactDirectory): void
         $rawPath = $artifactDirectory.DIRECTORY_SEPARATOR.$jobId.'.raw.json';
         $executionJob = nativeBenchmarkExecutionJob($job, $artifactDirectory);
         $command = nativeBenchmarkConcreteCommand($job, $artifactDirectory);
+        $containerName = nativeBenchmarkContainerName($jobId, $artifactDirectory);
+
+        nativeBenchmarkRequire(
+            nativeBenchmarkRemoveDockerContainer($containerName),
+            "$jobId could not clear its exact stale container before replay.",
+        );
 
         if (is_file($artifactPath)) {
             nativeBenchmarkValidateObservation(nativeBenchmarkReadJson($artifactPath), $executionJob);
@@ -296,7 +315,12 @@ function nativeBenchmarkRun(array $plan, string $artifactDirectory): void
                 throw new RuntimeException("$jobId command could not start.");
             }
 
-            $exitCode = proc_close($process);
+            $exitCode = nativeBenchmarkWaitForProcess(
+                $process,
+                $jobTimeoutSeconds,
+                $jobId,
+                static fn (): bool => nativeBenchmarkRemoveDockerContainer($containerName),
+            );
         } finally {
             fclose($stdout);
             fclose($stderr);
@@ -502,6 +526,7 @@ function nativeBenchmarkBuildReport(array $plan, string $artifactDirectory): arr
         'plan_sha256' => hash('sha256', nativeBenchmarkCanonicalJson($plan)),
         'randomization' => $plan['randomization'],
         'repetitions' => $plan['repetitions'],
+        'job_timeout_seconds' => $plan['job_timeout_seconds'],
         'quotas' => $plan['quotas'],
         'platform' => $platform,
         'config_sha256' => $plan['config']['sha256'],
@@ -526,8 +551,8 @@ function nativeBenchmarkReportCorpora(array $corpora): array
             'source_revision' => $corpus['source_revision'],
             'baseline_lock_sha256' => $corpus['baseline']['lock']['sha256'],
             'native_lock_sha256' => $corpus['native']['lock']['sha256'],
-            'baseline_image_id' => $corpus['baseline']['command'][9],
-            'native_image_id' => $corpus['native']['command'][9],
+            'baseline_image_id' => nativeBenchmarkDockerCommandImage($corpus['baseline']['command']),
+            'native_image_id' => nativeBenchmarkDockerCommandImage($corpus['native']['command']),
             'cohorts' => $corpus['cohorts'],
         ],
         $corpora,
@@ -547,6 +572,7 @@ function nativeBenchmarkConcreteCommand(array $job, string $artifactDirectory): 
     $jobId = nativeBenchmarkId($job['job_id'] ?? null, 'job');
     $replacements = [
         '{artifact_dir}' => str_replace('\\', '/', $artifactDirectory),
+        '{container_name}' => nativeBenchmarkContainerName($jobId, $artifactDirectory),
         '{artifact_file}' => $jobId.'.json',
         '{job_file}' => $jobId.'.job.json',
         '{raw_file}' => $jobId.'.raw.json',
@@ -556,6 +582,7 @@ function nativeBenchmarkConcreteCommand(array $job, string $artifactDirectory): 
         '{runner}' => (string) ($job['runner'] ?? ''),
         '{processes}' => (string) ($job['requested_processes'] ?? ''),
         '{repetition}' => (string) ($job['repetition'] ?? ''),
+        '{job_timeout_seconds}' => (string) ($job['job_timeout_seconds'] ?? ''),
     ];
     $template = $job['command'] ?? null;
     nativeBenchmarkRequire(is_array($template) && array_is_list($template), "$jobId command is invalid.");
@@ -571,6 +598,121 @@ function nativeBenchmarkConcreteCommand(array $job, string $artifactDirectory): 
     return $command;
 }
 
+function nativeBenchmarkContainerName(string $jobId, string $artifactDirectory): string
+{
+    nativeBenchmarkId($jobId, 'job');
+
+    return 'drove-n6-'.$jobId.'-'.substr(hash('sha256', str_replace('\\', '/', $artifactDirectory)), 0, 12);
+}
+
+/**
+ * @param  resource  $process
+ * @param  null|Closure(): bool  $onTimeout
+ */
+function nativeBenchmarkWaitForProcess(mixed $process, int $timeoutSeconds, string $subject, ?Closure $onTimeout = null): int
+{
+    nativeBenchmarkRequire(is_resource($process), "$subject process is unavailable.");
+    nativeBenchmarkRequire($timeoutSeconds > 0, "$subject watchdog timeout must be positive.");
+    $deadline = hrtime(true) + ($timeoutSeconds * 1_000_000_000);
+
+    while (true) {
+        $status = proc_get_status($process);
+
+        if (! $status['running']) {
+            $closedExitCode = proc_close($process);
+
+            return $status['exitcode'] >= 0 ? $status['exitcode'] : $closedExitCode;
+        }
+
+        if (hrtime(true) < $deadline) {
+            usleep(10_000);
+
+            continue;
+        }
+
+        $cleanupSucceeded = true;
+
+        if ($onTimeout instanceof Closure) {
+            try {
+                $cleanupSucceeded = $onTimeout();
+            } catch (Throwable) {
+                $cleanupSucceeded = false;
+            }
+        }
+
+        $graceDeadline = hrtime(true) + 5_000_000_000;
+
+        do {
+            $status = proc_get_status($process);
+
+            if (! $status['running']) {
+                break;
+            }
+
+            usleep(10_000);
+        } while (hrtime(true) < $graceDeadline);
+
+        if ($status['running']) {
+            proc_terminate($process);
+            usleep(100_000);
+            $status = proc_get_status($process);
+        }
+
+        if ($status['running']) {
+            proc_terminate($process, 9);
+        }
+
+        proc_close($process);
+
+        throw new RuntimeException(sprintf(
+            '%s exceeded its %d-second watchdog timeout%s.',
+            $subject,
+            $timeoutSeconds,
+            $cleanupSucceeded ? '' : '; exact-container cleanup could not be confirmed',
+        ));
+    }
+}
+
+function nativeBenchmarkRemoveDockerContainer(string $containerName): bool
+{
+    nativeBenchmarkRequire(
+        preg_match('/^drove-n6-[a-z0-9-]+$/D', $containerName) === 1,
+        'Native benchmark watchdog refused an invalid container name.',
+    );
+    $stderrPath = tempnam(sys_get_temp_dir(), 'drove-n6-docker-rm-');
+
+    if (! is_string($stderrPath)) {
+        return false;
+    }
+
+    try {
+        $null = nativeBenchmarkNullDevice();
+        $process = proc_open(
+            ['docker', 'container', 'rm', '--force', $containerName],
+            [0 => ['file', $null, 'r'], 1 => ['file', $null, 'w'], 2 => ['file', $stderrPath, 'w']],
+            $pipes,
+            options: ['bypass_shell' => true],
+        );
+
+        if (! is_resource($process)) {
+            return false;
+        }
+
+        try {
+            $exitCode = nativeBenchmarkWaitForProcess($process, 30, "$containerName cleanup");
+        } catch (RuntimeException) {
+            return false;
+        }
+
+        $stderr = file_get_contents($stderrPath);
+
+        return $exitCode === 0
+            || is_string($stderr) && str_contains($stderr, 'No such container');
+    } finally {
+        @unlink($stderrPath);
+    }
+}
+
 /**
  * @param  array<string, mixed>  $job
  * @return array<string, mixed>
@@ -578,8 +720,7 @@ function nativeBenchmarkConcreteCommand(array $job, string $artifactDirectory): 
 function nativeBenchmarkExecutionJob(array $job, string $artifactDirectory): array
 {
     $command = nativeBenchmarkConcreteCommand($job, $artifactDirectory);
-    $image = $command[9] ?? null;
-    nativeBenchmarkRequire(is_string($image) && preg_match('/^sha256:[0-9a-f]{64}$/D', $image) === 1, 'Concrete benchmark command has no content-addressed image.');
+    $image = nativeBenchmarkDockerCommandImage($command);
 
     return [
         ...$job,
@@ -754,11 +895,17 @@ function nativeBenchmarkValidatePlan(array $plan): void
             && ($plan['c1_decision'] ?? null) === 'pending_measurement_and_review'
             && is_int($plan['repetitions'] ?? null)
             && $plan['repetitions'] >= 5
+            && is_int($plan['job_timeout_seconds'] ?? null)
+            && $plan['job_timeout_seconds'] > 0
             && ($plan['parallel_processes'] ?? null) === DROVE_NATIVE_BENCHMARK_PROCESSES
             && is_array($plan['schedule'] ?? null)
             && array_is_list($plan['schedule'])
             && $plan['schedule'] !== [],
         'Native benchmark plan is invalid.',
+    );
+    nativeBenchmarkRequire(
+        count($plan['schedule']) === DROVE_NATIVE_BENCHMARK_CELLS_PER_REPETITION * $plan['repetitions'],
+        'Native benchmark plan must contain exactly 32 cells per repetition.',
     );
     nativeBenchmarkRequire(
         is_array($randomization)
@@ -773,6 +920,15 @@ function nativeBenchmarkValidatePlan(array $plan): void
             && array_is_list($corpora)
             && array_column($corpora, 'id') === DROVE_NATIVE_BENCHMARK_CORPORA,
         'Native benchmark plan corpus ladder is invalid.',
+    );
+    $plannedContract = array_map(static fn (array $corpus): array => [
+        'id' => $corpus['id'] ?? null,
+        'source_revision' => $corpus['source_revision'] ?? null,
+        'cohorts' => $corpus['cohorts'] ?? null,
+    ], $corpora);
+    nativeBenchmarkRequire(
+        $plannedContract === nativeBenchmarkCorpusContract(),
+        'Native benchmark plan diverges from the exact pinned corpus revisions and six-cohort contract.',
     );
     $quotas = nativeBenchmarkQuotas($plan['quotas'] ?? null);
 
@@ -798,6 +954,7 @@ function nativeBenchmarkValidatePlan(array $plan): void
         $jobIds[$jobId] = true;
         nativeBenchmarkRequire(in_array($job['requested_processes'] ?? null, DROVE_NATIVE_BENCHMARK_PROCESSES, true), "$jobId has an invalid process count.");
         nativeBenchmarkRequire(in_array($job['runner'] ?? null, ['baseline', 'native'], true), "$jobId has an invalid runner.");
+        nativeBenchmarkRequire(($job['job_timeout_seconds'] ?? null) === $plan['job_timeout_seconds'], "$jobId changed the planned watchdog timeout.");
         nativeBenchmarkRequire(($job['drove_revision'] ?? null) === $plan['drove_revision'], "$jobId changed the planned Drove revision.");
         nativeBenchmarkRequire(is_array($job['command'] ?? null) && array_is_list($job['command']), "$jobId has no command.");
         nativeBenchmarkExpectedOutcome($job['expected'] ?? null, $jobId);
@@ -849,6 +1006,7 @@ function nativeBenchmarkRebuildSchedule(array $plan): array
                             'runner' => $runner,
                             'requested_processes' => $processCount,
                             'repetition' => $repetition,
+                            'job_timeout_seconds' => $plan['job_timeout_seconds'],
                             'source_revision' => $corpus['source_revision'],
                             'drove_revision' => $plan['drove_revision'],
                             'lock_sha256' => $corpus[$runner]['lock']['sha256'],
@@ -943,6 +1101,31 @@ function nativeBenchmarkExpectedOutcome(mixed $value, string $subject): array
     return ['cases' => $cases, 'assertions' => $assertions, 'statuses' => $normalized, 'semantic_hash' => $hash];
 }
 
+/** @param array<string, mixed> $row */
+function nativeBenchmarkFilamentCapacityProof(array $row): bool
+{
+    $processes = $row['processes'] ?? null;
+
+    return is_int($processes)
+        && ($row['capacity_proof'] ?? null) === ['enabled' => true]
+        && ($row['concurrency_barrier'] ?? null) === [
+            'requested' => $processes,
+            'observed' => $processes,
+            'cases' => $processes,
+            'one_fork_per_case' => true,
+            'scheduler' => [
+                'schema' => 1,
+                'forks' => $processes,
+                'scope_workers' => 0,
+                'executor_workers' => $processes,
+                'process_anchors' => 0,
+                'peak_live_pids' => $processes,
+                'peak_outstanding_tasks' => $processes,
+                'outstanding_task_limit' => 2 * $processes,
+            ],
+        ];
+}
+
 /**
  * @return array{path: string, sha256: string}
  */
@@ -953,6 +1136,31 @@ function nativeBenchmarkFileIdentity(mixed $value, string $baseDirectory): array
     nativeBenchmarkRequire(is_file($path), "Native benchmark pinned file does not exist: $path.");
 
     return ['path' => $path, 'sha256' => nativeBenchmarkHash($path)];
+}
+
+/**
+ * @return list<array{
+ *     id: string,
+ *     source_revision: string,
+ *     cohorts: list<array{
+ *         id: string,
+ *         mode: string,
+ *         c1_only_reason: ?string,
+ *         expected: array{cases: int, assertions: int, statuses: array<string, int>, semantic_hash: string}
+ *     }>
+ * }>
+ */
+function nativeBenchmarkCorpusContract(): array
+{
+    if (! function_exists('nativeBenchmarkCorpusDefinitions')) {
+        require_once __DIR__.'/native-benchmark-corpora.php';
+    }
+
+    return array_map(static fn (array $corpus): array => [
+        'id' => $corpus['id'],
+        'source_revision' => $corpus['source_revision'],
+        'cohorts' => $corpus['cohorts'],
+    ], nativeBenchmarkCorpusDefinitions(dirname(__DIR__, 2)));
 }
 
 /**
@@ -977,6 +1185,10 @@ function nativeBenchmarkValidatePrerequisite(array $evidence): void
             && array_is_list($artifacts)
             && $artifacts !== [],
         'N6 is locked until exact N1-N5 evidence passes all four corpora with Filament last.',
+    );
+    nativeBenchmarkRequire(
+        $outcomes === nativeBenchmarkCorpusContract(),
+        'N1-N5 evidence diverges from the exact pinned corpus revisions and six-cohort contract.',
     );
     $artifactCorpora = [];
     $artifactPaths = [];
@@ -1073,7 +1285,42 @@ function nativeBenchmarkWriteJson(string $path, array $payload): void
     $directory = dirname($path);
     nativeBenchmarkRequire(is_dir($directory) || (mkdir($directory, 0700, true) && is_dir($directory)), "Cannot create $directory.");
     $encoded = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR).PHP_EOL;
-    nativeBenchmarkRequire(file_put_contents($path, $encoded, LOCK_EX) !== false, "Cannot write JSON artifact $path.");
+    $temporary = tempnam($directory, '.'.basename($path).'.tmp-');
+    nativeBenchmarkRequire(is_string($temporary), "Cannot create a temporary JSON artifact beside $path.");
+    $stream = null;
+
+    try {
+        $stream = fopen($temporary, 'wb');
+
+        if (! is_resource($stream)) {
+            throw new RuntimeException("Cannot open temporary JSON artifact $temporary.");
+        }
+
+        nativeBenchmarkRequire(flock($stream, LOCK_EX), "Cannot lock temporary JSON artifact $temporary.");
+        $written = 0;
+        $length = strlen($encoded);
+
+        while ($written < $length) {
+            $bytes = fwrite($stream, substr($encoded, $written));
+            nativeBenchmarkRequire(is_int($bytes) && $bytes > 0, "Cannot write temporary JSON artifact $temporary.");
+            $written += $bytes;
+        }
+
+        nativeBenchmarkRequire(fflush($stream), "Cannot flush temporary JSON artifact $temporary.");
+        nativeBenchmarkRequire(fsync($stream), "Cannot sync temporary JSON artifact $temporary.");
+        nativeBenchmarkRequire(flock($stream, LOCK_UN), "Cannot unlock temporary JSON artifact $temporary.");
+        nativeBenchmarkRequire(fclose($stream), "Cannot close temporary JSON artifact $temporary.");
+        $stream = null;
+        nativeBenchmarkRequire(rename($temporary, $path), "Cannot atomically replace JSON artifact $path.");
+    } finally {
+        if (is_resource($stream)) {
+            fclose($stream);
+        }
+
+        if (is_file($temporary)) {
+            unlink($temporary);
+        }
+    }
 }
 
 function nativeBenchmarkHash(string $path): string
@@ -1204,6 +1451,8 @@ function nativeBenchmarkDockerCommand(string $image, array $quotas, string $corp
 
     return [
         'docker', 'run', '--rm', '--network=none',
+        '--name={container_name}',
+        '--label=org.oxhq.drove.native-benchmark.job-timeout-seconds={job_timeout_seconds}',
         '--cpus='.rtrim(rtrim(sprintf('%.6F', $quotas['cpu_cores']), '0'), '.'),
         '--memory='.$quotas['memory_bytes'], '--memory-swap='.$quotas['memory_bytes'],
         '--tmpfs=/tmp:rw,exec,nosuid,size=4294967296',
@@ -1222,10 +1471,25 @@ function nativeBenchmarkDockerCommand(string $image, array $quotas, string $corp
  */
 function nativeBenchmarkDockerImage(array $command, array $quotas, string $corpus, string $runner): string
 {
-    $image = $command[9] ?? null;
+    $image = nativeBenchmarkDockerCommandImage($command);
     nativeBenchmarkRequire(
-        is_string($image) && $command === nativeBenchmarkDockerCommand($image, $quotas, $corpus, $runner),
+        $command === nativeBenchmarkDockerCommand($image, $quotas, $corpus, $runner),
         "$corpus $runner command must use the exact fresh, networkless, quota-controlled benchmark container.",
+    );
+
+    return $image;
+}
+
+/** @param list<string> $command */
+function nativeBenchmarkDockerCommandImage(array $command): string
+{
+    $measure = array_search('/drove/benchmarks/corpus/native-benchmark-measure.php', $command, true);
+    $image = is_int($measure) && $measure >= 2 && ($command[$measure - 1] ?? null) === 'php'
+        ? ($command[$measure - 2] ?? null)
+        : null;
+    nativeBenchmarkRequire(
+        is_string($image) && preg_match('/^sha256:[0-9a-f]{64}$/D', $image) === 1,
+        'Native benchmark Docker command has no content-addressed image.',
     );
 
     return $image;

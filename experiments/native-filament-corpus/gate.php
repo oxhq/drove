@@ -534,6 +534,7 @@ SH;
             '--volume', nativeFilamentGateVolume($artifactDirectory, '/artifacts'),
             '--env', 'DROVE_NATIVE_FILAMENT_COHORT='.$cohort,
             '--env', 'DROVE_NATIVE_FILAMENT_PROCESSES='.$processes,
+            '--env', 'DROVE_NATIVE_CAPACITY_PROOF=1',
             '--env', 'DROVER_LIBRARY=/usr/local/lib/libdrover.so',
             $image,
             'php', '/drove/benchmarks/corpus/measure.php',
@@ -589,6 +590,20 @@ SH;
             'one_fork_per_case' => true,
             'scheduler' => $expectedBarrierScheduler,
         ];
+        $expectedCapacityProof = ['enabled' => true];
+        $observedConcurrency = $summary['observed_concurrency'] ?? null;
+        $scheduler = $summary['scheduler'] ?? null;
+        $naturalScheduler = is_array($scheduler)
+            && ($scheduler['schema'] ?? null) === 1
+            && ($scheduler['forks'] ?? null) === $expectedNative['cases']
+            && ($scheduler['scope_workers'] ?? null) === 0
+            && ($scheduler['executor_workers'] ?? null) === $expectedNative['cases']
+            && ($scheduler['process_anchors'] ?? null) === 0
+            && is_int($scheduler['peak_live_pids'] ?? null)
+            && $scheduler['peak_live_pids'] >= 1
+            && $scheduler['peak_live_pids'] <= $expectedScheduler['peak_live_pids']
+            && ($scheduler['peak_outstanding_tasks'] ?? null) === $scheduler['peak_live_pids']
+            && ($scheduler['outstanding_task_limit'] ?? null) === 2 * $processes;
         nativeFilamentGateAssert(
             ($summary['ok'] ?? null) === true
                 && ($summary['commit'] ?? null) === NATIVE_FILAMENT_GATE_COMMIT
@@ -610,9 +625,12 @@ SH;
                 && ($summary['case_parity']['baseline_runner'] ?? null) === 'pestphp/pest'
                 && ($summary['case_parity']['rows'] ?? null) === $expectedCaseRows
                 && ($summary['one_fork_per_case'] ?? null) === true
-                && ($summary['observed_concurrency'] ?? null) === $processes
+                && is_int($observedConcurrency)
+                && $observedConcurrency >= 1
+                && $observedConcurrency <= min($processes, $expectedNative['cases'])
+                && ($summary['capacity_proof'] ?? null) === $expectedCapacityProof
                 && ($summary['concurrency_barrier'] ?? null) === $expectedBarrier
-                && ($summary['scheduler'] ?? null) === $expectedScheduler
+                && $naturalScheduler
                 && ($summary['snapshot_provider'] ?? null) === [
                     'tracked' => 170,
                     'matched' => $expectedSnapshots,
@@ -648,6 +666,7 @@ SH;
             'phases_ms' => $phases,
             'one_fork_per_case' => true,
             'observed_concurrency' => $summary['observed_concurrency'],
+            'capacity_proof' => $summary['capacity_proof'],
             'concurrency_barrier' => $summary['concurrency_barrier'],
             'case_semantic_sha256' => $expectedSemanticHash,
             'wall_ms' => $measurement['wall_ms'],
@@ -728,6 +747,7 @@ SH;
         'matrix' => $runs,
         'snapshots' => ['tracked' => 170, 'mode' => 'read-only typed matcher'],
         'one_fork_per_case' => true,
+        'capacity_proof' => ['enabled' => true],
         'runtime_guard_fault_detected' => true,
         'prepared_database_unchanged' => true,
         'performance_interpretation' => false,

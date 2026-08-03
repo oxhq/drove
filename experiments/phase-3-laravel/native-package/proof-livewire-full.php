@@ -865,6 +865,7 @@ try {
         'incomplete' => count($incomplete),
         'assertions' => array_sum(array_column($tests, 'assertions')),
         'processes' => 1,
+        'capacity_proof' => ['enabled' => false],
         'phases_ms' => $phasesMs,
         'child_pids' => count(array_unique($testPids)),
         'forks' => $topology['forks'],

@@ -99,7 +99,26 @@ try {
                 && $observedLanes <= min($processes, $runnable)
                 && ($proof['forbidden_runtime']['classes'] ?? null) === []
                 && ($proof['forbidden_runtime']['files'] ?? null) === []
-                && ($proof['dependency_loader']['status'] ?? null) === 'n5',
+                && ($proof['dependency_loader']['mode'] ?? null) === 'clean-locked-vendor-selective'
+                && ($proof['dependency_loader']['status'] ?? null) === 'n5'
+                && ($proof['dependency_loader']['manifest_sha256'] ?? null) === nativeBenchmarkHash($root.'/benchmarks/corpus/locks/pest-native.composer.json')
+                && ($proof['dependency_loader']['lock_sha256'] ?? null) === nativeBenchmarkHash($root.'/benchmarks/corpus/locks/pest-native.lock')
+                && ($proof['dependency_loader']['excluded_prefixes'] ?? null) === [
+                    'Drove\\', 'Orchestra\\Testbench\\', 'Pest\\', 'PHPUnit\\', 'Tests\\',
+                ]
+                && ($proof['dependency_loader']['root_dev_vendor_rejected'] ?? null) === true
+                && ($proof['extension_front_door']['manifest'] ?? null) === [
+                    'schema' => 1,
+                    'id' => 'drove/native-pest-corpus',
+                    'package_version' => '1.0.0',
+                    'entrypoint' => 'DroveNativePestCorpus\\PestCorpusEntrypoint',
+                    'api' => ['min' => 1, 'max' => 1, 'negotiated' => 1],
+                    'contributions' => ['matcher'],
+                    'configuration' => [],
+                ]
+                && ($proof['extension_front_door']['matcher_count'] ?? null) === 8
+                && ($proof['extension_front_door']['runtime_magic'] ?? null) === false
+                && ($proof['extension_front_door']['core_matcher_override'] ?? null) === false,
             'The final native Pest C'.$processes.' artifact does not prove N1-N5.',
         );
     }
@@ -126,7 +145,9 @@ try {
             && array_all($invoice['matrix'] ?? [], static fn (mixed $row): bool => is_array($row)
                 && ($row['one_child_pid_per_case'] ?? null) === true
                 && ($row['semantic_match'] ?? null) === true
-                && ($row['observed_peak_lanes'] ?? null) === ($row['requested_processes'] ?? null)
+                && is_int($row['observed_peak_lanes'] ?? null)
+                && $row['observed_peak_lanes'] >= 1
+                && $row['observed_peak_lanes'] <= min($row['requested_processes'] ?? 0, $row['runnable_cases'] ?? 0)
                 && ($row['runnable_cases'] ?? null) === $invoiceExpected['cases']
                 && ($row['telemetry_cases'] ?? null) === $invoiceExpected['cases']
                 && ($row['unique_executor_pids'] ?? null) === $invoiceExpected['cases']
@@ -141,6 +162,7 @@ try {
     nativeBenchmarkRequire(
         ($livewire['ok'] ?? null) === true
             && ($livewire['case_rows_parity'] ?? null) === true
+            && ($livewire['capacity_proof']['enabled'] ?? null) === true
             && ($livewire['dependencies']['separate_vendors'] ?? null) === true
             && ($livewire['dependencies']['shared_version_source_dist_drift'] ?? null) === []
             && ($livewire['independent_baseline']['forbidden_packages'] ?? null) === []
@@ -184,6 +206,7 @@ try {
             && ($filament['selection']['assertions'] ?? null) === $filamentNonserial['assertions'] + $filamentSerial['assertions']
             && ($filament['environment']['pest_phpunit_testbench_packages'] ?? null) === 0
             && ($filament['one_fork_per_case'] ?? null) === true
+            && ($filament['capacity_proof']['enabled'] ?? null) === true
             && ($filament['runtime_guard_fault_detected'] ?? null) === true
             && ($filament['prepared_database_unchanged'] ?? null) === true
             && $filamentProcesses === [
@@ -192,7 +215,10 @@ try {
             ]
             && array_all($filament['matrix'] ?? [], static fn (mixed $row): bool => is_array($row)
                 && ($row['one_fork_per_case'] ?? null) === true
-                && ($row['observed_concurrency'] ?? null) === ($row['processes'] ?? null)
+                && nativeBenchmarkFilamentCapacityProof($row)
+                && is_int($row['observed_concurrency'] ?? null)
+                && $row['observed_concurrency'] >= 1
+                && $row['observed_concurrency'] <= min($row['processes'] ?? 0, $row['cases'] ?? 0)
                 && ($row['cases'] ?? null) === ($row['cohort'] === 'nonserial' ? $filamentNonserial['cases'] : $filamentSerial['cases'])
                 && ($row['assertions'] ?? null) === ($row['cohort'] === 'nonserial' ? $filamentNonserial['assertions'] : $filamentSerial['assertions'])
                 && ($row['case_semantic_sha256'] ?? null) === ($row['cohort'] === 'nonserial' ? $filamentNonserial['semantic_hash'] : $filamentSerial['semantic_hash'])),

@@ -1,5 +1,6 @@
+ARG DROVE_NATIVE_BENCHMARK_BASE_IMAGE=drove-phase-three-laravel:latest
 FROM node:22-bookworm-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46 AS node
-FROM drove-phase-three-laravel:latest
+FROM ${DROVE_NATIVE_BENCHMARK_BASE_IMAGE}
 
 ARG DROVE_REVISION=unknown
 

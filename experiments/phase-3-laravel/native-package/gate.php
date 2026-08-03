@@ -518,11 +518,18 @@ SH,
     foreach ([1, 2, 4, 8, 16, 30] as $processes) {
         $summary = gateDocker($image, $vendor, $checkout, [
             'php', 'native-package/proof-livewire-cohort.php',
-        ], $root, null, ['DROVE_NATIVE_LIVEWIRE_PROCESSES' => (string) $processes]);
+        ], $root, null, [
+            'DROVE_NATIVE_LIVEWIRE_PROCESSES' => (string) $processes,
+            'DROVE_NATIVE_CAPACITY_PROOF' => '1',
+        ]);
         $path = $artifactDirectory.'/livewire-cohort-c'.$processes.'.json';
         $output = $summary->getOutput();
         $decoded = json_decode($output, true, 16, JSON_THROW_ON_ERROR);
         gateAssert(is_array($decoded), 'Livewire C'.$processes.' summary is invalid.');
+        gateAssert(
+            ($decoded['capacity_proof'] ?? null) === ['enabled' => true],
+            'Livewire C'.$processes.' capacity proof diverged.',
+        );
         gateAssert(file_put_contents($path, $output) === strlen($output), 'Could not write '.$path.'.');
         $matrixPaths[] = '/artifacts/'.basename($path);
     }
@@ -560,6 +567,7 @@ SH,
         'full' => $fullResult,
         'case_rows_parity' => true,
         'faults' => json_decode($faults->getOutput(), true, 16, JSON_THROW_ON_ERROR),
+        'capacity_proof' => ['enabled' => true],
         'parallel_safe_matrix' => json_decode($compare->getOutput(), true, 16, JSON_THROW_ON_ERROR),
         'static_analysis' => 'passed',
     ];

@@ -15,6 +15,16 @@ try {
             && ! file_exists($newOutput),
         'A new native benchmark output path was not prepared safely.',
     );
+    $atomicOutput = $temporary.DIRECTORY_SEPARATOR.'atomic.json';
+    nativeBenchmarkWriteJson($atomicOutput, ['generation' => 1]);
+    nativeBenchmarkWriteJson($atomicOutput, ['generation' => 2]);
+    $atomicResidue = glob($temporary.DIRECTORY_SEPARATOR.'.atomic.json.tmp-*');
+    nativeBenchmarkRequire(
+        nativeBenchmarkReadJson($atomicOutput) === ['generation' => 2]
+            && is_array($atomicResidue)
+            && $atomicResidue === [],
+        'Atomic JSON replacement left stale content or a temporary artifact.',
+    );
     $lockCheckouts = [];
 
     foreach (['invoiceshelf', 'filament'] as $corpus) {
@@ -42,11 +52,90 @@ try {
     );
     nativeBenchmarkRequire(
         in_array('--network=none', $dockerCommand, true)
+            && in_array('--name={container_name}', $dockerCommand, true)
+            && in_array('--label=org.oxhq.drove.native-benchmark.job-timeout-seconds={job_timeout_seconds}', $dockerCommand, true)
             && in_array('--cpus=30', $dockerCommand, true)
             && in_array('--memory=17179869184', $dockerCommand, true)
             && in_array('--mount=type=bind,source={artifact_dir},target=/artifacts', $dockerCommand, true)
             && array_slice($dockerCommand, -4) === ['pest', '{cohort}', 'native', '{processes}'],
         'The native benchmark fresh-container command drifted.',
+    );
+    nativeBenchmarkRequireNaturalCorpusProof(['capacity_proof' => ['enabled' => false]], 'self-test');
+    nativeBenchmarkSelfTestRejects(
+        static function (): void {
+            nativeBenchmarkRequireNaturalCorpusProof(['capacity_proof' => ['enabled' => true]], 'self-test');
+        },
+        'natural corpus',
+    );
+    nativeBenchmarkSelfTestRejects(
+        static function (): void {
+            nativeBenchmarkRequireNaturalCorpusProof([], 'self-test');
+        },
+        'natural corpus',
+    );
+    $filamentCapacity = [
+        'processes' => 8,
+        'capacity_proof' => ['enabled' => true],
+        'concurrency_barrier' => [
+            'requested' => 8,
+            'observed' => 8,
+            'cases' => 8,
+            'one_fork_per_case' => true,
+            'scheduler' => [
+                'schema' => 1,
+                'forks' => 8,
+                'scope_workers' => 0,
+                'executor_workers' => 8,
+                'process_anchors' => 0,
+                'peak_live_pids' => 8,
+                'peak_outstanding_tasks' => 8,
+                'outstanding_task_limit' => 16,
+            ],
+        ],
+    ];
+    nativeBenchmarkRequire(nativeBenchmarkFilamentCapacityProof($filamentCapacity), 'Exact Filament capacity proof was rejected.');
+    $filamentCapacity['concurrency_barrier']['observed'] = 7;
+    nativeBenchmarkRequire(! nativeBenchmarkFilamentCapacityProof($filamentCapacity), 'Tampered Filament capacity proof was accepted.');
+    $watchdogStdout = fopen($temporary.DIRECTORY_SEPARATOR.'watchdog.stdout', 'wb');
+    $watchdogStderr = fopen($temporary.DIRECTORY_SEPARATOR.'watchdog.stderr', 'wb');
+
+    if (! is_resource($watchdogStdout) || ! is_resource($watchdogStderr)) {
+        throw new RuntimeException('Cannot open watchdog self-test logs.');
+    }
+
+    $watchdogProcess = proc_open(
+        [PHP_BINARY, '-r', 'sleep(30);'],
+        [0 => ['file', nativeBenchmarkNullDevice(), 'r'], 1 => $watchdogStdout, 2 => $watchdogStderr],
+        $watchdogPipes,
+        options: ['bypass_shell' => true],
+    );
+
+    if (! is_resource($watchdogProcess)) {
+        throw new RuntimeException('Cannot start watchdog self-test process.');
+    }
+
+    $watchdogCleanupCalled = false;
+    $watchdogStarted = hrtime(true);
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($watchdogProcess, &$watchdogCleanupCalled): void {
+            nativeBenchmarkWaitForProcess(
+                $watchdogProcess,
+                1,
+                'Self-test job',
+                static function () use ($watchdogProcess, &$watchdogCleanupCalled): bool {
+                    $watchdogCleanupCalled = true;
+
+                    return proc_terminate($watchdogProcess);
+                },
+            );
+        },
+        'watchdog timeout',
+    );
+    fclose($watchdogStdout);
+    fclose($watchdogStderr);
+    nativeBenchmarkRequire(
+        $watchdogCleanupCalled && (hrtime(true) - $watchdogStarted) < 5_000_000_000,
+        'Watchdog self-test did not invoke targeted cleanup promptly.',
     );
     $junit = $temporary.DIRECTORY_SEPARATOR.'livewire.xml';
     file_put_contents($junit, <<<'XML'
@@ -60,29 +149,14 @@ XML, LOCK_EX);
         'stdout' => 'ok',
         'stderr' => '',
     ]], 'The timed Livewire JUnit normalizer drifted.');
+    $contract = nativeBenchmarkCorpusContract();
     $evidencePath = $temporary.DIRECTORY_SEPARATOR.'n1-n5.json';
     $evidenceArtifacts = [];
-    $evidenceOutcomes = [];
 
-    foreach (DROVE_NATIVE_BENCHMARK_CORPORA as $index => $corpus) {
+    foreach (DROVE_NATIVE_BENCHMARK_CORPORA as $corpus) {
         $artifactPath = $temporary.DIRECTORY_SEPARATOR.$corpus.'-gate.json';
         file_put_contents($artifactPath, $corpus.' gate', LOCK_EX);
         $evidenceArtifacts[] = ['corpus' => $corpus, 'path' => $artifactPath, 'sha256' => nativeBenchmarkHash($artifactPath)];
-        $evidenceOutcomes[] = [
-            'id' => $corpus,
-            'source_revision' => str_repeat(dechex($index + 1), 40),
-            'cohorts' => [[
-                'id' => 'selected',
-                'mode' => 'parallel',
-                'c1_only_reason' => null,
-                'expected' => [
-                    'cases' => 3,
-                    'assertions' => 5,
-                    'statuses' => ['passed' => 3],
-                    'semantic_hash' => hash('sha256', $corpus.' selected semantics'),
-                ],
-            ]],
-        ];
     }
     nativeBenchmarkWriteJson($evidencePath, [
         'schema_version' => 1,
@@ -91,25 +165,27 @@ XML, LOCK_EX);
         'phases' => ['N1', 'N2', 'N3', 'N4', 'N5'],
         'corpora' => DROVE_NATIVE_BENCHMARK_CORPORA,
         'filament_final' => true,
-        'outcomes' => $evidenceOutcomes,
+        'outcomes' => $contract,
         'artifacts' => $evidenceArtifacts,
     ]);
     $config = [
         'schema_version' => 1,
         'repetitions' => 5,
+        'job_timeout_seconds' => 900,
         'n1_n5_evidence' => $evidencePath,
         'quotas' => ['cpu_cores' => 8.0, 'memory_bytes' => 4_294_967_296],
         'corpora' => [],
     ];
 
-    foreach (DROVE_NATIVE_BENCHMARK_CORPORA as $index => $corpus) {
+    foreach ($contract as $corpusDefinition) {
+        $corpus = $corpusDefinition['id'];
         $baselineLock = $temporary.DIRECTORY_SEPARATOR.$corpus.'-baseline.lock';
         $nativeLock = $temporary.DIRECTORY_SEPARATOR.$corpus.'-native.lock';
         file_put_contents($baselineLock, $corpus.' baseline', LOCK_EX);
         file_put_contents($nativeLock, $corpus.' native', LOCK_EX);
         $config['corpora'][] = [
             'id' => $corpus,
-            'source_revision' => str_repeat(dechex($index + 1), 40),
+            'source_revision' => $corpusDefinition['source_revision'],
             'baseline' => [
                 'lock' => $baselineLock,
                 'command' => nativeBenchmarkDockerCommand('sha256:'.hash('sha256', $corpus.' baseline image'), $config['quotas'], $corpus, 'baseline'),
@@ -118,16 +194,7 @@ XML, LOCK_EX);
                 'lock' => $nativeLock,
                 'command' => nativeBenchmarkDockerCommand('sha256:'.hash('sha256', $corpus.' native image'), $config['quotas'], $corpus, 'native'),
             ],
-            'cohorts' => [[
-                'id' => 'selected',
-                'mode' => 'parallel',
-                'expected' => [
-                    'cases' => 3,
-                    'assertions' => 5,
-                    'statuses' => ['passed' => 3],
-                    'semantic_hash' => hash('sha256', $corpus.' selected semantics'),
-                ],
-            ]],
+            'cohorts' => $corpusDefinition['cohorts'],
         ];
     }
 
@@ -139,9 +206,16 @@ XML, LOCK_EX);
     $plan = nativeBenchmarkReadJson($planPath);
     nativeBenchmarkValidatePlan($plan);
     nativeBenchmarkVerifyPinnedInputs($plan);
-    nativeBenchmarkRequire(count($plan['schedule']) === 140, 'Self-test plan did not create five baseline plus thirty native samples per corpus.');
     nativeBenchmarkRequire(
-        array_values(array_unique(array_column(array_slice($plan['schedule'], 105), 'corpus'))) === ['filament'],
+        count($plan['schedule']) === 160
+            && ($plan['job_timeout_seconds'] ?? null) === 900
+            && array_all($plan['schedule'], static fn (array $job): bool => ($job['job_timeout_seconds'] ?? null) === 900),
+        'Self-test plan did not create the exact 32-cell, five-repetition watchdog-bound matrix.',
+    );
+    $firstFilament = array_search('filament', array_column($plan['schedule'], 'corpus'), true);
+    nativeBenchmarkRequire(
+        $firstFilament === 115
+            && array_values(array_unique(array_column(array_slice($plan['schedule'], $firstFilament), 'corpus'))) === ['filament'],
         'Self-test plan did not leave Filament as the final corpus rung.',
     );
     $revisionMarker = $temporary.DIRECTORY_SEPARATOR.'drove-revision';
@@ -166,19 +240,31 @@ XML, LOCK_EX);
         'has no Drove revision marker',
     );
 
-    foreach (DROVE_NATIVE_BENCHMARK_CORPORA as $corpus) {
-        $jobs = array_values(array_filter(
-            $plan['schedule'],
-            static fn (array $job): bool => $job['corpus'] === $corpus,
-        ));
-        $baseline = array_values(array_filter($jobs, static fn (array $job): bool => $job['runner'] === 'baseline'));
-        $native = array_values(array_filter($jobs, static fn (array $job): bool => $job['runner'] === 'native'));
-        nativeBenchmarkRequire(count($baseline) === 5 && array_unique(array_column($baseline, 'requested_processes')) === [1], "$corpus baseline matrix is invalid.");
-
-        foreach (DROVE_NATIVE_BENCHMARK_PROCESSES as $processes) {
+    foreach ($contract as $corpusDefinition) {
+        foreach ($corpusDefinition['cohorts'] as $cohortDefinition) {
+            $jobs = array_values(array_filter(
+                $plan['schedule'],
+                static fn (array $job): bool => $job['corpus'] === $corpusDefinition['id']
+                    && $job['cohort'] === $cohortDefinition['id'],
+            ));
+            $baseline = array_values(array_filter($jobs, static fn (array $job): bool => $job['runner'] === 'baseline'));
+            $native = array_values(array_filter($jobs, static fn (array $job): bool => $job['runner'] === 'native'));
             nativeBenchmarkRequire(
-                count(array_filter($native, static fn (array $job): bool => $job['requested_processes'] === $processes)) === 5,
-                "$corpus native C$processes matrix is incomplete.",
+                count($baseline) === 5 && array_unique(array_column($baseline, 'requested_processes')) === [1],
+                "{$corpusDefinition['id']}/{$cohortDefinition['id']} baseline matrix is invalid.",
+            );
+            $processMatrix = $cohortDefinition['mode'] === 'parallel' ? DROVE_NATIVE_BENCHMARK_PROCESSES : [1];
+
+            foreach ($processMatrix as $processes) {
+                nativeBenchmarkRequire(
+                    count(array_filter($native, static fn (array $job): bool => $job['requested_processes'] === $processes)) === 5,
+                    "{$corpusDefinition['id']}/{$cohortDefinition['id']} native C$processes matrix is incomplete.",
+                );
+            }
+
+            nativeBenchmarkRequire(
+                count($native) === count($processMatrix) * 5,
+                "{$corpusDefinition['id']}/{$cohortDefinition['id']} native matrix contains an unexpected cell.",
             );
         }
     }
@@ -192,7 +278,8 @@ XML, LOCK_EX);
         $wall = $baseline
             ? 100 + $job['repetition']
             : round(1_000 / $job['requested_processes'], 3) + $job['repetition'];
-        $observedLanes = $baseline ? 1 : min($job['requested_processes'], $job['expected']['cases']);
+        $runnableCases = $job['expected']['cases'] - ($job['expected']['statuses']['skipped'] ?? 0);
+        $observedLanes = $baseline ? 1 : min($job['requested_processes'], $runnableCases);
 
         if ($job['corpus'] === 'pest' && $job['runner'] === 'native' && $job['requested_processes'] === 2 && $job['repetition'] === 1) {
             $observedLanes--;
@@ -223,8 +310,8 @@ XML, LOCK_EX);
             ],
             'topology' => [
                 'observed_lanes' => $observedLanes,
-                'forks' => $baseline ? 0 : $job['expected']['cases'],
-                'runnable_cases' => $baseline ? null : $job['expected']['cases'],
+                'forks' => $baseline ? 0 : $runnableCases,
+                'runnable_cases' => $baseline ? null : $runnableCases,
                 'strategy' => $baseline ? 'upstream' : 'isolated-per-test',
                 'fork_semantics' => $baseline ? 'runner-native' : 'one-fork-per-test',
             ],
@@ -246,10 +333,11 @@ XML, LOCK_EX);
         ($report['verification'] ?? null) === 'passed'
             && ($report['thresholds_applied'] ?? null) === false
             && ($report['c1_decision'] ?? null) === 'pending_human_review'
-            && count($report['groups'] ?? []) === 28
-            && count($report['comparisons'] ?? []) === 24
-            && count($report['native_scaling'] ?? []) === 24
-            && count($report['run_artifacts'] ?? []) === 140,
+            && ($report['job_timeout_seconds'] ?? null) === 900
+            && count($report['groups'] ?? []) === 32
+            && count($report['comparisons'] ?? []) === 26
+            && count($report['native_scaling'] ?? []) === 26
+            && count($report['run_artifacts'] ?? []) === 160,
         'Self-test report did not preserve the complete controlled matrix.',
     );
     $pestBaseline = array_values(array_filter(
@@ -327,7 +415,7 @@ XML, LOCK_EX);
         static function () use ($incompletePlan): void {
             nativeBenchmarkValidatePlan($incompletePlan);
         },
-        'incomplete',
+        'exactly 32 cells',
     );
     $unboundPlan = $plan;
     $unboundPlan['drove_revision'] = null;
@@ -347,15 +435,17 @@ XML, LOCK_EX);
     }
 
     unset($tamperedJob);
-    nativeBenchmarkValidatePlan($coherentTamper);
     nativeBenchmarkSelfTestRejects(
         static function () use ($coherentTamper): void {
-            nativeBenchmarkVerifyPinnedInputs($coherentTamper);
+            nativeBenchmarkValidatePlan($coherentTamper);
         },
-        'plan diverged from its pinned config',
+        'six-cohort contract',
     );
 
-    $firstJob = $plan['schedule'][0];
+    $firstJob = array_values(array_filter(
+        $plan['schedule'],
+        static fn (array $job): bool => $job['runner'] === 'native',
+    ))[0];
     $firstExecutionJob = nativeBenchmarkExecutionJob($firstJob, $artifacts);
     $invalid = nativeBenchmarkReadJson($artifacts.DIRECTORY_SEPARATOR.$firstJob['job_id'].'.json');
     $invalid['topology']['forks'] = 2;
@@ -455,7 +545,28 @@ XML, LOCK_EX);
     nativeBenchmarkWriteJson($configPath, $invalidConfig);
     nativeBenchmarkSelfTestRejects(
         static fn (): mixed => nativeBenchmarkBuildPlan($configPath, 7_331),
-        'outcomes diverge from the exact N1-N5 evidence',
+        'six-cohort contract',
+    );
+    $invalidConfig = $config;
+    array_pop($invalidConfig['corpora'][2]['cohorts']);
+    nativeBenchmarkWriteJson($configPath, $invalidConfig);
+    nativeBenchmarkSelfTestRejects(
+        static fn (): mixed => nativeBenchmarkBuildPlan($configPath, 7_331),
+        'six-cohort contract',
+    );
+    $invalidConfig = $config;
+    $invalidConfig['corpora'][3]['source_revision'] = str_repeat('0', 40);
+    nativeBenchmarkWriteJson($configPath, $invalidConfig);
+    nativeBenchmarkSelfTestRejects(
+        static fn (): mixed => nativeBenchmarkBuildPlan($configPath, 7_331),
+        'six-cohort contract',
+    );
+    $invalidConfig = $config;
+    unset($invalidConfig['job_timeout_seconds']);
+    nativeBenchmarkWriteJson($configPath, $invalidConfig);
+    nativeBenchmarkSelfTestRejects(
+        static fn (): mixed => nativeBenchmarkBuildPlan($configPath, 7_331),
+        'job timeout seconds',
     );
     $invalidConfig = $config;
     $invalidConfig['corpora'][0]['native']['command'][3] = '--network=bridge';
@@ -465,7 +576,10 @@ XML, LOCK_EX);
         'fresh, networkless',
     );
     $invalidConfig = $config;
-    $invalidConfig['corpora'][0]['native']['command'][9] = $invalidConfig['corpora'][0]['baseline']['command'][9];
+    $nativeImage = nativeBenchmarkDockerCommandImage($invalidConfig['corpora'][0]['native']['command']);
+    $nativeImageIndex = array_search($nativeImage, $invalidConfig['corpora'][0]['native']['command'], true);
+    nativeBenchmarkRequire(is_int($nativeImageIndex), 'Self-test could not locate the native image argument.');
+    $invalidConfig['corpora'][0]['native']['command'][$nativeImageIndex] = nativeBenchmarkDockerCommandImage($invalidConfig['corpora'][0]['baseline']['command']);
     nativeBenchmarkWriteJson($configPath, $invalidConfig);
     nativeBenchmarkSelfTestRejects(
         static fn (): mixed => nativeBenchmarkBuildPlan($configPath, 7_331),
@@ -479,6 +593,30 @@ XML, LOCK_EX);
             nativeBenchmarkValidatePrerequisite($unboundEvidence);
         },
         'N6 is locked',
+    );
+    $invalidEvidence = nativeBenchmarkReadJson($evidencePath);
+    $invalidEvidence['outcomes'][2]['source_revision'] = str_repeat('0', 40);
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($invalidEvidence): void {
+            nativeBenchmarkValidatePrerequisite($invalidEvidence);
+        },
+        'six-cohort contract',
+    );
+    $invalidEvidence = nativeBenchmarkReadJson($evidencePath);
+    array_pop($invalidEvidence['outcomes'][3]['cohorts']);
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($invalidEvidence): void {
+            nativeBenchmarkValidatePrerequisite($invalidEvidence);
+        },
+        'six-cohort contract',
+    );
+    $timeoutTamper = $plan;
+    $timeoutTamper['schedule'][0]['job_timeout_seconds']--;
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($timeoutTamper): void {
+            nativeBenchmarkValidatePlan($timeoutTamper);
+        },
+        'watchdog timeout',
     );
     $secondJob = $plan['schedule'][1];
     $secondPath = $artifacts.DIRECTORY_SEPARATOR.$secondJob['job_id'].'.json';

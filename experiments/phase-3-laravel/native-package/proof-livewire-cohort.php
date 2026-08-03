@@ -210,6 +210,7 @@ foreach ([
 }
 
 $processes = (int) (getenv('DROVE_NATIVE_LIVEWIRE_PROCESSES') ?: 8);
+$capacityProofEnabled = getenv('DROVE_NATIVE_CAPACITY_PROOF') === '1';
 $token = bin2hex(random_bytes(6));
 $stage = sys_get_temp_dir().'/drove-native-livewire-'.$token;
 $evidenceFile = sys_get_temp_dir().'/drove-native-livewire-'.$token.'.jsonl';
@@ -316,6 +317,7 @@ try {
             $applicationPath,
             &$declared,
             $barrierFile,
+            $capacityProofEnabled,
             $processes,
             $staged,
             &$preparedRoutes,
@@ -376,13 +378,15 @@ try {
                 },
             );
 
-            foreach ($staged as $source) {
-                Declarations::current()->declareHook(
-                    'before_each',
-                    static fn () => cohortSaturationBarrier($barrierFile, $processes),
-                    $source,
-                    1,
-                );
+            if ($capacityProofEnabled) {
+                foreach ($staged as $source) {
+                    Declarations::current()->declareHook(
+                        'before_each',
+                        static fn () => cohortSaturationBarrier($barrierFile, $processes),
+                        $source,
+                        1,
+                    );
+                }
             }
 
             $declared = (new ClassFrontend)->declareFiles($staged);
@@ -433,12 +437,16 @@ try {
         : [];
     $tests = $run['tests'] ?? null;
     cohortAssert(is_array($tests), 'Native Livewire execution did not return test results.');
-    $barrierLines = is_file($barrierFile)
-        ? file($barrierFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
-        : false;
-    $barrierPids = is_array($barrierLines)
-        ? array_values(array_unique(array_map('intval', $barrierLines)))
-        : [];
+    $barrierPids = [];
+
+    if ($capacityProofEnabled) {
+        $barrierLines = is_file($barrierFile)
+            ? file($barrierFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
+            : false;
+        $barrierPids = is_array($barrierLines)
+            ? array_values(array_unique(array_map('intval', $barrierLines)))
+            : [];
+    }
 
     $actual = array_map(
         static fn (array $test): array => [
@@ -513,13 +521,20 @@ try {
             'Native Livewire runtime audit did not bind an exact scheduler task identity to telemetry.',
         );
     }
-    sort($barrierPids, SORT_NUMERIC);
     $sortedTestPids = $testPids;
     sort($sortedTestPids, SORT_NUMERIC);
-    cohortAssert(
-        count($barrierPids) === 36 && $barrierPids === $sortedTestPids,
-        'Native Livewire saturation barrier did not cover every executor PID.',
-    );
+    $barrierPidSetMatchesTelemetry = false;
+
+    if ($capacityProofEnabled) {
+        sort($barrierPids, SORT_NUMERIC);
+        $barrierPidSetMatchesTelemetry = count($barrierPids) === 36
+            && $barrierPids === $sortedTestPids;
+        cohortAssert(
+            $barrierPidSetMatchesTelemetry,
+            'Native Livewire saturation barrier did not cover every executor PID.',
+        );
+    }
+
     $expectedTopology = [
         'schema' => 1,
         'forks' => 36,
@@ -530,16 +545,33 @@ try {
         'peak_outstanding_tasks' => min(2 * $processes, 36),
         'outstanding_task_limit' => 2 * $processes,
     ];
+    $naturalTopology = ($topology['schema'] ?? null) === 1
+        && ($topology['forks'] ?? null) === 36
+        && ($topology['scope_workers'] ?? null) === 0
+        && ($topology['executor_workers'] ?? null) === 36
+        && ($topology['process_anchors'] ?? null) === 0
+        && is_int($topology['peak_live_pids'] ?? null)
+        && $topology['peak_live_pids'] >= 1
+        && $topology['peak_live_pids'] <= $expectedTopology['peak_live_pids']
+        && ($topology['peak_outstanding_tasks'] ?? null) === $topology['peak_live_pids']
+        && ($topology['outstanding_task_limit'] ?? null) === 2 * $processes;
     cohortAssert(
-        $topology === $expectedTopology,
+        $capacityProofEnabled ? $topology === $expectedTopology : $naturalTopology,
         'Native Livewire violated the one-fork-per-case topology: '.json_encode(
-            ['actual' => $topology, 'expected' => $expectedTopology],
+            [
+                'actual' => $topology,
+                'expected' => $capacityProofEnabled ? $expectedTopology : 'bounded natural topology',
+            ],
             JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
         ),
     );
     cohortAssert(
-        $observedLanes === $processes,
-        'Native Livewire did not saturate every requested lane.',
+        $observedLanes >= 1
+            && $observedLanes <= min($processes, count($tests))
+            && (! $capacityProofEnabled || $observedLanes === $processes),
+        $capacityProofEnabled
+            ? 'Native Livewire did not saturate every requested lane.'
+            : 'Native Livewire emitted invalid natural corpus concurrency.',
     );
     $rootEvidenceRow = $rootEvidence[0];
     cohortAssert(
@@ -587,11 +619,14 @@ try {
             'root_tasks' => count($rootEvidence),
             'task_ids_bound_to_telemetry' => count($testEvidence),
         ],
-        'saturation_barrier' => [
+        'capacity_proof' => [
+            'enabled' => $capacityProofEnabled,
+        ],
+        'saturation_barrier' => $capacityProofEnabled ? [
             'requested_lanes' => $processes,
             'executor_pids' => count($barrierPids),
-            'pid_set_matches_telemetry' => true,
-        ],
+            'pid_set_matches_telemetry' => $barrierPidSetMatchesTelemetry,
+        ] : null,
         'topology' => $topology,
         'semantic_hash' => $semanticHash,
         'prepared_root_rows' => $rootRows,

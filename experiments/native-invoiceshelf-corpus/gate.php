@@ -524,6 +524,7 @@ SH,
             $summary,
         );
         $topology = $summary['scheduler']['topology'] ?? null;
+        $observedPeakLanes = $summary['scheduler']['observed_peak_lanes'] ?? null;
         $runtimeAudits = $summary['runtime_audits'] ?? null;
         $treeHashAfter = nativeInvoiceShelfGateTreeHash($workspace);
         nativeInvoiceShelfGateAssert(
@@ -542,7 +543,9 @@ SH,
                 && ($summary['scheduler']['telemetry_cases'] ?? null) === 202
                 && ($summary['scheduler']['unique_executor_pids'] ?? null) === 202
                 && ($summary['scheduler']['one_child_pid_per_case'] ?? null) === true
-                && ($summary['scheduler']['observed_peak_lanes'] ?? null) === $processes
+                && is_int($observedPeakLanes)
+                && $observedPeakLanes >= 1
+                && $observedPeakLanes <= min($processes, 202)
                 && is_array($topology)
                 && ($topology['executor_workers'] ?? null) === 202
                 && is_int($topology['scope_workers'] ?? null)

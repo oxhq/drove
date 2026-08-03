@@ -47,9 +47,12 @@ remains meaningful. The default container quota is 30 CPU cores and 16 GiB;
 the optional final two arguments override those finite quotas.
 
 The evidence also pins every cohort's mode, C1-only reason, and exact expected
-outcome. Every run/report re-derives the complete plan from the immutable
-config and recorded random seed, so editing a cohort or its coherently rebuilt
-schedule after planning is rejected.
+outcome. The prerequisite and config must match the six cohorts declared by
+`nativeBenchmarkCorpusDefinitions()` exactly. Five repetitions therefore mean
+32 cells per repetition and 160 jobs, with Filament last. Every run/report
+re-derives that complete plan from the immutable config and recorded random
+seed, so editing a cohort or its coherently rebuilt schedule after planning is
+rejected.
 
 Runner commands are argument arrays, never shell strings. The plan accepts only
 the exact content-addressed Docker template written by preparation: a fresh
@@ -98,6 +101,11 @@ need not incidentally saturate the requested cap; the N5 barrier fixture proves
 exact C1-C30 capacity separately. Skipped declarations remain in the outcome
 but do not fork; there is no batch or alternate C1 mode.
 
+Livewire and Filament proofs identify whether the explicit N5 capacity fixture
+is enabled. Timed N6 commands reject that mode and run the natural corpus;
+their observed lanes may be below the requested cap. The N1-N5 gates enable
+and validate the capacity fixture separately.
+
 The measurement wrapper adds monotonic wall milliseconds, aggregate process
 tree RSS/PSS peaks, fresh-container cgroup peak, OOM counters, platform,
 container identity, and observed finite CPU/memory quotas. Each observation is
@@ -115,6 +123,13 @@ still excludes PHP process startup, and the two sides do different verification
 work around the end-to-end wall. The report therefore makes the same-boundary
 native C1-to-C30 ratios and speedups explicit; those are the primary evidence
 for a later C1/default decision. It encodes no threshold or C1 decision.
+
+Preparation uses revision-and-run-unique Docker tags and binds each downstream
+build to its base image ID. Jobs default to a recorded 900-second watchdog and
+a deterministic container name. Resume removes only that exact stale
+container before validating or rerunning its job, and JSON artifacts are
+flushed and atomically renamed so a crash cannot turn a partial write into a
+valid replay input.
 
 Run the schema and false-green checks with:
 

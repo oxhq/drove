@@ -46,7 +46,8 @@ function nativeBenchmarkPrepareConfig(
 ): void {
     $evidencePayload = nativeBenchmarkReadJson($evidence);
     nativeBenchmarkValidatePrerequisite($evidencePayload);
-    $temporary = sys_get_temp_dir().DIRECTORY_SEPARATOR.'drove-native-n6-'.bin2hex(random_bytes(8));
+    $preparationToken = bin2hex(random_bytes(8));
+    $temporary = sys_get_temp_dir().DIRECTORY_SEPARATOR.'drove-native-n6-'.$preparationToken;
     nativeBenchmarkRequire(mkdir($temporary, 0700, true), 'Cannot create the native benchmark build workspace.');
 
     try {
@@ -86,20 +87,31 @@ function nativeBenchmarkPrepareConfig(
             $contexts[$corpus] = $context;
         }
 
-        nativeBenchmarkRunnerProcess([
-            'docker', 'build', '--tag', 'drove-phase-three-laravel',
-            '--file', $root.'/experiments/phase-3-laravel/Dockerfile', $root,
-        ]);
-        nativeBenchmarkRunnerProcess([
-            'docker', 'build', '--tag', 'drove-corpus', '--build-arg', 'DROVE_REVISION='.$revision,
-            '--file', $root.'/benchmarks/corpus/Dockerfile', $root,
-        ]);
+        $tagPrefix = $revision.'-'.$preparationToken;
+        $phaseThreeTag = 'drove-native-n6:'.$tagPrefix.'-phase-three-laravel';
+        $phaseThreeImage = nativeBenchmarkPrepareImage(
+            $phaseThreeTag,
+            $temporary.DIRECTORY_SEPARATOR.'phase-three.iid',
+            'native Phase 3 base',
+            ['--file', $root.'/experiments/phase-3-laravel/Dockerfile', $root],
+        );
+        $corpusTag = 'drove-native-n6:'.$tagPrefix.'-corpus';
+        $corpusImage = nativeBenchmarkPrepareImage(
+            $corpusTag,
+            $temporary.DIRECTORY_SEPARATOR.'corpus.iid',
+            'native corpus base',
+            [
+                '--build-arg', 'DROVE_NATIVE_BENCHMARK_BASE_IMAGE='.$phaseThreeTag.'@'.$phaseThreeImage,
+                '--build-arg', 'DROVE_REVISION='.$revision,
+                '--file', $root.'/benchmarks/corpus/Dockerfile', $root,
+            ],
+        );
         $images = [];
         $imageLockHashes = [];
 
         foreach (DROVE_NATIVE_BENCHMARK_CORPORA as $corpus) {
             foreach (['baseline', 'native'] as $runner) {
-                $tag = 'drove-native-n6-'.$corpus.'-'.$runner;
+                $tag = 'drove-native-n6:'.$tagPrefix.'-'.$corpus.'-'.$runner;
                 $definition = $definitionsById[$corpus] ?? null;
                 nativeBenchmarkRequire(is_array($definition), "$corpus benchmark definition is unavailable during image preparation.");
                 $lock = $runner === 'baseline'
@@ -107,22 +119,29 @@ function nativeBenchmarkPrepareConfig(
                     : ($definition['native_lock'] ?? null);
                 nativeBenchmarkRequire(is_string($lock) && is_file($lock), "$corpus $runner lock is unavailable during image preparation.");
                 $lockHash = nativeBenchmarkHash($lock);
-                nativeBenchmarkRunnerProcess([
-                    'docker', 'build', '--tag', $tag,
-                    '--build-context', 'corpus-source='.$contexts[$corpus],
-                    '--build-arg', 'DROVE_NATIVE_BENCHMARK_CORPUS='.$corpus,
-                    '--build-arg', 'DROVE_NATIVE_BENCHMARK_RUNNER='.$runner,
-                    '--build-arg', 'DROVE_NATIVE_BENCHMARK_LOCK_SHA256='.$lockHash,
-                    '--file', $root.'/benchmarks/corpus/native-benchmark.Dockerfile', $root,
-                ]);
-                $image = trim(nativeBenchmarkRunnerProcess([
-                    'docker', 'image', 'inspect', '--format={{.Id}}', $tag,
-                ])['stdout']);
-                nativeBenchmarkRequire(preg_match('/^sha256:[0-9a-f]{64}$/D', $image) === 1, "$corpus $runner image identity is invalid.");
+                $image = nativeBenchmarkPrepareImage(
+                    $tag,
+                    $temporary.DIRECTORY_SEPARATOR.$corpus.'-'.$runner.'.iid',
+                    "$corpus $runner",
+                    [
+                        '--build-context', 'corpus-source='.$contexts[$corpus],
+                        '--build-arg', 'DROVE_NATIVE_BENCHMARK_BASE_IMAGE='.$corpusTag.'@'.$corpusImage,
+                        '--build-arg', 'DROVE_NATIVE_BENCHMARK_CORPUS='.$corpus,
+                        '--build-arg', 'DROVE_NATIVE_BENCHMARK_RUNNER='.$runner,
+                        '--build-arg', 'DROVE_NATIVE_BENCHMARK_LOCK_SHA256='.$lockHash,
+                        '--file', $root.'/benchmarks/corpus/native-benchmark.Dockerfile', $root,
+                    ],
+                );
                 $images[$corpus][$runner] = $image;
                 $imageLockHashes[$corpus][$runner] = $lockHash;
             }
         }
+
+        $imageIdentityFiles = glob($temporary.DIRECTORY_SEPARATOR.'*.iid');
+        nativeBenchmarkRequire(
+            is_array($imageIdentityFiles) && count($imageIdentityFiles) === 10,
+            'Native benchmark preparation must build exactly ten images.',
+        );
 
         $inputRoot = dirname($output).DIRECTORY_SEPARATOR.'native-benchmark-inputs';
         nativeBenchmarkRequire(is_dir($inputRoot) || mkdir($inputRoot, 0700, true), 'Cannot create the native benchmark input directory.');
@@ -171,6 +190,7 @@ function nativeBenchmarkPrepareConfig(
         nativeBenchmarkWriteJson($output, [
             'schema_version' => 1,
             'repetitions' => 5,
+            'job_timeout_seconds' => 900,
             'n1_n5_evidence' => $evidence,
             'quotas' => $quotas,
             'corpora' => $corpora,
@@ -178,4 +198,34 @@ function nativeBenchmarkPrepareConfig(
     } finally {
         nativeBenchmarkRunnerRemoveTree($temporary);
     }
+}
+
+/**
+ * @param  list<string>  $arguments
+ */
+function nativeBenchmarkPrepareImage(
+    string $tag,
+    string $iidFile,
+    string $subject,
+    array $arguments,
+): string {
+    nativeBenchmarkRequire(! file_exists($iidFile), "The $subject image identity file already exists.");
+    nativeBenchmarkRunnerProcess([
+        'docker', 'build', '--iidfile', $iidFile, '--tag', $tag, ...$arguments,
+    ]);
+    $built = file_get_contents($iidFile);
+    if ($built === false) {
+        throw new RuntimeException("The $subject image identity is unreadable.");
+    }
+
+    $built = trim($built);
+    $tagged = trim(nativeBenchmarkRunnerProcess([
+        'docker', 'image', 'inspect', '--format={{.Id}}', $tag,
+    ])['stdout']);
+    nativeBenchmarkRequire(
+        preg_match('/^sha256:[0-9a-f]{64}$/D', $built) === 1 && $tagged === $built,
+        "The $subject image identity is invalid.",
+    );
+
+    return $built;
 }

@@ -250,6 +250,7 @@ function nativeBenchmarkNativeSummary(string $root, string $checkout, string $co
             nativeBenchmarkRunnerRemoveTree($storage);
         }
         $proof = nativeBenchmarkRunnerJson($process['stdout'], 'native Livewire');
+        nativeBenchmarkRequireNaturalCorpusProof($proof, 'Livewire');
         $baselinePath = $root.'/experiments/phase-3-laravel/native-package/livewire-'.($cohort === 'full' ? 'full' : 'parallel').'-baseline.json';
         $baseline = nativeBenchmarkReadJson($baselinePath);
         $cases = $baseline['cases'] ?? null;
@@ -279,6 +280,7 @@ function nativeBenchmarkNativeSummary(string $root, string $checkout, string $co
             ...nativeBenchmarkFilamentEnvironment(),
         ]);
         $proof = nativeBenchmarkRunnerJson($process['stdout'], 'native Filament');
+        nativeBenchmarkRequireNaturalCorpusProof($proof, 'Filament');
         $baseline = nativeBenchmarkReadJson($root.'/experiments/native-filament-corpus/baseline-cases.json');
         $expected = $baseline['cohorts'][$cohort] ?? null;
         nativeBenchmarkRequire(is_array($expected) && ($proof['case_parity']['semantic_sha256'] ?? null) === $expected['semantic_sha256'], 'The timed native Filament semantics diverged.');
@@ -295,6 +297,15 @@ function nativeBenchmarkNativeSummary(string $root, string $checkout, string $co
     }
 
     throw new RuntimeException("No native runner for $corpus/$cohort.");
+}
+
+/** @param array<string, mixed> $proof */
+function nativeBenchmarkRequireNaturalCorpusProof(array $proof, string $corpus): void
+{
+    nativeBenchmarkRequire(
+        ($proof['capacity_proof']['enabled'] ?? null) === false,
+        "The timed native $corpus proof must observe the natural corpus without a capacity barrier.",
+    );
 }
 
 /** @param list<array<string, mixed>> $cases

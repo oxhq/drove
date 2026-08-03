@@ -925,6 +925,7 @@ try {
         $droveRoot = $arguments[2] ?? dirname(__DIR__, 2);
         $cohort = getenv('DROVE_NATIVE_FILAMENT_COHORT') ?: 'nonserial';
         $processes = filter_var(getenv('DROVE_NATIVE_FILAMENT_PROCESSES') ?: '1', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 30]]);
+        $capacityProofEnabled = getenv('DROVE_NATIVE_CAPACITY_PROOF') === '1';
         $debugName = getenv('DROVE_NATIVE_FILAMENT_DEBUG_NAME') ?: null;
 
         if (! is_string($checkout)
@@ -1034,7 +1035,22 @@ try {
             ];
             $expectedConcurrency = min($actual['cases'], $processes);
             $observedConcurrency = $run['observed_concurrency']['global'] ?? null;
-            $concurrencyBarrier = nativeFilamentConcurrencyBarrier($processes, $stage);
+            $concurrencyBarrier = $capacityProofEnabled
+                ? nativeFilamentConcurrencyBarrier($processes, $stage)
+                : null;
+            $naturalTopology = ($topology['schema'] ?? null) === 1
+                && ($topology['forks'] ?? null) === $actual['cases']
+                && ($topology['scope_workers'] ?? null) === 0
+                && ($topology['executor_workers'] ?? null) === $actual['cases']
+                && ($topology['process_anchors'] ?? null) === 0
+                && is_int($topology['peak_live_pids'] ?? null)
+                && $topology['peak_live_pids'] >= 1
+                && $topology['peak_live_pids'] <= $expectedTopology['peak_live_pids']
+                && ($topology['peak_outstanding_tasks'] ?? null) === $topology['peak_live_pids']
+                && ($topology['outstanding_task_limit'] ?? null) === 2 * $processes;
+            $naturalConcurrency = is_int($observedConcurrency)
+                && $observedConcurrency >= 1
+                && $observedConcurrency <= $expectedConcurrency;
             $expected = $baseline[$cohort] ?? null;
             $caseRows = nativeFilamentRowsFromRun($tests);
             $expectedCaseRows = $caseBaseline['cohorts'][$cohort]['rows'] ?? null;
@@ -1058,8 +1074,8 @@ try {
                     && count($runtimeRows) === $actual['cases']
                     && count($pids) === $actual['cases']
                     && ! in_array(getmypid(), $pids, true)
-                    && $topology === $expectedTopology
-                    && $observedConcurrency === $expectedConcurrency
+                    && $naturalTopology
+                    && $naturalConcurrency
                     && array_all($runtimeRows, static fn (array $row): bool => ($row['classes'] ?? null) === [] && ($row['files'] ?? null) === [])
                     && is_array($expectedCaseRows)
                     && $caseRows === $expectedCaseRows
@@ -1139,6 +1155,9 @@ try {
                 ],
                 'one_fork_per_case' => $topology['forks'] === $actual['cases'] && count($pids) === $actual['cases'],
                 'observed_concurrency' => $observedConcurrency,
+                'capacity_proof' => [
+                    'enabled' => $capacityProofEnabled,
+                ],
                 'concurrency_barrier' => $concurrencyBarrier,
                 'snapshot_provider' => [
                     'tracked' => NATIVE_FILAMENT_SNAPSHOTS,

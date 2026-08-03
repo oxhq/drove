@@ -864,7 +864,9 @@ try {
                     && $testAuditPids === $expectedExecutorPids
                     && $telemetryCases === $actual['cases']
                     && count($executorPids) === $actual['cases']
-                    && $observedPeakLanes === min($processes, $actual['cases'])
+                    && is_int($observedPeakLanes)
+                    && $observedPeakLanes >= 1
+                    && $observedPeakLanes <= min($processes, $actual['cases'])
                     && array_all($evidence, static fn (array $row): bool => ($row['classes'] ?? null) === []
                         && ($row['files'] ?? null) === [])
                     && $prepared === [
