@@ -46,8 +46,12 @@ function nativeBenchmarkPrepareConfig(
 ): void {
     $evidencePayload = nativeBenchmarkReadJson($evidence);
     nativeBenchmarkValidatePrerequisite($evidencePayload);
+    $inputRoot = dirname($output).DIRECTORY_SEPARATOR.'native-benchmark-inputs';
+    nativeBenchmarkRequire(! file_exists($output) && ! is_link($output), 'Native benchmark config already exists.');
+    nativeBenchmarkRequire(! file_exists($inputRoot) && ! is_link($inputRoot), 'Native benchmark input directory already exists.');
     $preparationToken = bin2hex(random_bytes(8));
     $temporary = sys_get_temp_dir().DIRECTORY_SEPARATOR.'drove-native-n6-'.$preparationToken;
+    $stagedInputRoot = dirname($output).DIRECTORY_SEPARATOR.'.native-benchmark-inputs.tmp-'.$preparationToken;
     nativeBenchmarkRequire(mkdir($temporary, 0700, true), 'Cannot create the native benchmark build workspace.');
 
     try {
@@ -143,12 +147,11 @@ function nativeBenchmarkPrepareConfig(
             'Native benchmark preparation must build exactly ten images.',
         );
 
-        $inputRoot = dirname($output).DIRECTORY_SEPARATOR.'native-benchmark-inputs';
-        nativeBenchmarkRequire(is_dir($inputRoot) || mkdir($inputRoot, 0700, true), 'Cannot create the native benchmark input directory.');
+        nativeBenchmarkRequire(mkdir($stagedInputRoot, 0700, true), 'Cannot create the staged native benchmark input directory.');
         $lockCheckouts = [];
 
         foreach (['invoiceshelf', 'filament'] as $corpus) {
-            $directory = $inputRoot.DIRECTORY_SEPARATOR.$corpus;
+            $directory = $stagedInputRoot.DIRECTORY_SEPARATOR.$corpus;
             nativeBenchmarkRequire(is_dir($directory) || mkdir($directory, 0700, true), "Cannot create the $corpus baseline lock directory.");
             $source = $contexts[$corpus].DIRECTORY_SEPARATOR.'corpus'.DIRECTORY_SEPARATOR.'composer.lock';
             $target = $directory.DIRECTORY_SEPARATOR.'composer.lock';
@@ -166,11 +169,14 @@ function nativeBenchmarkPrepareConfig(
                     && nativeBenchmarkHash($definition['native_lock']) === $imageLockHashes[$corpus]['native'],
                 "$corpus dependency lock changed after its benchmark images were built.",
             );
+            $baselineLock = in_array($corpus, ['invoiceshelf', 'filament'], true)
+                ? $inputRoot.DIRECTORY_SEPARATOR.$corpus.DIRECTORY_SEPARATOR.'composer.lock'
+                : $definition['baseline_lock'];
             $corpora[] = [
                 'id' => $corpus,
                 'source_revision' => $definition['source_revision'],
                 'baseline' => [
-                    'lock' => $definition['baseline_lock'],
+                    'lock' => $baselineLock,
                     'command' => nativeBenchmarkDockerCommand($images[$corpus]['baseline'], $quotas, $corpus, 'baseline'),
                 ],
                 'native' => [
@@ -187,7 +193,7 @@ function nativeBenchmarkPrepareConfig(
             'The Drove checkout changed during native benchmark image preparation.',
         );
 
-        nativeBenchmarkWriteJson($output, [
+        nativeBenchmarkPreparePublishConfig($temporary, $stagedInputRoot, $inputRoot, $output, [
             'schema_version' => 1,
             'repetitions' => 5,
             'job_timeout_seconds' => 900,
@@ -195,8 +201,26 @@ function nativeBenchmarkPrepareConfig(
             'quotas' => $quotas,
             'corpora' => $corpora,
         ]);
-    } finally {
-        nativeBenchmarkRunnerRemoveTree($temporary);
+    } catch (Throwable $failure) {
+        nativeBenchmarkRunnerRethrowAfterCleanup($failure, $temporary, $stagedInputRoot);
+    }
+}
+
+/** @param array<string, mixed> $payload */
+function nativeBenchmarkPreparePublishConfig(
+    string $workspace,
+    string $stagedInputs,
+    string $publishedInputs,
+    string $output,
+    array $payload,
+): void {
+    nativeBenchmarkRunnerRemoveTree($workspace);
+    nativeBenchmarkRequire(rename($stagedInputs, $publishedInputs), 'Cannot publish the native benchmark input directory.');
+
+    try {
+        nativeBenchmarkWriteJson($output, $payload);
+    } catch (Throwable $failure) {
+        nativeBenchmarkRunnerRethrowAfterCleanup($failure, $publishedInputs);
     }
 }
 

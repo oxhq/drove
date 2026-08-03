@@ -246,9 +246,11 @@ function nativeBenchmarkNativeSummary(string $root, string $checkout, string $co
                 'DROVE_NATIVE_PACKAGE_STORAGE' => $storage,
                 'DROVE_NATIVE_LIVEWIRE_PROCESSES' => (string) $processes,
             ]);
-        } finally {
-            nativeBenchmarkRunnerRemoveTree($storage);
+        } catch (Throwable $failure) {
+            nativeBenchmarkRunnerRethrowAfterCleanup($failure, $storage);
         }
+
+        nativeBenchmarkRunnerRemoveTree($storage);
         $proof = nativeBenchmarkRunnerJson($process['stdout'], 'native Livewire');
         nativeBenchmarkRequireNaturalCorpusProof($proof, 'Livewire');
         $baselinePath = $root.'/experiments/phase-3-laravel/native-package/livewire-'.($cohort === 'full' ? 'full' : 'parallel').'-baseline.json';
@@ -493,20 +495,83 @@ function nativeBenchmarkRunnerJson(string $contents, string $subject): array
 
 function nativeBenchmarkRunnerRemoveTree(string $directory): void
 {
-    if (! is_dir($directory)) {
-        return;
+    for ($attempt = 0; $attempt < 20; $attempt++) {
+        clearstatcache(true, $directory);
+
+        if (! file_exists($directory) && ! is_link($directory)) {
+            return;
+        }
+
+        if (is_link($directory) || ! is_dir($directory)) {
+            throw new RuntimeException("Native benchmark cleanup target is not a directory: $directory");
+        }
+
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST,
+            );
+
+            foreach ($iterator as $entry) {
+                $path = $entry->getPathname();
+
+                if ($entry->isDir() && ! $entry->isLink()) {
+                    @chmod($path, 0700);
+                    @rmdir($path);
+
+                    continue;
+                }
+
+                @chmod($path, 0600);
+                @unlink($path);
+            }
+        } catch (UnexpectedValueException) {
+            // A transient Windows handle can also make directory enumeration fail.
+        }
+
+        unset($entry, $iterator);
+        @chmod($directory, 0700);
+        @rmdir($directory);
+        clearstatcache(true, $directory);
+
+        if (! file_exists($directory) && ! is_link($directory)) {
+            return;
+        }
+
+        if ($attempt < 19) {
+            usleep(100_000);
+        }
     }
 
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST,
-    );
+    $remaining = @scandir($directory);
+    $remainingCount = is_array($remaining) ? count(array_diff($remaining, ['.', '..'])) : -1;
 
-    foreach ($iterator as $entry) {
-        $entry->isDir() && ! $entry->isLink()
-            ? rmdir($entry->getPathname())
-            : unlink($entry->getPathname());
+    throw new RuntimeException(sprintf(
+        'Could not remove native benchmark workspace %s; %d entries remain.',
+        $directory,
+        $remainingCount,
+    ));
+}
+
+function nativeBenchmarkRunnerRethrowAfterCleanup(Throwable $failure, string ...$directories): never
+{
+    $cleanupFailures = [];
+
+    foreach ($directories as $directory) {
+        try {
+            nativeBenchmarkRunnerRemoveTree($directory);
+        } catch (Throwable $cleanupFailure) {
+            $cleanupFailures[] = $cleanupFailure->getMessage();
+        }
     }
 
-    rmdir($directory);
+    if ($cleanupFailures !== []) {
+        throw new RuntimeException(
+            $failure->getMessage().' Cleanup also failed: '.implode(' | ', $cleanupFailures),
+            0,
+            $failure,
+        );
+    }
+
+    throw $failure;
 }

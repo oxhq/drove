@@ -8,6 +8,162 @@ $temporary = sys_get_temp_dir().DIRECTORY_SEPARATOR.'drove-native-benchmark-'.bi
 
 try {
     nativeBenchmarkRequire(mkdir($temporary, 0700, true), 'Cannot create native benchmark self-test directory.');
+    $cleanupParent = $temporary.DIRECTORY_SEPARATOR.'cleanup-parent';
+    $cleanupFixture = $cleanupParent.DIRECTORY_SEPARATOR.'cleanup-fixture';
+    $cleanupSibling = $cleanupParent.DIRECTORY_SEPARATOR.'sibling.txt';
+    nativeBenchmarkRequire(
+        mkdir($cleanupFixture.DIRECTORY_SEPARATOR.'nested', 0700, true)
+            && file_put_contents($cleanupFixture.DIRECTORY_SEPARATOR.'nested'.DIRECTORY_SEPARATOR.'proof.txt', 'cleanup') === 7,
+        'Could not create the native benchmark cleanup fixture.',
+    );
+    nativeBenchmarkRequire(
+        file_put_contents($cleanupSibling, 'sibling') === 7,
+        'Could not create the native benchmark cleanup sibling.',
+    );
+    nativeBenchmarkRunnerRemoveTree($cleanupFixture);
+    nativeBenchmarkRequire(
+        ! file_exists($cleanupFixture) && file_get_contents($cleanupSibling) === 'sibling',
+        'Native benchmark cleanup escaped its exact target or left fixture residue.',
+    );
+
+    if (PHP_OS_FAMILY === 'Windows') {
+        $lockedFixture = $cleanupParent.DIRECTORY_SEPARATOR.'locked-fixture';
+        $lockedFile = $lockedFixture.DIRECTORY_SEPARATOR.'pack.idx';
+        $lockReady = $cleanupParent.DIRECTORY_SEPARATOR.'lock-ready';
+        nativeBenchmarkRequire(
+            mkdir($lockedFixture, 0700) && file_put_contents($lockedFile, 'locked') === 6,
+            'Could not create the Windows cleanup lock fixture.',
+        );
+        $lockScript = sprintf(
+            '$stream = [IO.File]::Open(\'%s\', \'Open\', \'Read\', \'None\'); [IO.File]::WriteAllText(\'%s\', \'ready\'); Start-Sleep -Milliseconds 750; $stream.Dispose()',
+            str_replace("'", "''", $lockedFile),
+            str_replace("'", "''", $lockReady),
+        );
+        $lockProcess = proc_open(
+            [
+                'powershell.exe',
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                $lockScript,
+            ],
+            [
+                0 => ['file', nativeBenchmarkNullDevice(), 'r'],
+                1 => ['file', nativeBenchmarkNullDevice(), 'w'],
+                2 => ['file', nativeBenchmarkNullDevice(), 'w'],
+            ],
+            $lockPipes,
+            options: ['bypass_shell' => true],
+        );
+
+        if (! is_resource($lockProcess)) {
+            throw new RuntimeException('Could not start the Windows cleanup lock fixture.');
+        }
+
+        $lockDeadline = hrtime(true) + 5_000_000_000;
+
+        while (! file_exists($lockReady) && hrtime(true) < $lockDeadline) {
+            clearstatcache(true, $lockReady);
+            usleep(10_000);
+        }
+
+        nativeBenchmarkRequire(file_exists($lockReady), 'The Windows cleanup lock fixture did not become ready.');
+        $cleanupStarted = hrtime(true);
+        nativeBenchmarkRunnerRemoveTree($lockedFixture);
+        $lockExit = proc_close($lockProcess);
+        nativeBenchmarkRequire(
+            $lockExit === 0
+                && ! file_exists($lockedFixture)
+                && (hrtime(true) - $cleanupStarted) >= 500_000_000,
+            'Native benchmark cleanup did not retry a transient Windows file lock.',
+        );
+    }
+
+    $blockedWorkspace = $temporary.DIRECTORY_SEPARATOR.'blocked-workspace';
+    $stagedInputs = $temporary.DIRECTORY_SEPARATOR.'staged-inputs';
+    $publishedInputs = $temporary.DIRECTORY_SEPARATOR.'published-inputs';
+    $blockedConfig = $temporary.DIRECTORY_SEPARATOR.'blocked-config.json';
+    nativeBenchmarkRequire(
+        file_put_contents($blockedWorkspace, 'blocked') === 7 && mkdir($stagedInputs, 0700),
+        'Could not create blocked publication fixture.',
+    );
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($blockedWorkspace, $stagedInputs, $publishedInputs, $blockedConfig): void {
+            nativeBenchmarkPreparePublishConfig(
+                $blockedWorkspace,
+                $stagedInputs,
+                $publishedInputs,
+                $blockedConfig,
+                ['published' => true],
+            );
+        },
+        'not a directory',
+    );
+    nativeBenchmarkRequire(
+        ! file_exists($blockedConfig) && is_dir($stagedInputs) && ! file_exists($publishedInputs),
+        'Native benchmark inputs or config were published before cleanup succeeded.',
+    );
+    nativeBenchmarkRequire(unlink($blockedWorkspace) && mkdir($blockedWorkspace, 0700), 'Could not reset cleanup publication fixture.');
+    nativeBenchmarkPreparePublishConfig(
+        $blockedWorkspace,
+        $stagedInputs,
+        $publishedInputs,
+        $blockedConfig,
+        ['published' => true],
+    );
+    nativeBenchmarkRequire(
+        ! file_exists($blockedWorkspace)
+            && ! file_exists($stagedInputs)
+            && is_dir($publishedInputs)
+            && nativeBenchmarkReadJson($blockedConfig) === ['published' => true],
+        'Native benchmark inputs and config were not published after cleanup succeeded.',
+    );
+
+    $rollbackWorkspace = $temporary.DIRECTORY_SEPARATOR.'rollback-workspace';
+    $rollbackStagedInputs = $temporary.DIRECTORY_SEPARATOR.'rollback-staged-inputs';
+    $rollbackPublishedInputs = $temporary.DIRECTORY_SEPARATOR.'rollback-published-inputs';
+    $blockedOutput = $temporary.DIRECTORY_SEPARATOR.'rollback-config.json';
+    nativeBenchmarkRequire(
+        mkdir($rollbackWorkspace, 0700)
+            && mkdir($rollbackStagedInputs, 0700),
+        'Could not create publication rollback fixture.',
+    );
+    nativeBenchmarkSelfTestRejects(
+        static function () use ($rollbackWorkspace, $rollbackStagedInputs, $rollbackPublishedInputs, $blockedOutput): void {
+            nativeBenchmarkPreparePublishConfig(
+                $rollbackWorkspace,
+                $rollbackStagedInputs,
+                $rollbackPublishedInputs,
+                $blockedOutput,
+                ['invalid' => NAN],
+            );
+        },
+        'Inf and NaN cannot be JSON encoded',
+    );
+    nativeBenchmarkRequire(
+        ! file_exists($rollbackWorkspace)
+            && ! file_exists($rollbackStagedInputs)
+            && ! file_exists($rollbackPublishedInputs)
+            && ! file_exists($blockedOutput),
+        'Native benchmark input publication was not rolled back after config failure.',
+    );
+
+    $primaryFailure = new RuntimeException('primary failure');
+    $blockedCleanup = $temporary.DIRECTORY_SEPARATOR.'blocked-cleanup';
+    nativeBenchmarkRequire(file_put_contents($blockedCleanup, 'blocked') === 7, 'Could not create combined cleanup failure fixture.');
+
+    try {
+        nativeBenchmarkRunnerRethrowAfterCleanup($primaryFailure, $blockedCleanup);
+    } catch (RuntimeException $combinedFailure) {
+        nativeBenchmarkRequire(
+            str_contains($combinedFailure->getMessage(), 'primary failure Cleanup also failed:')
+                && $combinedFailure->getPrevious() === $primaryFailure,
+            'Native benchmark cleanup obscured its primary failure.',
+        );
+    }
+
+    nativeBenchmarkRequire(unlink($blockedCleanup), 'Could not remove combined cleanup failure fixture.');
+
     $newOutput = nativeBenchmarkOutputPath('new-output/config.json', $temporary);
     nativeBenchmarkRequire(
         $newOutput === $temporary.DIRECTORY_SEPARATOR.'new-output'.DIRECTORY_SEPARATOR.'config.json'
@@ -646,36 +802,18 @@ XML, LOCK_EX);
 
     fwrite(STDOUT, "Native N6 benchmark harness self-test passed.\n");
 } finally {
-    nativeBenchmarkSelfTestDelete($temporary);
+    nativeBenchmarkRunnerRemoveTree($temporary);
 }
 
 function nativeBenchmarkSelfTestRejects(Closure $operation, string $messageFragment): void
 {
     try {
         $operation();
-    } catch (RuntimeException $exception) {
+    } catch (Throwable $exception) {
         nativeBenchmarkRequire(str_contains($exception->getMessage(), $messageFragment), "Unexpected rejection: {$exception->getMessage()}");
 
         return;
     }
 
     throw new RuntimeException("Self-test expected rejection containing '$messageFragment'.");
-}
-
-function nativeBenchmarkSelfTestDelete(string $directory): void
-{
-    if (! is_dir($directory)) {
-        return;
-    }
-
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST,
-    );
-
-    foreach ($iterator as $entry) {
-        $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
-    }
-
-    rmdir($directory);
 }
