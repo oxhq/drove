@@ -223,10 +223,17 @@ try {
         'livewire',
         'native',
     );
+    $livewireBaselineDockerCommand = nativeBenchmarkDockerCommand(
+        'sha256:'.str_repeat('c', 64),
+        ['cpu_cores' => 30.0, 'memory_bytes' => 17_179_869_184],
+        'livewire',
+        'baseline',
+    );
     nativeBenchmarkRequire(
         in_array('--network=none', $dockerCommand, true)
             && ! in_array('--read-only', $dockerCommand, true)
             && in_array('--read-only', $livewireDockerCommand, true)
+            && ! in_array('--read-only', $livewireBaselineDockerCommand, true)
             && in_array('--name={container_name}', $dockerCommand, true)
             && in_array('--label=org.oxhq.drove.native-benchmark.job-timeout-seconds={job_timeout_seconds}', $dockerCommand, true)
             && in_array('--cpus=30', $dockerCommand, true)
@@ -324,6 +331,14 @@ XML, LOCK_EX);
         'stdout' => 'ok',
         'stderr' => '',
     ]], 'The timed Livewire JUnit normalizer drifted.');
+    $unrecordedOutputRejected = false;
+
+    try {
+        nativeBenchmarkLivewireRows($junit, false);
+    } catch (RuntimeException $failure) {
+        $unrecordedOutputRejected = str_contains($failure->getMessage(), 'emitted output absent');
+    }
+    nativeBenchmarkRequire($unrecordedOutputRejected, 'The timed Livewire normalizer hid unrecorded output.');
     $contract = nativeBenchmarkCorpusContract();
     $evidencePath = $temporary.DIRECTORY_SEPARATOR.'n1-n5.json';
     $evidenceArtifacts = [];

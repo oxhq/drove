@@ -135,10 +135,13 @@ function nativeBenchmarkBaselineSummary(string $root, string $checkout, string $
                 '--colors=never', '--log-junit='.$junit, ...$files,
             ], $checkout, ['DUSK_DRIVER_URL' => 'http://127.0.0.1:9515']);
             $verificationStarted = hrtime(true);
-            $actual = nativeBenchmarkLivewireRows($junit);
             $expected = $baseline['cases'] ?? null;
             nativeBenchmarkRequire(is_array($expected), 'The committed Livewire benchmark case rows are invalid.');
             usort($expected, static fn (array $left, array $right): int => $left['id'] <=> $right['id']);
+            $actual = nativeBenchmarkLivewireRows(
+                $junit,
+                array_key_exists('stdout', $expected[0] ?? []),
+            );
             nativeBenchmarkRequire($actual === $expected, 'The timed Livewire baseline case rows diverged.');
 
             return nativeBenchmarkUpstreamSummary(nativeBenchmarkOutcomeFromCases($actual), [
@@ -389,8 +392,8 @@ function nativeBenchmarkFilamentEnvironment(): array
     ];
 }
 
-/** @return list<array{id: string, status: string, assertions: int, stdout: string, stderr: string}> */
-function nativeBenchmarkLivewireRows(string $junit): array
+/** @return list<array{id: string, status: string, assertions: int, stdout?: string, stderr?: string}> */
+function nativeBenchmarkLivewireRows(string $junit, bool $includeEmptyStreams = true): array
 {
     $document = new DOMDocument;
     nativeBenchmarkRequire($document->load($junit, LIBXML_NONET), 'The timed Livewire JUnit artifact is invalid.');
@@ -414,13 +417,17 @@ function nativeBenchmarkLivewireRows(string $junit): array
         nativeBenchmarkRequire(! isset($rows[$id]), 'The timed Livewire baseline emitted a duplicate case ID.');
         $failed = $case->getElementsByTagName('failure')->length > 0 || $case->getElementsByTagName('error')->length > 0;
         $incomplete = $case->getElementsByTagName('skipped')->length > 0;
-        $rows[$id] = [
-            'id' => $id,
-            'status' => $failed ? 'failed' : ($incomplete ? 'incomplete' : 'passed'),
-            'assertions' => (int) $case->getAttribute('assertions'),
-            'stdout' => nativeBenchmarkJunitStream($case, 'system-out'),
-            'stderr' => nativeBenchmarkJunitStream($case, 'system-err'),
-        ];
+        $stdout = nativeBenchmarkJunitStream($case, 'system-out');
+        $stderr = nativeBenchmarkJunitStream($case, 'system-err');
+        nativeBenchmarkRequire(
+            $includeEmptyStreams || ($stdout === '' && $stderr === ''),
+            'The timed Livewire baseline emitted output absent from its committed case rows.',
+        );
+        $status = $failed ? 'failed' : ($incomplete ? 'incomplete' : 'passed');
+        $assertions = (int) $case->getAttribute('assertions');
+        $rows[$id] = $includeEmptyStreams
+            ? compact('id', 'status', 'assertions', 'stdout', 'stderr')
+            : compact('id', 'status', 'assertions');
     }
 
     ksort($rows, SORT_STRING);
